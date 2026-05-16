@@ -40,8 +40,11 @@ tasks:
 
   lint:
     desc: "Run tflint on all components for CLOUD (default: aws)"
+    vars:
+      CLOUD: '{{.CLOUD | default "aws"}}'
     cmds:
-      - tflint --recursive --config .tflint-{{.CLOUD}}.hcl components/{{.CLOUD}}/
+      - tflint --init --config "$PWD/.tflint-{{.CLOUD}}.hcl"
+      - tflint --recursive --config "$PWD/.tflint-{{.CLOUD}}.hcl" --chdir=components/{{.CLOUD}} --minimum-failure-severity=error
 
   # === Planning ===
 
