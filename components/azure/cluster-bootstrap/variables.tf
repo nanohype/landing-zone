@@ -41,7 +41,7 @@ variable "team" {
 variable "gitops_repo_url" {
   description = "Git URL of the AKS GitOps repository"
   type        = string
-  default     = "https://github.com/stxkxs/aks-gitops.git"
+  default     = "https://github.com/nanohype/aks-gitops.git"
 }
 
 variable "gitops_repo_revision" {

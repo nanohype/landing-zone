@@ -252,5 +252,5 @@ Approximate $/day at default sizes:
 | `LimitExceeded: ... vCPUs ... cannot be increased` during cluster | quota too low | Request increase via Service Quotas console / `aws service-quotas request-service-quota-increase` |
 | EKS cluster create fails with `InvalidParameterException` re: SG/subnet | network module didn't fully complete | Re-apply `network`, then re-apply `cluster` |
 | `cluster-bootstrap` connects but fails RBAC | IAM principal not in cluster access entries | Update `live/aws/workload-<env>/.../cluster/terragrunt.hcl` access_entries map, re-apply `cluster` |
-| ArgoCD apps stuck in OutOfSync, "repository not accessible" | eks-gitops URL wrong or repo private | Verify https://github.com/stxkxs/eks-gitops loads anonymously |
+| ArgoCD apps stuck in OutOfSync, "repository not accessible" | eks-gitops URL wrong or repo private | Verify https://github.com/nanohype/eks-gitops loads anonymously |
 | Addons stuck Pending | Karpenter not provisioning | `kubectl get nodepool && kubectl describe nodepool default` |

@@ -44,7 +44,7 @@ Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructur
 live/{cloud}/{account}/{region}/{environment}/{component}/terragrunt.hcl
 ```
 
-**GitOps boundary:** OpenTofu deploys cloud resources + Cilium + ArgoCD. ArgoCD manages everything else via [eks-gitops](https://github.com/stxkxs/eks-gitops).
+**GitOps boundary:** OpenTofu deploys cloud resources + Cilium + ArgoCD. ArgoCD manages everything else via [eks-gitops](https://github.com/nanohype/eks-gitops).
 
 ## Repository Structure
 

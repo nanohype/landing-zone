@@ -72,7 +72,7 @@ variable "argocd_appset_replicas" {
 variable "gitops_repo_url" {
   description = "GitOps repository URL"
   type        = string
-  default     = "https://github.com/stxkxs/eks-gitops.git"
+  default     = "https://github.com/nanohype/eks-gitops.git"
 }
 
 variable "gitops_repo_branch" {

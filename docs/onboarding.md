@@ -6,7 +6,7 @@ Welcome to landing-zone. This guide gets you from zero to your first `plan` outp
 
 This repo provisions and manages cloud infrastructure across AWS, GCP, and Azure for the platform: networking, Kubernetes clusters (EKS/GKE/AKS), databases, queues, storage, IAM, monitoring, and cost controls. It uses OpenTofu for resource definitions and Terragrunt for environment orchestration.
 
-**What it does NOT do:** in-cluster workloads (Kubernetes deployments, Helm releases beyond bootstrap). Those are managed by ArgoCD via the [eks-gitops](https://github.com/stxkxs/eks-gitops) repo.
+**What it does NOT do:** in-cluster workloads (Kubernetes deployments, Helm releases beyond bootstrap). Those are managed by ArgoCD via the [eks-gitops](https://github.com/nanohype/eks-gitops) repo.
 
 ## Tool Installation
 
