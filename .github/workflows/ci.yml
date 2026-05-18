@@ -146,6 +146,11 @@ jobs:
       - uses: gruntwork-io/terragrunt-action@v3
         with:
           tg_version: "0.99.4"
+          # gruntwork-io/terragrunt-action@v3 manages its own tool versions
+          # via mise. Without a mise.toml in the repo it requires tofu_version
+          # to be passed explicitly — even though the previous opentofu/setup
+          # step put tofu on PATH already.
+          tofu_version: "1.11.5"
 
       - name: Configure AWS credentials
         if: matrix.cloud == 'aws'
