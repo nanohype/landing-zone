@@ -9,6 +9,8 @@
 
 Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructure.
 
+**AI clients / agents start here:** [`AGENTS.md`](AGENTS.md). For the stack-wide view, see the [Platform Reference](https://github.com/nanohype/nanohype/blob/main/docs/platform-reference.md).
+
 ## Architecture
 
 ```
