@@ -28,6 +28,16 @@ output "nat_gateway_ids" {
   value       = module.vpc.natgw_ids
 }
 
+output "private_route_table_ids" {
+  description = "List of private route table IDs (one per private subnet)"
+  value       = module.vpc.private_route_table_ids
+}
+
+output "public_route_table_ids" {
+  description = "List of public route table IDs"
+  value       = module.vpc.public_route_table_ids
+}
+
 output "vpc_endpoints_sg_id" {
   description = "Security group ID for VPC endpoints"
   value       = try(aws_security_group.vpc_endpoints[0].id, null)

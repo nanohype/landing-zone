@@ -34,6 +34,48 @@ resource "aws_kms_key" "secrets" {
         Principal = { Service = "secretsmanager.amazonaws.com" }
         Action    = ["kms:Decrypt", "kms:GenerateDataKey"]
         Resource  = "*"
+      },
+      {
+        # CloudWatch Logs needs to use this key when any log group in the
+        # account requests encryption with it. The EncryptionContext
+        # condition scopes the grant to log-group ARNs in this account/region.
+        Sid       = "AllowCloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.${var.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt*",
+          "kms:Decrypt*",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*",
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.region}:${local.account_id}:*"
+          }
+        }
+      },
+      {
+        # Bedrock needs to GenerateDataKey when writing invocation logs to
+        # an S3 bucket encrypted with this key. Scoped by SourceAccount so
+        # only Bedrock acting on behalf of this account can use the key.
+        Sid       = "AllowBedrock"
+        Effect    = "Allow"
+        Principal = { Service = "bedrock.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
       }
     ]
   })

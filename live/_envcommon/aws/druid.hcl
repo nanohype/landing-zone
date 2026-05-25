@@ -1,5 +1,5 @@
 terraform {
-  source = "${dirname(find_in_parent_folders("cloud.hcl"))}/../../components/aws/druid"
+  source = "${dirname(find_in_parent_folders("cloud.hcl"))}/../..//components/aws/druid"
 }
 
 dependency "network" {

@@ -87,6 +87,126 @@ resource "kubectl_manifest" "disable_aws_node" {
 }
 
 ################################################################################
+# Reconcile EKS-managed addons against the new Cilium datapath
+#
+# The race: `lz-cluster` installs `aws-ebs-csi-driver` (and other EKS managed
+# addons) BEFORE this workspace runs, while VPC CNI is still the active
+# datapath. Once Cilium takes over and `aws-node` is patched off (above), the
+# pre-existing EBS CSI pods retain stale ENI-backed routes and can no longer
+# reach the cluster service VIP (172.20.0.1) — manifesting as CrashLoopBackOff
+# on ebs-csi-node + ebs-csi-controller, with errors like:
+#   "dial tcp 172.20.0.1:443: i/o timeout"
+#
+# We run an in-cluster Job (kubectl image) that, after Cilium reports Ready,
+# `rollout restart`s the affected workloads so they're recreated against the
+# new datapath. Idempotent: on a subsequent apply where Cilium is unchanged
+# the resource is a no-op (the Job name embeds a hash of the Cilium release
+# ID, so it only re-runs when Cilium itself changes).
+################################################################################
+
+resource "kubernetes_service_account_v1" "bootstrap_reconciler" {
+  metadata {
+    name      = "cilium-bootstrap-reconciler"
+    namespace = "kube-system"
+  }
+  depends_on = [helm_release.cilium]
+}
+
+resource "kubernetes_cluster_role_v1" "bootstrap_reconciler" {
+  metadata {
+    name = "cilium-bootstrap-reconciler"
+  }
+  # Just enough to `kubectl rollout restart` / `rollout status` on the
+  # workloads we know need reconciliation. Scoped reads on pods so
+  # `rollout status` can watch pod readiness.
+  rule {
+    api_groups = ["apps"]
+    resources  = ["daemonsets", "deployments"]
+    verbs      = ["get", "list", "watch", "patch"]
+  }
+  rule {
+    api_groups = [""]
+    resources  = ["pods"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
+resource "kubernetes_cluster_role_binding_v1" "bootstrap_reconciler" {
+  metadata {
+    name = "cilium-bootstrap-reconciler"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = kubernetes_cluster_role_v1.bootstrap_reconciler.metadata[0].name
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account_v1.bootstrap_reconciler.metadata[0].name
+    namespace = kubernetes_service_account_v1.bootstrap_reconciler.metadata[0].namespace
+  }
+}
+
+resource "kubernetes_job_v1" "restart_pre_cilium_addons" {
+  metadata {
+    # Name suffix is a stable hash of the cilium release id. Re-running this
+    # workspace when cilium hasn't changed produces the same name → terraform
+    # treats it as already-applied and skips re-creation.
+    name      = "restart-pre-cilium-addons-${substr(sha1(helm_release.cilium.id), 0, 10)}"
+    namespace = "kube-system"
+  }
+
+  spec {
+    backoff_limit              = 3
+    ttl_seconds_after_finished = 3600 # auto-cleanup an hour after completion
+
+    template {
+      metadata {
+        labels = {
+          "app.kubernetes.io/name"      = "cilium-bootstrap-reconciler"
+          "app.kubernetes.io/component" = "bootstrap"
+        }
+      }
+      spec {
+        service_account_name = kubernetes_service_account_v1.bootstrap_reconciler.metadata[0].name
+        restart_policy       = "OnFailure"
+
+        container {
+          name    = "kubectl"
+          image   = "docker.io/bitnamilegacy/kubectl:1.33.4-debian-12-r0"
+          command = ["sh", "-c"]
+          args = [<<-EOT
+            set -e
+            echo "Waiting for cilium DaemonSet to converge..."
+            kubectl -n kube-system rollout status daemonset/cilium --timeout=300s
+            echo "Restarting EBS CSI workloads to pick up the Cilium datapath..."
+            kubectl -n kube-system rollout restart daemonset/ebs-csi-node
+            kubectl -n kube-system rollout restart deployment/ebs-csi-controller
+            echo "Waiting for EBS CSI workloads to be Ready..."
+            kubectl -n kube-system rollout status daemonset/ebs-csi-node --timeout=300s
+            kubectl -n kube-system rollout status deployment/ebs-csi-controller --timeout=300s
+            echo "Done."
+          EOT
+          ]
+        }
+      }
+    }
+  }
+
+  wait_for_completion = true
+  timeouts {
+    create = "10m"
+    update = "10m"
+  }
+
+  depends_on = [
+    helm_release.cilium,
+    kubectl_manifest.disable_aws_node,
+    kubernetes_cluster_role_binding_v1.bootstrap_reconciler,
+  ]
+}
+
+################################################################################
 # Bootstrap: ArgoCD
 ################################################################################
 

@@ -8,7 +8,7 @@ include "envcommon" {
 }
 
 inputs = {
-  cluster_endpoint_public_access = false
+  cluster_endpoint_public_access = true
   system_node_min_size           = 3
   system_node_max_size           = 9
   system_node_desired_size       = 3
