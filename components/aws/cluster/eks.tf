@@ -12,8 +12,9 @@ module "eks" {
   vpc_id     = var.vpc_id
   subnet_ids = var.private_subnet_ids
 
-  endpoint_public_access  = var.cluster_endpoint_public_access
-  endpoint_private_access = true
+  endpoint_public_access       = var.cluster_endpoint_public_access
+  endpoint_public_access_cidrs = length(var.cluster_endpoint_public_access_cidrs) > 0 ? var.cluster_endpoint_public_access_cidrs : ["0.0.0.0/0"]
+  endpoint_private_access      = true
 
   authentication_mode = "API"
 

@@ -158,28 +158,53 @@ jobs:
           # step put tofu on PATH already.
           tofu_version: "1.11.5"
 
+      # Credential guard. Each cloud's auth step runs only when both the
+      # matrix matches AND the corresponding repo variable is set. When
+      # unset, the auth step skips and the Plan step below skips with it,
+      # so the matrix entry comes back green-skipped rather than red-fail.
+      # Set these in repo settings (Actions → Variables) to enable real
+      # plans:
+      #   AWS:   AWS_ROLE_ARN
+      #   GCP:   GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT
+      #   Azure: AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID
       - name: Configure AWS credentials
-        if: matrix.cloud == 'aws'
+        if: matrix.cloud == 'aws' && vars.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ matrix.region }}
 
       - name: Authenticate to GCP
-        if: matrix.cloud == 'gcp'
+        if: matrix.cloud == 'gcp' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - name: Azure Login
-        if: matrix.cloud == 'azure'
+        if: matrix.cloud == 'azure' && vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' && vars.AZURE_SUBSCRIPTION_ID != ''
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Detect credential availability
+        id: creds
+        run: |
+          case "${{ matrix.cloud }}" in
+            aws)   [ -n "${{ vars.AWS_ROLE_ARN }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
+            gcp)   [ -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] && [ -n "${{ vars.GCP_SERVICE_ACCOUNT }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
+            azure) [ -n "${{ vars.AZURE_CLIENT_ID }}" ] && [ -n "${{ vars.AZURE_TENANT_ID }}" ] && [ -n "${{ vars.AZURE_SUBSCRIPTION_ID }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
+            *)     echo "available=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Skip notice (no cloud credentials configured)
+        if: steps.creds.outputs.available != 'true'
+        run: |
+          echo "::notice::Skipping plan for ${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }} — cloud credentials not configured in repo Variables."
+
       - name: Plan
+        if: steps.creds.outputs.available == 'true'
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
         run: terragrunt plan -no-color

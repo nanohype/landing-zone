@@ -1,5 +1,5 @@
 terraform {
-  source = "${dirname(find_in_parent_folders("cloud.hcl"))}/../../components/aws/cluster-addons"
+  source = "${dirname(find_in_parent_folders("cloud.hcl"))}/../..//components/aws/cluster-addons"
 }
 
 dependency "cluster" {

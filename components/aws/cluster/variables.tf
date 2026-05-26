@@ -43,6 +43,12 @@ variable "cluster_endpoint_public_access" {
   default     = true
 }
 
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the public EKS API endpoint. Empty list = unrestricted (the AWS default). Set to your operator IP(s) to lock it down."
+  type        = list(string)
+  default     = []
+}
+
 variable "access_entries" {
   description = "EKS access entries for IAM principals"
   type        = any
