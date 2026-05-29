@@ -9,11 +9,11 @@
  * Single-tenant on purpose: marshal's resource shapes (DDB GSI on
  * slack-channel-index, three FIFO queues with specific dedup semantics,
  * EventBridge Scheduler group, etc.) don't generalize cleanly to the
- * other protohype apps. Each app gets its own dedicated `<app>-platform`
+ * other protohype-team apps. Each app gets its own dedicated `<app>-platform`
  * component.
  *
  * Wired by live/_envcommon/aws/marshal-platform.hcl. Output ARNs flow
- * back into the protohype/marshal Platform CR's spec.irsa.policies via
+ * back into the incident-response Platform CR's spec.irsa.policies via
  * the kx local-config render or whatever bridge the eks-agent-platform
  * operator uses for cross-cluster identity propagation.
  */
