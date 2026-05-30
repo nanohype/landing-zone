@@ -16,10 +16,10 @@ inputs = {
         Version = "2012-10-17"
         Statement = [
           {
-            Sid       = "DenyLeaveOrganization"
-            Effect    = "Deny"
-            Action    = "organizations:LeaveOrganization"
-            Resource  = "*"
+            Sid      = "DenyLeaveOrganization"
+            Effect   = "Deny"
+            Action   = "organizations:LeaveOrganization"
+            Resource = "*"
           },
         ]
       })
@@ -62,10 +62,10 @@ inputs = {
         Version = "2012-10-17"
         Statement = [
           {
-            Sid       = "DenyRootUserActions"
-            Effect    = "Deny"
-            Action    = "*"
-            Resource  = "*"
+            Sid      = "DenyRootUserActions"
+            Effect   = "Deny"
+            Action   = "*"
+            Resource = "*"
             Condition = {
               StringLike = {
                 "aws:PrincipalArn" = "arn:aws:iam::*:root"
@@ -83,8 +83,8 @@ inputs = {
         Version = "2012-10-17"
         Statement = [
           {
-            Sid       = "DenyOutsideAllowedRegions"
-            Effect    = "Deny"
+            Sid    = "DenyOutsideAllowedRegions"
+            Effect = "Deny"
             NotAction = [
               "a4b:*",
               "budgets:*",
@@ -195,6 +195,102 @@ inputs = {
             Condition = {
               Bool = {
                 "ec2:Encrypted" = "false"
+              }
+            }
+          },
+        ]
+      })
+    }
+
+    # Bedrock is reached in-region (agentgateway + IRSA callers all invoke in
+    # us-west-2 / us-east-1); there is no Bedrock VPC endpoint to key on, and
+    # SCPs gate API actions, not the cloudflared MCP tunnel's network egress.
+    # So the sanctioned-egress guardrail is region-pinning, mirroring
+    # RegionRestriction but scoped to model invocation.
+    DenyBedrockEgressOutsideRegion = {
+      description = "Deny Bedrock model invocation outside sanctioned regions"
+      target_ids  = []
+      policy = jsonencode({
+        Version = "2012-10-17"
+        Statement = [
+          {
+            Sid    = "DenyBedrockInvokeOutsideSanctionedRegions"
+            Effect = "Deny"
+            Action = [
+              "bedrock:InvokeModel",
+              "bedrock:InvokeModelWithResponseStream",
+              "bedrock:Converse",
+              "bedrock:ConverseStream",
+            ]
+            Resource = "*"
+            Condition = {
+              StringNotEquals = {
+                "aws:RequestedRegion" = [
+                  "us-east-1",
+                  "us-west-2",
+                ]
+              }
+            }
+          },
+        ]
+      })
+    }
+
+    EnforceMandatoryTags = {
+      description = "Deny resource creation without PlatformId and DataClassification tags"
+      target_ids  = []
+      policy = jsonencode({
+        Version = "2012-10-17"
+        Statement = [
+          {
+            Sid    = "DenyCreateWithoutMandatoryTags"
+            Effect = "Deny"
+            Action = [
+              "ec2:RunInstances",
+              "ec2:CreateVolume",
+              "lambda:CreateFunction",
+              "s3:CreateBucket",
+              "dynamodb:CreateTable",
+              "rds:CreateDBInstance",
+              "rds:CreateDBCluster",
+              "sqs:CreateQueue",
+              "sns:CreateTopic",
+            ]
+            Resource = "*"
+            Condition = {
+              Null = {
+                "aws:RequestTag/PlatformId"         = "true"
+                "aws:RequestTag/DataClassification" = "true"
+              }
+            }
+          },
+        ]
+      })
+    }
+
+    # Org-level defense-in-depth atop the per-key encryption-context enforcement
+    # the eks-agent-platform operator already applies (its KMS grants always set
+    # EncryptionContextEquals {PlatformId}). Bites operator-managed data keys
+    # (ManagedBy=eks-agent-platform); the opentofu-managed secrets/logs keys use
+    # a different context key and stay out of scope. Verify the data CMK carries
+    # this ManagedBy value before attaching to a live OU.
+    DenyKmsDecryptWithoutPlatformContext = {
+      description = "Deny KMS decrypt on platform-managed keys without PlatformId encryption context"
+      target_ids  = []
+      policy = jsonencode({
+        Version = "2012-10-17"
+        Statement = [
+          {
+            Sid      = "DenyDecryptWithoutPlatformContext"
+            Effect   = "Deny"
+            Action   = "kms:Decrypt"
+            Resource = "arn:aws:kms:*:*:key/*"
+            Condition = {
+              StringEquals = {
+                "aws:ResourceTag/ManagedBy" = "eks-agent-platform"
+              }
+              Null = {
+                "kms:EncryptionContext:PlatformId" = "true"
               }
             }
           },
