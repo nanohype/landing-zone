@@ -3,7 +3,7 @@
  * tenant. Single-tenant by design (same rationale as marshal-platform
  * and almanac-platform).
  *
- * Resources, mapped to dispatch's CDK-era stack:
+ * Resources:
  *   - Aurora Serverless v2 (PostgreSQL): drafts + audit_events tables.
  *     The chart's migrate-job Helm hook applies schema migrations
  *     against this DB before any new pipeline/api/web pod rolls out.

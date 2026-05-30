@@ -3,7 +3,7 @@
  * Platform tenant. Single-tenant by design (same rationale as
  * marshal-platform).
  *
- * Resources, mapped to almanac's CDK-era stack:
+ * Resources:
  *   - KMS key for per-user OAuth token envelope encryption
  *   - DynamoDB ×3: tokens / audit / identity-cache (with TTL on audit +
  *     identity-cache)
@@ -16,7 +16,7 @@
  *     into one policy attached to the shared ServiceAccount
  *
  * Wired by live/_envcommon/aws/almanac-platform.hcl. Output ARNs flow
- * into the protohype/almanac Platform CR's spec.irsa.policies via the
+ * into the slack-knowledge-bot Platform CR's spec.irsa.policies via the
  * operator-side identity propagation layer.
  */
 
