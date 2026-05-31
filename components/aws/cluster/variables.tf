@@ -50,23 +50,16 @@ variable "cluster_endpoint_public_access_cidrs" {
 }
 
 variable "access_entries" {
-  description = "EKS access entries for IAM principals"
+  description = <<-EOT
+    Extra EKS access entries for IAM principals, keyed by name. The principal
+    that applies this component is already granted cluster-admin via
+    enable_cluster_creator_admin_permissions, so this defaults to empty;
+    populate it per-environment with real principal ARNs (CI roles, SSO admin
+    roles, etc.). Do NOT put placeholder ARNs here — an invalid principal_arn
+    fails the apply.
+  EOT
   type        = any
-  default = {
-    admin_sso = {
-      # Replace with your actual IAM Identity Center admin role ARN before applying.
-      # Format: arn:aws:iam::<account-id>:role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<permission-set>_<suffix>
-      principal_arn = "arn:aws:iam::000000000000:role/aws-reserved/sso.amazonaws.com/us-west-2/AWSReservedSSO_AdministratorAccess_PLACEHOLDER"
-      policy_associations = {
-        admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
-  }
+  default     = {}
 }
 
 # System node group

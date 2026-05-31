@@ -17,6 +17,11 @@ module "eks" {
   endpoint_private_access      = true
 
   authentication_mode = "API"
+  # Grant the principal that applies this component cluster-admin via an
+  # access entry. Without it an API-auth cluster has no human-reachable
+  # admin (only the EKS service + node roles are mapped), so nothing can
+  # bootstrap ArgoCD/addons. Maps the applier dynamically — no hardcoded ARN.
+  enable_cluster_creator_admin_permissions = true
 
   create_kms_key = false
 
