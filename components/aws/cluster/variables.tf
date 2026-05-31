@@ -64,9 +64,9 @@ variable "access_entries" {
 
 # System node group
 variable "system_node_instance_types" {
-  description = "Instance types for system node group"
+  description = "Instance types for system node group (Graviton/arm64 — pair with the ARM_64 AMI)"
   type        = list(string)
-  default     = ["m5a.xlarge", "m5.xlarge"]
+  default     = ["m7g.xlarge", "m6g.xlarge"]
 }
 
 variable "system_node_min_size" {
