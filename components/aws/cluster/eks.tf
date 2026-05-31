@@ -67,7 +67,7 @@ module "eks" {
     system = {
       name           = "${var.environment}-system"
       instance_types = var.system_node_instance_types
-      ami_type       = "BOTTLEROCKET_x86_64"
+      ami_type       = "BOTTLEROCKET_ARM_64"
       min_size       = var.system_node_min_size
       max_size       = var.system_node_max_size
       desired_size   = var.system_node_desired_size
