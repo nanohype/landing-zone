@@ -22,6 +22,15 @@ locals {
   repository          = local.env_vars.locals.repository
 }
 
+# --- Common inputs ---
+# region + environment are declared (no default) by every component, so the
+# root passes the resolved values down. Component-specific inputs (team,
+# cluster_name, tenants, …) come from each component's _envcommon/*.hcl.
+inputs = {
+  region      = local.region
+  environment = local.environment
+}
+
 # --- AWS Provider ---
 generate "provider_aws" {
   path      = "provider.tf"
