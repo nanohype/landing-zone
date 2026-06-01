@@ -109,12 +109,18 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
 
 ## GitHub Actions OIDC Auth Failure
 
+> Only relevant to the **optional** GitHub Actions CI path. The default model
+> runs `deploy` and `task e2e` locally with SSO credentials and needs no OIDC
+> role — see [First-Time AWS Deploy](first-deploy-aws.md).
+
 **Symptom:** CI workflow fails with "Not authorized to perform sts:AssumeRoleWithWebIdentity".
 
 **Fix:**
 
-1. **Verify the OIDC provider** exists in the AWS account:
+1. **Verify the OIDC provider + deploy role exist.** Both are provisioned by the
+   `github-oidc` component — apply it once per account, then read the role ARN:
    ```bash
+   task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=github-oidc
    aws iam list-open-id-connect-providers
    ```
 
