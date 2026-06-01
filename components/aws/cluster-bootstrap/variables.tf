@@ -96,3 +96,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_portal_reader" {
+  description = "Create a read-only portal-reader ServiceAccount + durable token so the portal can register this cluster and watch Platform/Tenant CRs without manual token minting"
+  type        = bool
+  default     = true
+}
