@@ -258,6 +258,20 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       "region"                         = var.region
       "cluster_name"                   = var.cluster_name
       "vpc_id"                         = var.vpc_id
+      # Opts this cluster into the eks-agent-platform operator ApplicationSet.
+      "eks-agent-platform/enabled" = "true"
+    }
+    # Per-cluster IRSA wiring for the agent-platform operator: the cluster OIDC
+    # outputs + the deterministic operator role ARN (path-scoped, named by
+    # agent-iam as <env>-eks-agent-platform-operator). The eks-gitops operator
+    # ApplicationSet reads these via the ArgoCD cluster generator and injects
+    # them as Helm values, so the operator gets its IRSA without the account ID
+    # ever being committed to the public gitops repos. Annotations (not labels)
+    # because ARNs contain characters that label values disallow.
+    annotations = {
+      "eks-agent-platform/oidc-provider-arn" = var.oidc_provider_arn
+      "eks-agent-platform/oidc-issuer-host"  = var.oidc_issuer
+      "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.environment}-eks-agent-platform-operator"
     }
   }
 
