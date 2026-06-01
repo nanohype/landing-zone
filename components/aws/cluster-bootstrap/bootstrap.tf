@@ -89,17 +89,21 @@ resource "kubectl_manifest" "disable_aws_node" {
 ################################################################################
 # Reconcile EKS-managed addons against the new Cilium datapath
 #
-# The race: `lz-cluster` installs `aws-ebs-csi-driver` (and other EKS managed
-# addons) BEFORE this workspace runs, while VPC CNI is still the active
-# datapath. Once Cilium takes over and `aws-node` is patched off (above), the
-# pre-existing EBS CSI pods retain stale ENI-backed routes and can no longer
-# reach the cluster service VIP (172.20.0.1) — manifesting as CrashLoopBackOff
-# on ebs-csi-node + ebs-csi-controller, with errors like:
-#   "dial tcp 172.20.0.1:443: i/o timeout"
+# The race: `lz-cluster` installs CoreDNS + `aws-ebs-csi-driver` (and other EKS
+# managed addons) BEFORE this workspace runs, while VPC CNI is still the active
+# datapath. Once Cilium takes over and `aws-node` is patched off (above), those
+# pre-existing pods retain stale ENI-backed routes and can no longer reach the
+# cluster service VIP (172.20.0.1) — manifesting as CrashLoopBackOff with errors
+# like "dial tcp 172.20.0.1:443: i/o timeout".
+#
+# CoreDNS is the worst case and must be restarted too: its pods keep the stale
+# datapath, so cluster DNS fails and everything resolving a Service name cascades
+# — e.g. argocd-repo-server CrashLoops on its liveness probe and the app-of-apps
+# can't render ("dns: lookup argocd-repo-server ... i/o timeout").
 #
 # We run an in-cluster Job (kubectl image) that, after Cilium reports Ready,
-# `rollout restart`s the affected workloads so they're recreated against the
-# new datapath. Idempotent: on a subsequent apply where Cilium is unchanged
+# `rollout restart`s the affected workloads (CoreDNS first, then EBS CSI) so
+# they're recreated against the new datapath. Idempotent: on a subsequent apply where Cilium is unchanged
 # the resource is a no-op (the Job name embeds a hash of the Cilium release
 # ID, so it only re-runs when Cilium itself changes).
 ################################################################################
@@ -179,10 +183,13 @@ resource "kubernetes_job_v1" "restart_pre_cilium_addons" {
             set -e
             echo "Waiting for cilium DaemonSet to converge..."
             kubectl -n kube-system rollout status daemonset/cilium --timeout=300s
+            echo "Restarting CoreDNS to pick up the Cilium datapath..."
+            kubectl -n kube-system rollout restart deployment/coredns
             echo "Restarting EBS CSI workloads to pick up the Cilium datapath..."
             kubectl -n kube-system rollout restart daemonset/ebs-csi-node
             kubectl -n kube-system rollout restart deployment/ebs-csi-controller
-            echo "Waiting for EBS CSI workloads to be Ready..."
+            echo "Waiting for CoreDNS + EBS CSI workloads to be Ready..."
+            kubectl -n kube-system rollout status deployment/coredns --timeout=300s
             kubectl -n kube-system rollout status daemonset/ebs-csi-node --timeout=300s
             kubectl -n kube-system rollout status deployment/ebs-csi-controller --timeout=300s
             echo "Done."
