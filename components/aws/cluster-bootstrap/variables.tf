@@ -102,3 +102,9 @@ variable "enable_portal_reader" {
   type        = bool
   default     = true
 }
+
+variable "tenants_repo_url" {
+  description = "SSH URL of the private tenants GitOps repo (e.g. git@github.com:nanohype/tenants.git). When set, cluster-bootstrap registers a read-only deploy key on it and writes the matching ArgoCD repository credential so ArgoCD can pull portal-committed tenant manifests. Empty disables the integration. Requires GITHUB_TOKEN in the environment when set."
+  type        = string
+  default     = ""
+}

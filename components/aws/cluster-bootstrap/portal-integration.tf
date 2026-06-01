@@ -75,3 +75,52 @@ resource "kubernetes_secret_v1" "portal_reader_token" {
   type                           = "kubernetes.io/service-account-token"
   wait_for_service_account_token = true
 }
+
+################################################################################
+# ArgoCD credential for the private tenants repo (optional)
+#
+# When tenants_repo_url is set: generate a read-only deploy key, register it on
+# the repo via the GitHub provider, and write the matching ArgoCD repository
+# Secret — replacing a manual `gh repo deploy-key add` + hand-crafted Secret, so
+# ArgoCD can pull the portal-committed tenant manifests. Per-cluster key, removed
+# from the repo when the cluster is destroyed.
+################################################################################
+
+locals {
+  # git@github.com:nanohype/tenants.git     -> nanohype/tenants
+  # https://github.com/nanohype/tenants.git -> nanohype/tenants
+  tenants_repo_slug  = var.tenants_repo_url == "" ? "" : trimsuffix(replace(replace(var.tenants_repo_url, "git@github.com:", ""), "https://github.com/", ""), ".git")
+  tenants_repo_owner = var.tenants_repo_url == "" ? "" : split("/", local.tenants_repo_slug)[0]
+  tenants_repo_name  = var.tenants_repo_url == "" ? "" : split("/", local.tenants_repo_slug)[1]
+  wire_tenants_repo  = var.tenants_repo_url != ""
+}
+
+resource "tls_private_key" "argocd_tenants" {
+  count     = local.wire_tenants_repo ? 1 : 0
+  algorithm = "ED25519"
+}
+
+resource "github_repository_deploy_key" "argocd_tenants" {
+  count      = local.wire_tenants_repo ? 1 : 0
+  repository = local.tenants_repo_name
+  title      = "argocd-${var.cluster_name}-ro"
+  key        = tls_private_key.argocd_tenants[0].public_key_openssh
+  read_only  = true
+}
+
+resource "kubernetes_secret_v1" "argocd_tenants_repo" {
+  count = local.wire_tenants_repo ? 1 : 0
+  metadata {
+    name      = "tenants-repo"
+    namespace = helm_release.argocd.namespace
+    labels = {
+      "argocd.argoproj.io/secret-type" = "repository"
+    }
+  }
+  data = {
+    type          = "git"
+    url           = var.tenants_repo_url
+    sshPrivateKey = tls_private_key.argocd_tenants[0].private_key_openssh
+  }
+  depends_on = [github_repository_deploy_key.argocd_tenants]
+}
