@@ -1,0 +1,97 @@
+# Manual end-to-end: provision a real EKS substrate, install the operator,
+# deploy one tenant via GitOps, assert real-IRSA + cloudgov, tear it all down.
+#
+# workflow_dispatch ONLY — never scheduled — because each run provisions real,
+# billable AWS. scripts/e2e.sh always tears down (EXIT trap), so a failed run
+# does not leave billing on.
+#
+# Requires:
+#   vars.E2E_AWS_ROLE_ARN   — an OIDC role in the target account with rights to
+#                             provision/destroy the substrate + ECR + IAM.
+#   secrets.E2E_GITHUB_TOKEN — a token (PAT or App) with read on
+#                             eks-agent-platform + cloudgov and write on the
+#                             tenants repo (deploy-key admin + push).
+name: e2e (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      account_id:
+        description: "Target AWS account ID (12 digits)"
+        required: true
+      region:
+        description: "Region"
+        default: "us-west-2"
+      environment:
+        description: "Env tree (dev | staging | production)"
+        default: "dev"
+      account_dir:
+        description: "Account directory (workload-dev | workload-prod)"
+        default: "workload-dev"
+      tenant:
+        description: "Tenant name to create"
+        default: "e2e-smoke"
+
+permissions:
+  id-token: write
+  contents: read
+
+# Never let two runs race on the same region's substrate.
+concurrency:
+  group: e2e-${{ inputs.region }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nanohype/eks-agent-platform
+          path: .siblings/eks-agent-platform
+          token: ${{ secrets.E2E_GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          repository: nanohype/cloudgov
+          path: .siblings/cloudgov
+          token: ${{ secrets.E2E_GITHUB_TOKEN }}
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.11.5"
+      - name: install terragrunt
+        run: |
+          curl -fsSL -o /usr/local/bin/terragrunt \
+            https://github.com/gruntwork-io/terragrunt/releases/download/v0.99.4/terragrunt_linux_amd64
+          chmod +x /usr/local/bin/terragrunt
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: azure/setup-helm@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.E2E_AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+
+      # Let the tenants-repo clone/push (and the bootstrap deploy key) use the
+      # token over https, transparently rewriting the SSH URL.
+      - name: configure git auth
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.E2E_GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
+
+      - name: run e2e (provision → tenant → validate → teardown)
+        env:
+          E2E_ACCOUNT_ID: ${{ inputs.account_id }}
+          E2E_REGION: ${{ inputs.region }}
+          E2E_ENV: ${{ inputs.environment }}
+          E2E_ACCOUNT_DIR: ${{ inputs.account_dir }}
+          E2E_TENANT: ${{ inputs.tenant }}
+          E2E_EKS_AGENT_PLATFORM_DIR: ${{ github.workspace }}/.siblings/eks-agent-platform
+          E2E_CLOUDGOV_DIR: ${{ github.workspace }}/.siblings/cloudgov
+          GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
+          AWS_PROFILE: "" # use the OIDC env credentials, not a named profile
+        run: ./scripts/e2e.sh

@@ -85,6 +85,18 @@ tasks:
     cmds:
       - ./scripts/init-backend-{{.CLOUD}}.sh
 
+  # === End-to-end (manual, real spend) ===
+
+  e2e:
+    desc: |
+      MANUAL end-to-end on a REAL AWS account: provision -> install operator ->
+      deploy a tenant via GitOps -> assert real-IRSA + cloudgov -> teardown
+      (always, even on failure). Real, billable AWS (~$0.30-0.60/run) — run on
+      demand only, never scheduled. Requires E2E_ACCOUNT_ID; see scripts/e2e.sh
+      for the full set of knobs and prereqs.
+    cmds:
+      - ./scripts/e2e.sh
+
   # === Help ===
 
   help:
