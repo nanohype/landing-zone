@@ -49,3 +49,16 @@ provider "kubectl" {
     args        = ["eks", "get-token", "--cluster-name", var.cluster_name, "--region", var.region]
   }
 }
+
+################################################################################
+# GitHub Provider Config
+#
+# Used only when tenants_repo_url is set, to register ArgoCD's read-only deploy
+# key on the tenants repo. owner is parsed from that URL; the token comes from
+# the GITHUB_TOKEN environment variable. When tenants_repo_url is empty, owner
+# is "" and no github resources are created, so the provider is never called.
+################################################################################
+
+provider "github" {
+  owner = local.tenants_repo_owner
+}
