@@ -254,3 +254,44 @@ Approximate $/day at default sizes:
 | `cluster-bootstrap` connects but fails RBAC | IAM principal not in cluster access entries | Update `live/aws/workload-<env>/.../cluster/terragrunt.hcl` access_entries map, re-apply `cluster` |
 | ArgoCD apps stuck in OutOfSync, "repository not accessible" | eks-gitops URL wrong or repo private | Verify https://github.com/nanohype/eks-gitops loads anonymously |
 | Addons stuck Pending | Karpenter not provisioning | `kubectl get nodepool && kubectl describe nodepool default` |
+
+## Execution model: local (default) vs CI
+
+`deploy` and the end-to-end harness run **locally** with your SSO credentials —
+the `aws sso login --profile workload-<env>` + `AWS_PROFILE` setup above is all
+you need. There is no GitHub Actions runner in the default model; `task apply`
+and `task e2e` execute on your machine against the target account.
+
+The repo also ships GitHub Actions workflows (`deploy.yml`, `e2e.yml`) for an
+**optional** CI path. Those assume a GitHub→AWS OIDC role, which the
+`github-oidc` component provisions (the OIDC provider + a repo-scoped deploy
+role). Apply it once per account with your admin/SSO creds, then wire its output
+into the GitHub Actions repo *variables*:
+
+```bash
+task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=github-oidc
+cd live/aws/workload-<env>/us-west-2/<env>/github-oidc && terragrunt output -raw deploy_role_arn
+# Set the printed ARN as the AWS_ROLE_ARN (deploy.yml) and E2E_AWS_ROLE_ARN
+# (e2e.yml) repo variables. Local exec does not need this.
+```
+
+The role ships with **no permissions** — its trust is scoped to
+`repo:nanohype/landing-zone:*`, and you attach the policies CI needs via the
+component's `managed_policy_arns` (e.g. `AdministratorAccess` with a
+`permissions_boundary_arn`, or a scoped set). Skip this component entirely if you
+only run locally.
+
+## End-to-end validation (`task e2e`)
+
+A single manual command provisions a throwaway substrate, installs the operator,
+deploys a tenant via GitOps, asserts real-IRSA + cloudgov conformance, and tears
+everything down — always, even on failure (an EXIT trap), so a broken run never
+leaves billing on:
+
+```bash
+E2E_ACCOUNT_ID=<account-id> AWS_PROFILE=workload-<env> task e2e
+```
+
+It's real, billable AWS (~$0.30-0.60 for a ~30-45 min run on the dev tree) and is
+**never scheduled** — run it on demand to confirm the whole stack still holds
+together. See `scripts/e2e.sh` for the full set of knobs and prerequisites.
