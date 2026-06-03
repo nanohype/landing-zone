@@ -108,3 +108,9 @@ variable "tenants_repo_url" {
   type        = string
   default     = ""
 }
+
+variable "enable_agent_platform" {
+  description = "Label this cluster into the eks-agent-platform operator ApplicationSet, so eks-gitops installs the operator via GitOps using the per-cluster OIDC/role annotations. Set false to install the operator out of band — e.g. the e2e harness builds and helm-installs the operator from a locally-built ECR image until a release is published, and the GitOps install would otherwise race it for ownership of the operator's resources."
+  type        = bool
+  default     = true
+}
