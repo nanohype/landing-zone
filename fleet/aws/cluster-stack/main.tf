@@ -6,7 +6,7 @@
 # is the next step (they pull k8s/helm providers, so they land in a sibling root).
 
 module "network" {
-  source = "../../components/aws/network"
+  source = "../../../components/aws/network"
 
   environment  = var.environment
   region       = var.region
@@ -19,7 +19,7 @@ module "network" {
 }
 
 module "cluster" {
-  source = "../../components/aws/cluster"
+  source = "../../../components/aws/cluster"
 
   environment     = var.environment
   region          = var.region
