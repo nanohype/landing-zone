@@ -30,7 +30,7 @@ tofu init \
   -backend-config=region=<region>
 AWS_REGION=<region> tofu apply \
   -var region=<region> -var environment=dev -var team=platform \
-  -var assume_role_arn=arn:aws:iam::<account>:role/terraform-vend   # omit for same-account
+  -var assume_role_arn=arn:aws:iam::<account>:role/eks-fleet/dev-eks-fleet-vend   # omit for same-account
 ```
 
 ## Scope
