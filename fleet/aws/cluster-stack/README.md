@@ -1,4 +1,4 @@
-# fleet/cluster-stack
+# fleet/aws/cluster-stack
 
 The plain-tofu entrypoint the [`eks-fleet`](https://github.com/nanohype/eks-fleet)
 cluster factory runs.
