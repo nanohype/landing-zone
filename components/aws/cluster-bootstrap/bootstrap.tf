@@ -251,16 +251,18 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
   metadata {
     name      = "in-cluster"
     namespace = "argocd"
-    labels = {
+    labels = merge({
       "argocd.argoproj.io/secret-type" = "cluster"
       "environment"                    = var.environment
       "account_id"                     = local.account_id
       "region"                         = var.region
       "cluster_name"                   = var.cluster_name
       "vpc_id"                         = var.vpc_id
+      }, var.enable_agent_platform ? {
       # Opts this cluster into the eks-agent-platform operator ApplicationSet.
+      # Disable to install the operator out of band (see enable_agent_platform).
       "eks-agent-platform/enabled" = "true"
-    }
+    } : {})
     # Per-cluster IRSA wiring for the agent-platform operator: the cluster OIDC
     # outputs + the deterministic operator role ARN (path-scoped, named by
     # agent-iam as <env>-eks-agent-platform-operator). The eks-gitops operator

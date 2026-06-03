@@ -8,8 +8,12 @@ locals {
   region      = local.region_vars.locals.region
   environment = local.env_vars.locals.environment
 
-  # Cloud-specific identifiers (try() for cross-cloud safety)
-  account_id      = try(local.account_vars.locals.account_id, "")
+  # Cloud-specific identifiers (try() for cross-cloud safety).
+  # TERRAGRUNT_ACCOUNT_ID lets automation (the e2e harness) inject the real AWS
+  # account id without writing it into the tracked account.hcl placeholder — so a
+  # real account id never lands in a tracked file. Falls back to account.hcl for
+  # normal local deploys (where the user sets it in account.hcl directly).
+  account_id      = get_env("TERRAGRUNT_ACCOUNT_ID", try(local.account_vars.locals.account_id, ""))
   project_id      = try(local.account_vars.locals.project_id, "")
   subscription_id = try(local.account_vars.locals.subscription_id, "")
   azure_tenant_id = try(local.account_vars.locals.tenant_id, "")
