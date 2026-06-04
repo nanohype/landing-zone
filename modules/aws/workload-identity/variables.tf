@@ -44,3 +44,15 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "path" {
+  description = "IAM path for the role (e.g. \"/eks-fleet/\" for cross-account fleet-vend gating). Default \"/\" = AWS root path."
+  type        = string
+  default     = "/"
+}
+
+variable "permissions_boundary" {
+  description = "ARN of the permissions boundary to attach to the role. null = no boundary (the default)."
+  type        = string
+  default     = null
+}

@@ -8,6 +8,17 @@ module "karpenter" {
 
   cluster_name = module.eks.cluster_name
 
+  # Cross-account fleet-vend gating: the controller + node roles land under
+  # var.cluster_iam_role_path (role/eks-fleet/*). NOTE the asymmetric upstream names
+  # (verified against the resolved submodule): the CONTROLLER boundary input is
+  # iam_role_permissions_boundary_arn (with _arn), the NODE is
+  # node_iam_role_permissions_boundary (no _arn). Boundary inert under the path-only
+  # gate; path defaults "/" = same-account.
+  iam_role_path                      = var.cluster_iam_role_path
+  iam_role_permissions_boundary_arn  = local.cluster_permissions_boundary
+  node_iam_role_path                 = var.cluster_iam_role_path
+  node_iam_role_permissions_boundary = local.cluster_permissions_boundary
+
   # The generated controller policy exceeds the 6144-char limit on standard
   # customer-managed IAM policies; the module's documented workaround is to
   # attach it inline (10240-char limit) instead.

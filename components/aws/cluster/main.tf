@@ -9,6 +9,11 @@ locals {
   oidc_issuer       = replace(module.eks.cluster_oidc_issuer_url, "https://", "")
   oidc_provider_arn = module.eks.oidc_provider_arn
 
+  # "" (the unset default, same-account) → null so the role-minting modules attach
+  # no boundary. Single conversion point — every module input references this local,
+  # never the raw var, or IAM would get a literal empty-string boundary ARN.
+  cluster_permissions_boundary = var.cluster_permissions_boundary_arn != "" ? var.cluster_permissions_boundary_arn : null
+
   tags = merge(var.tags, {
     Component = "cluster"
     Team      = var.team
