@@ -114,6 +114,18 @@ variable "nat_gateways" {
   default     = 1
 }
 
+variable "enable_eks_interface_endpoint" {
+  description = <<-EOT
+    Create the EKS API interface endpoint. Leave true for normal vended clusters.
+    Set FALSE for an eks-fleet provisioning hub: the endpoint's private DNS shadows
+    the IRSA OIDC issuer (oidc.eks.<region>.amazonaws.com → NXDOMAIN), which breaks
+    the in-VPC runner's data.tls_certificate when it creates a vended cluster's OIDC
+    provider. With it off the EKS API resolves publicly via NAT.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Additional tags merged onto every resource"
   type        = map(string)
