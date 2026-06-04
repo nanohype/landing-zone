@@ -286,6 +286,9 @@ resource "aws_iam_role_policy" "hub" {
             "iam:PassedToService" = [
               "eks.amazonaws.com",
               "ec2.amazonaws.com",
+              # Karpenter's controller role is an EKS Pod Identity role; creating
+              # its pod-identity association passes the role to this service.
+              "pods.eks.amazonaws.com",
             ]
           }
         }
