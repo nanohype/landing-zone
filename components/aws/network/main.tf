@@ -62,7 +62,7 @@ module "vpc_endpoints" {
 
   vpc_id = module.vpc.vpc_id
 
-  endpoints = {
+  endpoints = merge({
     s3 = {
       service      = "s3"
       service_type = "Gateway"
@@ -107,13 +107,9 @@ module "vpc_endpoints" {
       security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
       tags                = { Name = "${var.environment}-sts-endpoint" }
     }
-    eks = {
-      service             = "eks"
-      private_dns_enabled = true
-      subnet_ids          = module.vpc.private_subnets
-      security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
-      tags                = { Name = "${var.environment}-eks-endpoint" }
-    }
+    # eks-auth stays unconditional: it serves eks-auth.<region>.amazonaws.com (EKS Pod
+    # Identity), a SIBLING of eks.<region>.amazonaws.com — not a parent of the OIDC
+    # issuer — so its private DNS doesn't shadow oidc.eks.<region>. Don't conditionalize it.
     eks_auth = {
       service             = "eks-auth"
       private_dns_enabled = true
@@ -121,7 +117,18 @@ module "vpc_endpoints" {
       security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
       tags                = { Name = "${var.environment}-eks-auth-endpoint" }
     }
-  }
+    # The EKS API interface endpoint is conditional: its private DNS shadows the
+    # OIDC issuer subdomain (oidc.eks.<region>.amazonaws.com), which a provisioning
+    # hub must resolve from inside the VPC. See var.enable_eks_interface_endpoint.
+    }, var.enable_eks_interface_endpoint ? {
+    eks = {
+      service             = "eks"
+      private_dns_enabled = true
+      subnet_ids          = module.vpc.private_subnets
+      security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
+      tags                = { Name = "${var.environment}-eks-endpoint" }
+    }
+  } : {})
 
   tags = local.tags
 }

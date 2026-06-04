@@ -8,14 +8,15 @@
 module "network" {
   source = "../../../components/aws/network"
 
-  environment  = var.environment
-  region       = var.region
-  cluster_name = var.cluster_name
-  vpc_cidr     = var.vpc_cidr
-  max_azs      = var.max_azs
-  nat_gateways = var.nat_gateways
-  team         = var.team
-  tags         = var.tags
+  environment                   = var.environment
+  region                        = var.region
+  cluster_name                  = var.cluster_name
+  vpc_cidr                      = var.vpc_cidr
+  max_azs                       = var.max_azs
+  nat_gateways                  = var.nat_gateways
+  team                          = var.team
+  tags                          = var.tags
+  enable_eks_interface_endpoint = var.enable_eks_interface_endpoint
 }
 
 module "cluster" {
