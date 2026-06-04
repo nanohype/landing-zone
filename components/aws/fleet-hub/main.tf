@@ -25,11 +25,16 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
   partition  = data.aws_partition.current.partition
 
-  role_name    = "eks-fleet-crossplane"
-  iam_path     = "/eks-fleet/"
-  sa_subject   = "system:serviceaccount:crossplane-system:provider-opentofu"
-  ssm_prefix   = "/eks-fleet/${var.environment}/fleet-hub"
-  hub_role_arn = "arn:${local.partition}:iam::${local.account_id}:role/${local.role_name}"
+  role_name  = "eks-fleet-crossplane"
+  iam_path   = "/eks-fleet/"
+  sa_subject = "system:serviceaccount:crossplane-system:provider-opentofu"
+
+  # IAM OIDC condition keys are the issuer URL WITHOUT the scheme; the EKS module
+  # (and aws eks describe-cluster) report it WITH https://. Strip it so the var is
+  # tolerant of either form — a scheme in the key silently breaks every assume.
+  oidc_issuer_host = replace(var.oidc_issuer, "https://", "")
+  ssm_prefix       = "/eks-fleet/${var.environment}/fleet-hub"
+  hub_role_arn     = "arn:${local.partition}:iam::${local.account_id}:role/${local.role_name}"
 
   # Cross-account vend roles the hub may assume (any account, any env), and the
   # same-account cluster roles/policies/profiles it may manage — only under the
@@ -177,12 +182,12 @@ data "aws_iam_policy_document" "hub_trust" {
     }
     condition {
       test     = "StringEquals"
-      variable = "${var.oidc_issuer}:sub"
+      variable = "${local.oidc_issuer_host}:sub"
       values   = [local.sa_subject]
     }
     condition {
       test     = "StringEquals"
-      variable = "${var.oidc_issuer}:aud"
+      variable = "${local.oidc_issuer_host}:aud"
       values   = ["sts.amazonaws.com"]
     }
   }
