@@ -95,7 +95,7 @@ landing-zone/
 
 ## Prerequisites
 
-- [OpenTofu](https://opentofu.org/) >= 1.11.0
+- [OpenTofu](https://opentofu.org/) >= 1.10.0
 - [Terragrunt](https://terragrunt.gruntwork.io/) (latest)
 - Cloud CLI tools: [AWS CLI v2](https://aws.amazon.com/cli/), [gcloud](https://cloud.google.com/sdk), [az CLI](https://learn.microsoft.com/en-us/cli/azure/)
 - [TFLint](https://github.com/terraform-linters/tflint) with cloud-specific plugins

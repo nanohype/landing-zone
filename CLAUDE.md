@@ -30,7 +30,7 @@ make apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 
 ## Conventions
 
-- OpenTofu >= 1.11.0, not Terraform — use `tofu` CLI, never `terraform`
+- OpenTofu >= 1.10.0, not Terraform — use `tofu` CLI, never `terraform`
 - All HCL files: `tofu fmt` style (2-space indent, aligned `=`)
 - Component variables must have descriptions (enforced by tflint `terraform_documented_variables`)
 - Component outputs must have descriptions (enforced by tflint `terraform_documented_outputs`)

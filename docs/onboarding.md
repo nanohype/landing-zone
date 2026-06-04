@@ -12,7 +12,7 @@ This repo provisions and manages cloud infrastructure across AWS, GCP, and Azure
 
 | Tool | Version | Install |
 |------|---------|---------|
-| [OpenTofu](https://opentofu.org/docs/intro/install/) | >= 1.11.0 | `brew install opentofu` |
+| [OpenTofu](https://opentofu.org/docs/intro/install/) | >= 1.10.0 | `brew install opentofu` |
 | [Terragrunt](https://terragrunt.gruntwork.io/docs/getting-started/install/) | latest | `brew install terragrunt` |
 | [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) | v2 | `brew install awscli` |
 | [gcloud CLI](https://cloud.google.com/sdk/docs/install) | latest | `brew install google-cloud-sdk` |

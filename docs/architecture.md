@@ -6,7 +6,7 @@ Design decisions, dependency graph, and structural overview of the landing-zone 
 
 ### Why OpenTofu (not Terraform)
 
-OpenTofu is the open-source fork of Terraform, free from licensing restrictions. The codebase requires `>= 1.11.0` and uses native S3 state locking (`use_lockfile`), removing the need for a DynamoDB lock table.
+OpenTofu is the open-source fork of Terraform, free from licensing restrictions. The codebase requires `>= 1.10.0` and uses native S3 state locking (`use_lockfile`), removing the need for a DynamoDB lock table.
 
 ### Why Terragrunt
 

@@ -19,7 +19,7 @@ Plus:
 
 Every component:
 
-- Has its own `versions.tf` declaring `terraform >= 1.11.0` + AWS provider `~> 6.0` (or equivalent per cloud).
+- Has its own `versions.tf` declaring `terraform >= 1.10.0` + AWS provider `~> 6.0` (or equivalent per cloud).
 - Has its own `variables.tf` + `outputs.tf` + provider-specific resource files.
 - Reads from upstream component outputs via terragrunt `dependency` blocks declared in `live/_envcommon/<cloud>/<component>.hcl`.
 - Tags every resource with `Environment`, `ManagedBy`, `Project`, `CostCenter`, `BusinessUnit`, `DataClassification`, `Compliance`, `Repository` (default tags emitted by `live/root.hcl`).
