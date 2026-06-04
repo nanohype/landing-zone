@@ -12,10 +12,10 @@
 #
 # Applied AFTER the management EKS cluster exists (it takes that cluster's OIDC
 # provider as input). The role name is fixed (eks-fleet-crossplane, root path) to
-# match the eks-fleet bootstrap ServiceAccount annotation. Same caveat as fleet-vend:
-# for the same-account CreateRole-gated-on-boundary guard to hold at apply, the
-# cluster-stack entrypoint must create cluster roles under /eks-fleet/ with the
-# boundary attached.
+# match the eks-fleet bootstrap ServiceAccount annotation. The CreateRole gate is
+# PATH-SCOPED to /eks-fleet/ (like fleet-vend): the hub role's own boundary is the
+# escalation ceiling, so every cluster it vends just needs its roles under
+# /eks-fleet/ (the composition sets cluster_iam_role_path = /eks-fleet/ for hub vends).
 ################################################################################
 
 data "aws_caller_identity" "current" {}
@@ -290,9 +290,13 @@ resource "aws_iam_role_policy" "hub" {
         Resource = [local.managed_role_arn, local.managed_role_name_arn, local.managed_instance_prof_arn]
       },
       {
-        # Same-account cluster-role management — only roles carrying the boundary
-        # (the escalation guard, same as fleet-vend / agent-iam).
-        Sid    = "ManageClusterRolesWithBoundary"
+        # Same-account cluster-role management, path-scoped to /eks-fleet/. The hub
+        # role's OWN boundary (hub_boundary) is the escalation ceiling, so a
+        # per-created-role boundary condition is redundant — path-scoping is the
+        # gate (mirrors the relaxed fleet-vend gate). The provider-opentofu runner
+        # on the hub provisions same-account clusters AS this role, so their IAM
+        # roles must land under /eks-fleet/ (the composition sets cluster_iam_role_path).
+        Sid    = "ManageClusterRolesByPath"
         Effect = "Allow"
         Action = [
           "iam:CreateRole",
@@ -306,11 +310,6 @@ resource "aws_iam_role_policy" "hub" {
           "iam:PutRolePermissionsBoundary",
         ]
         Resource = local.managed_role_arn
-        Condition = {
-          StringEquals = {
-            "iam:PermissionsBoundary" = aws_iam_policy.hub_boundary.arn
-          }
-        }
       },
       {
         Sid    = "DeleteClusterRoles"
