@@ -301,6 +301,34 @@ resource "aws_iam_role_policy" "hub" {
         Resource = [local.managed_role_arn, local.managed_role_name_arn, local.managed_instance_prof_arn, local.hub_role_arn]
       },
       {
+        # EKS managed node groups validate the eks-nodegroup service-linked role
+        # AS THE CALLER — CreateNodegroup does iam:GetRole on
+        # AWSServiceRoleForAmazonEKSNodegroup. GetRole takes no iam:AWSServiceName
+        # context, so it lives in its own statement scoped to the SLR path.
+        Sid      = "ReadServiceLinkedRoles"
+        Effect   = "Allow"
+        Action   = ["iam:GetRole"]
+        Resource = "arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/*"
+      },
+      {
+        # On the first node group in an account EKS mints the SLR if it's absent.
+        # Condition-locked to the EKS service principals — it can only create
+        # AWS-owned service roles, never a real one (no escalation).
+        Sid      = "CreateEKSServiceLinkedRoles"
+        Effect   = "Allow"
+        Action   = ["iam:CreateServiceLinkedRole"]
+        Resource = "arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/*"
+        Condition = {
+          StringEquals = {
+            "iam:AWSServiceName" = [
+              "eks.amazonaws.com",
+              "eks-nodegroup.amazonaws.com",
+              "eks-fargate.amazonaws.com",
+            ]
+          }
+        }
+      },
+      {
         # Same-account cluster-role management, path-scoped to /eks-fleet/. The hub
         # role's OWN boundary (hub_boundary) is the escalation ceiling, so a
         # per-created-role boundary condition is redundant — path-scoping is the
