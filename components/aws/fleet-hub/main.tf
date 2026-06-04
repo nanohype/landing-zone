@@ -250,6 +250,14 @@ resource "aws_iam_role_policy" "hub" {
         Resource = "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter/eks-fleet/*"
       },
       {
+        # Read AWS's public service parameters — the cluster module resolves the
+        # latest Bottlerocket/EKS AMI from /aws/service/* (AWS-owned, empty account).
+        Sid      = "SSMPublicServiceRead"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
+        Resource = "arn:${local.partition}:ssm:${var.region}::parameter/aws/service/*"
+      },
+      {
         Sid    = "OIDCProvider"
         Effect = "Allow"
         Action = [
@@ -287,7 +295,10 @@ resource "aws_iam_role_policy" "hub" {
           "iam:ListInstanceProfilesForRole",
           "iam:GetInstanceProfile",
         ]
-        Resource = [local.managed_role_arn, local.managed_role_name_arn, local.managed_instance_prof_arn]
+        # + the hub role's OWN arn: the cluster module's
+        # enable_cluster_creator_admin_permissions resolves the creator via
+        # aws_iam_session_context, which calls iam:GetRole on this assumed role.
+        Resource = [local.managed_role_arn, local.managed_role_name_arn, local.managed_instance_prof_arn, local.hub_role_arn]
       },
       {
         # Same-account cluster-role management, path-scoped to /eks-fleet/. The hub
