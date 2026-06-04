@@ -1,5 +1,7 @@
 resource "aws_iam_role" "this" {
-  name = var.role_name
+  name                 = var.role_name
+  path                 = var.path
+  permissions_boundary = var.permissions_boundary
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

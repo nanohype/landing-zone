@@ -103,3 +103,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# --- cross-account vending (eks-fleet rung 2) -------------------------------
+# When this cluster is vended into a workload account, the management hub assumes
+# that account's fleet-vend role to provision it. fleet-vend gates iam:CreateRole
+# (and CreatePolicy) on the /eks-fleet/ path, so every IAM role + the encryption
+# policy this component mints must land under that path. Default "/" = AWS root
+# path = unchanged same-account behavior.
+variable "cluster_iam_role_path" {
+  description = "IAM path for every IAM role + managed policy the cluster mints (cluster role, system node-group role, Karpenter controller/node roles, IRSA roles, encryption policy). Set to \"/eks-fleet/\" for cross-account fleet-vend gating; \"/\" (default) = root path = unchanged same-account behavior."
+  type        = string
+  default     = "/"
+}
+
+variable "cluster_permissions_boundary_arn" {
+  description = "Permissions-boundary ARN attached to every IAM role the cluster mints. Empty (default) = no boundary (same-account). Wired to all role-minting modules but inert under fleet-vend's path-only gate; populate only if fleet-vend is re-tightened to require a per-role boundary."
+  type        = string
+  default     = ""
+}

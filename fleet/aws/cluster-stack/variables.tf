@@ -22,6 +22,24 @@ variable "assume_role_arn" {
   default     = ""
 }
 
+variable "external_id" {
+  description = "sts:ExternalId presented when assuming the cross-account vend role (must match the fleet-vend trust; ignored same-account)"
+  type        = string
+  default     = "eks-fleet"
+}
+
+variable "cluster_iam_role_path" {
+  description = "IAM path for the cluster's IAM roles + policies. \"/eks-fleet/\" for cross-account fleet-vend gating; \"/\" (default) for same-account."
+  type        = string
+  default     = "/"
+}
+
+variable "cluster_permissions_boundary_arn" {
+  description = "Permissions-boundary ARN for the cluster's IAM roles. Empty (default) = no boundary; inert under fleet-vend's path-only gate."
+  type        = string
+  default     = ""
+}
+
 # --- cluster ----------------------------------------------------------------
 variable "cluster_name" {
   description = "EKS cluster base name; the component prefixes it with environment"

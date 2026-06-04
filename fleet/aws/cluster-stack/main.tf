@@ -39,6 +39,9 @@ module "cluster" {
   system_node_desired_size   = var.system_node_desired_size
   system_node_disk_size      = var.system_node_disk_size
 
+  cluster_iam_role_path            = var.cluster_iam_role_path
+  cluster_permissions_boundary_arn = var.cluster_permissions_boundary_arn
+
   team = var.team
   tags = var.tags
 }

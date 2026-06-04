@@ -25,6 +25,13 @@ module "eks" {
 
   create_kms_key = false
 
+  # Cross-account fleet-vend gating: the cluster IAM role + the encryption managed
+  # policy land under var.cluster_iam_role_path so the vend role's CreateRole /
+  # CreatePolicy (scoped to /eks-fleet/*) is satisfied. Defaults "/" = same-account.
+  iam_role_path                 = var.cluster_iam_role_path
+  iam_role_permissions_boundary = local.cluster_permissions_boundary
+  encryption_policy_path        = var.cluster_iam_role_path
+
   encryption_config = {
     provider_key_arn = module.kms.key_arn
     resources        = ["secrets"]
@@ -73,6 +80,11 @@ module "eks" {
       desired_size   = var.system_node_desired_size
       disk_size      = var.system_node_disk_size
       capacity_type  = "ON_DEMAND"
+
+      # node-group role under the fleet-vend path (v21 sets these per-group, not
+      # via an eks_managed_node_group_defaults var)
+      iam_role_path                 = var.cluster_iam_role_path
+      iam_role_permissions_boundary = local.cluster_permissions_boundary
 
       metadata_options = {
         http_endpoint               = "enabled"

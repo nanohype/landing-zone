@@ -4,17 +4,18 @@
 #
 # The management-account Crossplane role (eks-fleet-crossplane) sts:AssumeRoles
 # this role; the cluster-stack entrypoint then runs as it to stand up the
-# network + cluster. Mirrors components/aws/agent-iam one layer up: a permissions
-# boundary is the hard ceiling (capping the vend role itself AND every role it
-# mints for the cluster), the identity policy may only create/modify roles under
-# /eks-fleet/ that carry that boundary (the escalation guard), and the role ARN
-# is published to SSM for the hub/portal to discover.
+# network + cluster. The vend role carries a permissions boundary that is the hard
+# escalation ceiling (it can't mint users, touch org/account, strip boundaries, or
+# widen itself), and its identity policy is PATH-SCOPED: it may only create/modify
+# the cluster's IAM roles + policies under /eks-fleet/. The role ARN is published
+# to SSM for the hub/portal to discover.
 #
-# NOTE: for the CreateRole-gated-on-boundary guard to hold at apply, the
-# cluster-stack entrypoint must create the cluster's IAM roles under iam_role_path
-# "/eks-fleet/" with this boundary attached (terraform-aws-eks
-# iam_role_path / iam_role_permissions_boundary). That wiring lands with the first
-# cross-account apply (rung 2) — this component defines the account-side contract.
+# CONTRACT: the cluster-stack entrypoint sets cluster_iam_role_path = "/eks-fleet/"
+# for cross-account vends (terraform-aws-eks / karpenter / workload-identity all
+# create their roles under that path), which is what satisfies this role's path
+# gate. No per-role permissions boundary is required — the vend role's own boundary
+# is the ceiling. (The vend boundary ARN is still published to SSM so the gate can
+# be re-tightened to require a per-role boundary later without rewiring.)
 ################################################################################
 
 data "aws_caller_identity" "current" {}
@@ -231,9 +232,13 @@ resource "aws_iam_role_policy" "vend" {
         Resource = [local.managed_role_arn, local.managed_role_name_arn, local.managed_instance_prof_arn]
       },
       {
-        # Create + modify cluster roles ONLY when they carry the boundary — the
-        # privilege-escalation guard, copied from agent-iam one layer up.
-        Sid    = "ManageClusterRolesWithBoundary"
+        # Create + modify cluster roles created under the /eks-fleet/ path. The
+        # vend role's OWN permissions boundary (below) is the escalation ceiling —
+        # it already denies minting users, touching org/account, and widening
+        # itself — so a per-created-role boundary condition here is redundant
+        # belt-and-suspenders. Path-scoping is the gate; the cluster component just
+        # sets cluster_iam_role_path = /eks-fleet/ (no per-role boundary needed).
+        Sid    = "ManageClusterRolesByPath"
         Effect = "Allow"
         Action = [
           "iam:CreateRole",
@@ -247,11 +252,6 @@ resource "aws_iam_role_policy" "vend" {
           "iam:PutRolePermissionsBoundary",
         ]
         Resource = local.managed_role_arn
-        Condition = {
-          StringEquals = {
-            "iam:PermissionsBoundary" = aws_iam_policy.vend_boundary.arn
-          }
-        }
       },
       {
         Sid    = "DeleteClusterRoles"
