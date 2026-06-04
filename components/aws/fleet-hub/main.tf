@@ -109,6 +109,9 @@ resource "aws_iam_policy" "hub_boundary" {
           "kms:*",
           "logs:*",
           "cloudwatch:*",
+          # Karpenter interruption handling: EventBridge rules + an SQS queue.
+          "events:*",
+          "sqs:*",
           "ssm:*",
           "s3:*",
           "sts:AssumeRole",
@@ -211,6 +214,9 @@ resource "aws_iam_role_policy" "hub" {
           "kms:*",
           "logs:*",
           "cloudwatch:*",
+          # Karpenter interruption handling: EventBridge rules + an SQS queue.
+          "events:*",
+          "sqs:*",
           "tag:GetResources",
         ]
         Resource = "*"

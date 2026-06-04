@@ -73,6 +73,9 @@ resource "aws_iam_policy" "vend_boundary" {
           "kms:*",
           "logs:*",
           "cloudwatch:*",
+          # Karpenter interruption handling: EventBridge rules + an SQS queue.
+          "events:*",
+          "sqs:*",
           "ssm:*",
           "sts:AssumeRole",
           "sts:TagSession",
@@ -174,6 +177,9 @@ resource "aws_iam_role_policy" "vend" {
           "kms:*",
           "logs:*",
           "cloudwatch:*",
+          # Karpenter interruption handling: EventBridge rules + an SQS queue.
+          "events:*",
+          "sqs:*",
           "tag:GetResources",
         ]
         Resource = "*"
