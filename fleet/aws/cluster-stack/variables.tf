@@ -28,6 +28,12 @@ variable "external_id" {
   default     = "eks-fleet"
 }
 
+variable "bootstrap_access_role_arn" {
+  description = "IAM role granted cluster-admin via an EKS access entry so the cross-account bootstrap Workspace's ambient get-token can reach this cluster's API — set it to the hub's Crossplane role for cross-account vends. Empty (default) = same-account, where the creator is already admin."
+  type        = string
+  default     = ""
+}
+
 variable "cluster_iam_role_path" {
   description = "IAM path for the cluster's IAM roles + policies. \"/eks-fleet/\" for cross-account fleet-vend gating; \"/\" (default) for same-account."
   type        = string
