@@ -1,5 +1,5 @@
 /**
- * dispatch-platform — AWS substrate for the dispatch newsletter Platform
+ * digest-pipeline-platform — AWS substrate for the digest-pipeline newsletter Platform
  * tenant. Single-tenant by design (same rationale as marshal-platform
  * and slack-knowledge-bot-platform).
  *
@@ -13,17 +13,17 @@
  *     IRSA policy scopes SendEmail to that identity ARN.
  *   - IRSA role bundling Aurora-via-secret, S3 R/W, SES SendEmail,
  *     Bedrock InvokeModel (Claude Sonnet 4 / 4.6), and Secrets
- *     Manager Read on dispatch/<env>/*.
+ *     Manager Read on digest-pipeline/<env>/*.
  *
- * Wired by live/_envcommon/aws/dispatch-platform.hcl. The chart's
+ * Wired by live/_envcommon/aws/digest-pipeline-platform.hcl. The chart's
  * ExternalSecret aggregates four Secrets Manager entries
  * (db-credentials from RDS, approvers + workos-directory +
  * grafana-cloud from the operator-seeded set) into one k8s Secret.
  */
 
 locals {
-  prefix      = "dispatch-${var.environment}"
-  common_tags = merge({ Component = "dispatch-platform", Tenant = "dispatch" }, var.tags)
+  prefix      = "digest-pipeline-${var.environment}"
+  common_tags = merge({ Component = "digest-pipeline-platform", Tenant = "digest-pipeline" }, var.tags)
 }
 
 data "aws_caller_identity" "current" {}

@@ -1,11 +1,11 @@
 /**
- * IRSA role for dispatch's shared ServiceAccount (used by pipeline,
+ * IRSA role for digest-pipeline's shared ServiceAccount (used by pipeline,
  * api, and web Deployments in the chart, plus the migrate-job hook).
  * One consolidated inline policy covers everything the Platform CR's
  * placeholder ARNs reference.
  */
 
-module "dispatch_irsa" {
+module "digest_pipeline_irsa" {
   source = "../../../modules/aws/workload-identity"
 
   role_name         = "${local.prefix}-platform"
@@ -37,8 +37,8 @@ module "dispatch_irsa" {
         "ses:GetSendQuota",
       ]
       Resource = [
-        aws_sesv2_email_identity.dispatch.arn,
-        aws_sesv2_configuration_set.dispatch.arn,
+        aws_sesv2_email_identity.digest_pipeline.arn,
+        aws_sesv2_configuration_set.digest_pipeline.arn,
       ]
     },
     {
@@ -57,13 +57,13 @@ module "dispatch_irsa" {
       ]
     },
     {
-      # Secrets Manager: dispatch/<env>/db-credentials (managed by RDS),
+      # Secrets Manager: digest-pipeline/<env>/db-credentials (managed by RDS),
       # plus operator-seeded approvers, workos-directory, grafana-cloud.
       # The chart's ExternalSecret resolves all four.
       Effect = "Allow"
       Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
       Resource = [
-        "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:dispatch/${var.environment}/*",
+        "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:digest-pipeline/${var.environment}/*",
         # RDS master credentials live at the secret-arn the Aurora
         # module manages; pulled by ARN rather than path because the
         # module owns the naming.

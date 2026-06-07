@@ -34,19 +34,19 @@ variable "oidc_issuer" {
 }
 
 variable "namespace" {
-  description = "Kubernetes namespace where the dispatch Platform tenant runs."
+  description = "Kubernetes namespace where the digest-pipeline Platform tenant runs."
   type        = string
   default     = "tenants-protohype"
 }
 
 variable "service_account" {
-  description = "Kubernetes ServiceAccount name dispatch's chart binds to."
+  description = "Kubernetes ServiceAccount name digest-pipeline's chart binds to."
   type        = string
-  default     = "dispatch"
+  default     = "digest-pipeline"
 }
 
 variable "ses_sending_domain" {
-  description = "Verified SES sending domain (e.g., dispatch.example.com). Required — SES SendEmail policy is scoped to the identity ARN derived from this. Set per-env via the live terragrunt.hcl."
+  description = "Verified SES sending domain (e.g., digest-pipeline.example.com). Required — SES SendEmail policy is scoped to the identity ARN derived from this. Set per-env via the live terragrunt.hcl."
   type        = string
 }
 

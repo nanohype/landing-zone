@@ -1,5 +1,5 @@
 /**
- * S3 buckets for dispatch.
+ * S3 buckets for digest-pipeline.
  *
  * voice-baseline:
  *   Immutable corpus of voice-baseline examples. Pipeline reads from

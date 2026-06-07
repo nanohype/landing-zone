@@ -1,6 +1,6 @@
 output "irsa_role_arn" {
-  description = "IAM role ARN for the dispatch ServiceAccount. The eks-agent-platform operator reconciles this onto the chart's ServiceAccount's eks.amazonaws.com/role-arn annotation."
-  value       = module.dispatch_irsa.iam_role_arn
+  description = "IAM role ARN for the digest-pipeline ServiceAccount. The eks-agent-platform operator reconciles this onto the chart's ServiceAccount's eks.amazonaws.com/role-arn annotation."
+  value       = module.digest_pipeline_irsa.iam_role_arn
 }
 
 output "aurora_cluster_endpoint" {
@@ -15,7 +15,7 @@ output "aurora_cluster_port" {
 
 output "aurora_database_name" {
   description = "Default database name."
-  value       = "dispatch"
+  value       = "digest_pipeline"
 }
 
 output "aurora_master_user_secret_arn" {
@@ -35,15 +35,15 @@ output "raw_aggregations_bucket_name" {
 
 output "ses_identity_arn" {
   description = "SES v2 verified email identity ARN. The IRSA policy scopes ses:SendEmail to this."
-  value       = aws_sesv2_email_identity.dispatch.arn
+  value       = aws_sesv2_email_identity.digest_pipeline.arn
 }
 
 output "ses_configuration_set_name" {
   description = "SES configuration set name for per-send event tracking."
-  value       = aws_sesv2_configuration_set.dispatch.configuration_set_name
+  value       = aws_sesv2_configuration_set.digest_pipeline.configuration_set_name
 }
 
 output "ses_dkim_tokens" {
   description = "DKIM tokens emitted by SES. Publish as three CNAME records (<token>._domainkey.<domain>) in the sending domain's hosted zone before SES verifies the identity."
-  value       = aws_sesv2_email_identity.dispatch.dkim_signing_attributes[0].tokens
+  value       = aws_sesv2_email_identity.digest_pipeline.dkim_signing_attributes[0].tokens
 }

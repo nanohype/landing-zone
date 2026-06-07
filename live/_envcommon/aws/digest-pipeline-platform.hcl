@@ -1,12 +1,16 @@
 /**
- * dispatch-platform — env-shared inputs and dependency wiring.
+ * digest-pipeline-platform — env-shared inputs and dependency wiring.
  *
  * Per-env overrides go in
- * live/aws/<account>/<region>/<env>/dispatch-platform/terragrunt.hcl.
+ * live/aws/<account>/<region>/<env>/digest-pipeline-platform/terragrunt.hcl.
  *
  * Dependency wiring on network + cluster components; per-env input
  * for ses_sending_domain (no default — must be set explicitly).
  */
+
+terraform {
+  source = "${dirname(find_in_parent_folders("cloud.hcl"))}/../..//components/aws/digest-pipeline-platform"
+}
 
 dependency "network" {
   config_path = "${get_path_relative_to_include("live")}/../network"

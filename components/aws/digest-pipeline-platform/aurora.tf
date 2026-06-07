@@ -20,7 +20,7 @@ resource "aws_db_subnet_group" "aurora" {
 
 resource "aws_security_group" "aurora" {
   name_prefix = "${local.prefix}-aurora-"
-  description = "Security group for Aurora PostgreSQL — dispatch ${var.environment}"
+  description = "Security group for Aurora PostgreSQL — digest-pipeline ${var.environment}"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -49,8 +49,8 @@ module "aurora" {
   engine_mode    = "provisioned"
   engine_version = "16.6"
 
-  database_name   = "dispatch"
-  master_username = "dispatch_admin"
+  database_name   = "digest_pipeline"
+  master_username = "digest_pipeline_admin"
 
   manage_master_user_password = true
 
