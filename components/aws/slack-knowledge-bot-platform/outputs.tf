@@ -59,6 +59,6 @@ output "aurora_cluster_port" {
 }
 
 output "aurora_master_user_secret_arn" {
-  description = "Secrets Manager ARN holding RDS master credentials. SlackKnowledgeBot points its db-credentials ExternalSecret at this name; the chart resolves username + password via External Secrets at pod start."
+  description = "Secrets Manager ARN holding RDS master credentials. slack-knowledge-bot points its db-credentials ExternalSecret at this name; the chart resolves username + password via External Secrets at pod start."
   value       = module.aurora.cluster_master_user_secret[0].secret_arn
 }

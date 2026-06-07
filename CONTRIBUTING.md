@@ -9,8 +9,8 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 ## Development Workflow
 
 1. **Branch** -- create a feature branch from `main`
-2. **Validate locally** -- `make fmt-check && make validate CLOUD=<cloud> && make lint CLOUD=<cloud>`
-3. **Plan against dev** -- `make plan CLOUD=<cloud> ACCOUNT=workload-dev REGION=<region> ENVIRONMENT=dev COMPONENT=<name>`
+2. **Validate locally** -- `task fmt:check && task validate CLOUD=<cloud> && task lint CLOUD=<cloud>`
+3. **Plan against dev** -- `task plan CLOUD=<cloud> ACCOUNT=workload-dev REGION=<region> ENVIRONMENT=dev COMPONENT=<name>`
 4. **Open a PR** -- CI runs fmt, validate (per cloud/component matrix), tflint (per cloud), checkov, and plan matrix
 5. **Review** -- get approval, verify plan output in CI
 6. **Merge** -- deploy via `deploy.yml` workflow dispatch

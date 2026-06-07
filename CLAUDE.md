@@ -5,21 +5,21 @@ Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructur
 ## Build & Validate
 
 ```bash
-make fmt                                              # format all .tf files
-make fmt-check                                        # check formatting (CI uses this)
-make validate CLOUD=aws                               # init + validate every AWS component
-make validate CLOUD=gcp                               # init + validate every GCP component
-make validate CLOUD=azure                             # init + validate every Azure component
-make lint CLOUD=aws                                   # tflint with AWS plugin
-make lint CLOUD=gcp                                   # tflint with GCP plugin
-make lint CLOUD=azure                                 # tflint with Azure plugin
-make plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
-make apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+task fmt                                              # format all .tf files
+task fmt:check                                        # check formatting (CI uses this)
+task validate CLOUD=aws                               # init + validate every AWS component
+task validate CLOUD=gcp                               # init + validate every GCP component
+task validate CLOUD=azure                             # init + validate every Azure component
+task lint CLOUD=aws                                   # tflint with AWS plugin
+task lint CLOUD=gcp                                   # tflint with GCP plugin
+task lint CLOUD=azure                                 # tflint with Azure plugin
+task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 ```
 
 ## Architecture
 
-- **24 AWS components**, **17 GCP components**, **17 Azure components** across 3 clouds
+- **33 AWS components**, **17 GCP components**, **19 Azure components** across 3 clouds
 - **4 environments** per cloud: dev, staging, production, org (AWS management account)
 - **Multi-account isolation:** workload-dev, workload-staging, workload-prod, management (AWS)
 - **Multi-region support:** us-west-2 (AWS), us-central1 (GCP), westus2 (Azure)
@@ -56,7 +56,7 @@ Tenant modules live in `components/aws/{name}/modules/tenant/`.
 
 ```
 components/
-  aws/                     # 24 AWS OpenTofu root modules
+  aws/                     # 33 AWS OpenTofu root modules
     {name}/
       main.tf
       variables.tf
@@ -108,10 +108,10 @@ live/
 
 ## Testing Changes
 
-1. `make fmt-check` — formatting
-2. `make validate CLOUD=aws` — syntax + provider validation
-3. `make lint CLOUD=aws` — tflint rules
-4. `make plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<name>` — dry-run against dev
+1. `task fmt:check` — formatting
+2. `task validate CLOUD=aws` — syntax + provider validation
+3. `task lint CLOUD=aws` — tflint rules
+4. `task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<name>` — dry-run against dev
 
 ## CI/CD
 

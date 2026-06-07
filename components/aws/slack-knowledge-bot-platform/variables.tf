@@ -9,7 +9,7 @@ variable "region" {
 }
 
 variable "vpc_id" {
-  description = "VPC ID. SlackKnowledgeBot's RDS Aurora + ElastiCache Redis sit in private subnets in this VPC."
+  description = "VPC ID. slack-knowledge-bot's RDS Aurora + ElastiCache Redis sit in private subnets in this VPC."
   type        = string
 }
 

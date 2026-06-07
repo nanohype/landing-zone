@@ -55,7 +55,7 @@ variable "identity_cache_ttl_seconds" {
 }
 
 variable "sqs_visibility_timeout_seconds" {
-  description = "SQS visibility timeout for the incident-events queue. IncidentResponse's processor uses 300s per its SqsConsumer config."
+  description = "SQS visibility timeout for the incident-events queue. incident-response's processor uses 300s per its SqsConsumer config."
   type        = number
   default     = 300
 }
