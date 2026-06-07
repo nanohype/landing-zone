@@ -1,5 +1,5 @@
 locals {
-  environment         = "prod"
+  environment         = "production"
   cost_center         = "platform-engineering"
   business_unit       = "engineering"
   data_classification = "confidential"
