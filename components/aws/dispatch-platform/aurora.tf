@@ -4,7 +4,7 @@
  * hook (`npm run migrate:up` against the api image) before any pipeline/
  * api/web pod from the new version starts.
  *
- * Module mirrors druid + almanac-platform: terraform-aws-modules/
+ * Module mirrors druid + slack-knowledge-bot-platform: terraform-aws-modules/
  * rds-aurora/aws ~9.0, db.serverless instance, security group scoped
  * to the EKS cluster SG.
  */

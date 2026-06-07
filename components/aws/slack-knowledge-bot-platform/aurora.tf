@@ -1,5 +1,5 @@
 /**
- * Aurora Serverless v2 (PostgreSQL) — retrieval backend for almanac's
+ * Aurora Serverless v2 (PostgreSQL) — retrieval backend for slack-knowledge-bot's
  * pgvector + BM25 hybrid search. The pgvector extension itself is
  * created at app bootstrap (CREATE EXTENSION vector + table DDL in
  * src/rag/backends/pgvector-schema.ts) — Aurora just supplies the
@@ -11,7 +11,7 @@
  * restricted to the EKS cluster SG.
  *
  * Master credentials managed by RDS into a Secrets Manager secret named
- * by the RDS module; almanac/<env>/db-credentials is the canonical
+ * by the RDS module; slack-knowledge-bot/<env>/db-credentials is the canonical
  * pointer that the chart's ExternalSecret resolves at pod start.
  */
 
@@ -26,7 +26,7 @@ resource "aws_db_subnet_group" "aurora" {
 
 resource "aws_security_group" "aurora" {
   name_prefix = "${local.prefix}-aurora-"
-  description = "Security group for Aurora PostgreSQL — almanac ${var.environment}"
+  description = "Security group for Aurora PostgreSQL — slack-knowledge-bot ${var.environment}"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -55,8 +55,8 @@ module "aurora" {
   engine_mode    = "provisioned"
   engine_version = "16.6"
 
-  database_name   = "almanac"
-  master_username = "almanac_admin"
+  database_name   = "slack_knowledge_bot"
+  master_username = "slack_knowledge_bot_admin"
 
   manage_master_user_password = true
 

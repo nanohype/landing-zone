@@ -1,7 +1,7 @@
 /**
  * competitive-intelligence-platform — AWS substrate for the
  * competitive-intelligence Platform tenant of the protohype team.
- * Single-tenant by design (same rationale as almanac-platform).
+ * Single-tenant by design (same rationale as slack-knowledge-bot-platform).
  *
  * Resources:
  *   - Aurora Serverless v2 (PostgreSQL): retrieval backend with the

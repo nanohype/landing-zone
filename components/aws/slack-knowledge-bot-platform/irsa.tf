@@ -1,5 +1,5 @@
 /**
- * IRSA role for almanac's shared ServiceAccount (used by both the main
+ * IRSA role for slack-knowledge-bot's shared ServiceAccount (used by both the main
  * application pod and the audit-consumer Deployment). One consolidated
  * inline policy covers every action the Platform CR's placeholder ARNs
  * reference.
@@ -8,7 +8,7 @@
  * chart's ServiceAccount's eks.amazonaws.com/role-arn annotation.
  */
 
-module "almanac_irsa" {
+module "slack_knowledge_bot_irsa" {
   source = "../../../modules/aws/workload-identity"
 
   role_name         = "${local.prefix}-platform"
@@ -93,7 +93,7 @@ module "almanac_irsa" {
       Effect = "Allow"
       Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
       Resource = [
-        "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:almanac/${var.environment}/*",
+        "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:slack-knowledge-bot/${var.environment}/*",
       ]
     },
     {

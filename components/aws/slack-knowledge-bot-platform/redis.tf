@@ -1,5 +1,5 @@
 /**
- * ElastiCache Redis replication group — shared state for almanac's
+ * ElastiCache Redis replication group — shared state for slack-knowledge-bot's
  * sliding-window rate limiter (src/ratelimit/redis-limiter.ts). Multi-
  * instance pods cannot use in-memory Maps; the limiter would multiply
  * the actual limit by replica count without a shared backend.
@@ -17,7 +17,7 @@ resource "aws_elasticache_subnet_group" "redis" {
 
 resource "aws_security_group" "redis" {
   name_prefix = "${local.prefix}-redis-"
-  description = "Security group for ElastiCache Redis — almanac ${var.environment}"
+  description = "Security group for ElastiCache Redis — slack-knowledge-bot ${var.environment}"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -39,7 +39,7 @@ resource "aws_security_group" "redis" {
 
 resource "aws_elasticache_replication_group" "rate_limit" {
   replication_group_id = "${local.prefix}-ratelimit"
-  description          = "almanac ${var.environment} rate-limiting Redis"
+  description          = "slack-knowledge-bot ${var.environment} rate-limiting Redis"
 
   engine             = "redis"
   engine_version     = "7.1"
