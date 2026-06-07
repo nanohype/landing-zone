@@ -1,10 +1,10 @@
 /**
  * SES verified sending identity + configuration set.
  *
- * The verified identity is a domain (dispatch.example.com); DKIM
+ * The verified identity is a domain (digest-pipeline.example.com); DKIM
  * tokens published in DNS authorize SES to send on its behalf. The
  * configuration set tracks per-send events for the Grafana
- * `dispatch.email.sent` metric.
+ * `digest-pipeline.email.sent` metric.
  *
  * IRSA policy in irsa.tf scopes ses:SendEmail / ses:SendRawEmail to
  * the identity ARN built from var.ses_sending_domain.
@@ -16,13 +16,13 @@
  * the identity in "pending" state.
  */
 
-resource "aws_sesv2_email_identity" "dispatch" {
+resource "aws_sesv2_email_identity" "digest_pipeline" {
   email_identity = var.ses_sending_domain
 
   tags = local.common_tags
 }
 
-resource "aws_sesv2_configuration_set" "dispatch" {
+resource "aws_sesv2_configuration_set" "digest_pipeline" {
   configuration_set_name = "${local.prefix}-newsletter"
 
   delivery_options {

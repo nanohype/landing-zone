@@ -3,7 +3,7 @@ include "root" {
 }
 
 include "envcommon" {
-  path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/dispatch-platform.hcl"
+  path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/digest-pipeline-platform.hcl"
   merge_strategy = "deep"
 }
 
@@ -18,7 +18,7 @@ inputs = {
   # SES verified sending domain for dev. Real-mail can be disabled by
   # leaving this in the SES sandbox (default for new identities) — only
   # the verified domain can receive at first.
-  ses_sending_domain = "dispatch-dev.example.com"
+  ses_sending_domain = "digest-pipeline-dev.example.com"
 
   raw_aggregations_lifecycle_days = 30
 }

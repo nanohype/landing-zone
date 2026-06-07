@@ -3,7 +3,7 @@ include "root" {
 }
 
 include "envcommon" {
-  path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/dispatch-platform.hcl"
+  path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/digest-pipeline-platform.hcl"
   merge_strategy = "deep"
 }
 
@@ -14,5 +14,5 @@ inputs = {
   rds_max_acu               = 4
   rds_backup_retention_days = 7
 
-  ses_sending_domain = "dispatch-staging.example.com"
+  ses_sending_domain = "digest-pipeline-staging.example.com"
 }
