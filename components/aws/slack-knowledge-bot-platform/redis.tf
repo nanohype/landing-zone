@@ -38,7 +38,10 @@ resource "aws_security_group" "redis" {
 }
 
 resource "aws_elasticache_replication_group" "rate_limit" {
-  replication_group_id = "${local.prefix}-ratelimit"
+  # ElastiCache caps replication_group_id at 40 chars. The prefix
+  # (slack-knowledge-bot-<env>) is already 30 in production, so a short
+  # "-rl" suffix keeps headroom; the description carries the full meaning.
+  replication_group_id = "${local.prefix}-rl"
   description          = "slack-knowledge-bot ${var.environment} rate-limiting Redis"
 
   engine             = "redis"
