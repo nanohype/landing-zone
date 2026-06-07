@@ -20,7 +20,7 @@ locals {
 dependency "cluster" {
   config_path = "../cluster"
   mock_outputs = {
-    oidc_issuer_url = "https://mock.oic.prod-aks.azure.com/mock"
+    oidc_issuer_url = "https://mock.oic.production-aks.azure.com/mock"
   }
 }
 
