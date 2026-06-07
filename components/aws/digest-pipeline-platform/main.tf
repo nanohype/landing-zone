@@ -1,6 +1,6 @@
 /**
  * digest-pipeline-platform — AWS substrate for the digest-pipeline newsletter Platform
- * tenant. Single-tenant by design (same rationale as marshal-platform
+ * tenant. Single-tenant by design (same rationale as incident-response-platform
  * and slack-knowledge-bot-platform).
  *
  * Resources:

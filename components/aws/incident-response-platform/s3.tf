@@ -1,11 +1,11 @@
 /**
- * Long-term audit archive bucket for marshal. The processor pod can write
+ * Long-term audit archive bucket for incident-response. The processor pod can write
  * postmortem PDFs, incident timeline snapshots, and any other artifact
  * worth keeping beyond the DDB audit table's TTL window.
  *
  * The chart's Platform CR also references this bucket as
  * spec.storage.bucket — the eks-agent-platform operator applies the
- * bucket policy that scopes access to the marshal IRSA role.
+ * bucket policy that scopes access to the incident-response IRSA role.
  */
 
 resource "aws_s3_bucket" "audit" {

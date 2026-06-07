@@ -3,7 +3,7 @@ include "root" {
 }
 
 include "envcommon" {
-  path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/marshal-platform.hcl"
+  path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/incident-response-platform.hcl"
   merge_strategy = "deep"
 }
 
