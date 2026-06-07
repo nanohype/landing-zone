@@ -1,5 +1,5 @@
 /**
- * DynamoDB tables for almanac.
+ * DynamoDB tables for slack-knowledge-bot.
  *
  * tokens — per-(user, provider) OAuth token store.
  *   PK userId / SK provider. KMS-encrypted payload via the token-store

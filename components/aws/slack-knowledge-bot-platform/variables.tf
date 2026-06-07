@@ -9,7 +9,7 @@ variable "region" {
 }
 
 variable "vpc_id" {
-  description = "VPC ID. Almanac's RDS Aurora + ElastiCache Redis sit in private subnets in this VPC."
+  description = "VPC ID. SlackKnowledgeBot's RDS Aurora + ElastiCache Redis sit in private subnets in this VPC."
   type        = string
 }
 
@@ -34,15 +34,15 @@ variable "oidc_issuer" {
 }
 
 variable "namespace" {
-  description = "Kubernetes namespace where the almanac Platform tenant runs. Matches the Platform CR's metadata.namespace."
+  description = "Kubernetes namespace where the slack-knowledge-bot Platform tenant runs. Matches the Platform CR's metadata.namespace."
   type        = string
   default     = "tenants-protohype"
 }
 
 variable "service_account" {
-  description = "Kubernetes ServiceAccount name almanac's chart binds to. Matches the chart's serviceaccount.yaml output."
+  description = "Kubernetes ServiceAccount name slack-knowledge-bot's chart binds to. Matches the chart's serviceaccount.yaml output."
   type        = string
-  default     = "almanac"
+  default     = "slack-knowledge-bot"
 }
 
 variable "deletion_protection" {

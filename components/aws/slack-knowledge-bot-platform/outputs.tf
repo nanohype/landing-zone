@@ -1,6 +1,6 @@
 output "irsa_role_arn" {
-  description = "IAM role ARN for the almanac ServiceAccount. The eks-agent-platform operator reconciles this onto the chart's ServiceAccount's eks.amazonaws.com/role-arn annotation."
-  value       = module.almanac_irsa.iam_role_arn
+  description = "IAM role ARN for the slack-knowledge-bot ServiceAccount. The eks-agent-platform operator reconciles this onto the chart's ServiceAccount's eks.amazonaws.com/role-arn annotation."
+  value       = module.slack_knowledge_bot_irsa.iam_role_arn
 }
 
 output "tokens_table_name" {
@@ -59,6 +59,6 @@ output "aurora_cluster_port" {
 }
 
 output "aurora_master_user_secret_arn" {
-  description = "Secrets Manager ARN holding RDS master credentials. Almanac points its db-credentials ExternalSecret at this name; the chart resolves username + password via External Secrets at pod start."
+  description = "Secrets Manager ARN holding RDS master credentials. SlackKnowledgeBot points its db-credentials ExternalSecret at this name; the chart resolves username + password via External Secrets at pod start."
   value       = module.aurora.cluster_master_user_secret[0].secret_arn
 }

@@ -1,7 +1,7 @@
 /**
  * KMS key for per-user OAuth token envelope encryption.
  *
- * Almanac's DDBKmsTokenStorage encrypts each user's token payload with a
+ * SlackKnowledgeBot's DDBKmsTokenStorage encrypts each user's token payload with a
  * data key wrapped by this CMK, binding the ciphertext to an
  * EncryptionContext of {userId, provider} so a leaked blob can't be
  * decrypted for a different pair. Rotation is annual.

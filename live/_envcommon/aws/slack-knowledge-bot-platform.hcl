@@ -1,14 +1,18 @@
 /**
- * almanac-platform — env-shared inputs and dependency wiring.
+ * slack-knowledge-bot-platform — env-shared inputs and dependency wiring.
  *
  * Per-env overrides go in
- * live/aws/<account>/<region>/<env>/almanac-platform/terragrunt.hcl.
+ * live/aws/<account>/<region>/<env>/slack-knowledge-bot-platform/terragrunt.hcl.
  *
  * Single-tenant component, so this envcommon file is dependency wiring:
  * the cluster component supplies OIDC bits for the IRSA module's trust
  * policy; the network component supplies vpc_id + private subnets +
  * cluster security group for the Aurora + Redis ingress rules.
  */
+
+terraform {
+  source = "${dirname(find_in_parent_folders("cloud.hcl"))}/../..//components/aws/slack-knowledge-bot-platform"
+}
 
 dependency "network" {
   config_path = "${get_path_relative_to_include("live")}/../network"

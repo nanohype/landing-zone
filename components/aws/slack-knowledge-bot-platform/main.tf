@@ -1,5 +1,5 @@
 /**
- * almanac-platform — AWS substrate for the almanac Slack-knowledge-bot
+ * slack-knowledge-bot-platform — AWS substrate for the slack-knowledge-bot Slack-knowledge-bot
  * Platform tenant. Single-tenant by design (same rationale as
  * marshal-platform).
  *
@@ -15,14 +15,14 @@
  *   - IRSA role bundling DDB / SQS / S3 / KMS / Bedrock / Secrets Manager
  *     into one policy attached to the shared ServiceAccount
  *
- * Wired by live/_envcommon/aws/almanac-platform.hcl. Output ARNs flow
+ * Wired by live/_envcommon/aws/slack-knowledge-bot-platform.hcl. Output ARNs flow
  * into the slack-knowledge-bot Platform CR's spec.irsa.policies via the
  * operator-side identity propagation layer.
  */
 
 locals {
-  prefix      = "almanac-${var.environment}"
-  common_tags = merge({ Component = "almanac-platform", Tenant = "almanac" }, var.tags)
+  prefix      = "slack-knowledge-bot-${var.environment}"
+  common_tags = merge({ Component = "slack-knowledge-bot-platform", Tenant = "slack-knowledge-bot" }, var.tags)
 }
 
 data "aws_caller_identity" "current" {}

@@ -5,7 +5,7 @@
  * CREATE EXTENSION vector + table DDL) — Aurora just supplies the
  * Postgres engine + storage.
  *
- * Module mirrors the almanac-platform tenant Aurora setup
+ * Module mirrors the slack-knowledge-bot-platform tenant Aurora setup
  * (terraform-aws-modules/rds-aurora/aws ~9.0): one db.serverless
  * instance with min/max ACU sized via per-env vars, security group
  * restricted to the EKS cluster SG.

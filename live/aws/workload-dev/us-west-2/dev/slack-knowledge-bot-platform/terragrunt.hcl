@@ -3,7 +3,7 @@ include "root" {
 }
 
 include "envcommon" {
-  path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/almanac-platform.hcl"
+  path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/slack-knowledge-bot-platform.hcl"
   merge_strategy = "deep"
 }
 

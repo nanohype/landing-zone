@@ -1,7 +1,7 @@
 /**
  * dispatch-platform — AWS substrate for the dispatch newsletter Platform
  * tenant. Single-tenant by design (same rationale as marshal-platform
- * and almanac-platform).
+ * and slack-knowledge-bot-platform).
  *
  * Resources:
  *   - Aurora Serverless v2 (PostgreSQL): drafts + audit_events tables.
