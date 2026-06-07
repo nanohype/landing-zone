@@ -1,6 +1,6 @@
 # The cluster stack: network -> cluster, wired explicitly. This is the tofu-native
 # equivalent of the terragrunt dependency chain (live/_envcommon/aws/cluster.hcl
-# feeds the network's vpc_id + subnets into the cluster). A provider-terraform
+# feeds the network's vpc_id + subnets into the cluster). A provider-opentofu
 # Workspace runs this root to vend one cluster; outputs.tf returns what the
 # Cluster claim's status needs. Adding cluster-bootstrap + agent-iam to the chain
 # is the next step (they pull k8s/helm providers, so they land in a sibling root).

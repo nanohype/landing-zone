@@ -1,4 +1,4 @@
-# Inputs a provider-terraform Workspace passes (eks-fleet's Cluster composition).
+# Inputs a provider-opentofu Workspace passes (eks-fleet's Cluster composition).
 # Names + defaults track the wrapped components/aws/{network,cluster} modules.
 
 variable "region" {

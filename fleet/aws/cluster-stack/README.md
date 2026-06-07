@@ -4,7 +4,7 @@ The plain-tofu entrypoint the [`eks-fleet`](https://github.com/nanohype/eks-flee
 cluster factory runs.
 
 `eks-fleet` vends clusters from a `Cluster` claim; its Crossplane composition
-renders a provider-terraform `Workspace` that runs **this** root. provider-terraform
+renders a provider-opentofu `Workspace` that runs **this** root. provider-opentofu
 runs the `tofu` binary, not `terragrunt`, so it can't point at a `components/aws/*`
 directory directly — those rely on terragrunt-generated provider blocks +
 `_envcommon` dependency wiring. This root makes both explicit:
@@ -23,7 +23,7 @@ the cluster module gains a variable, add it here and to the eks-fleet `Cluster` 
 tofu init -backend=false        # offline check — no S3, no AWS creds
 tofu validate
 
-# real run (provider-terraform does this, with the S3 backend + assume_role):
+# real run (provider-opentofu does this, with the S3 backend + assume_role):
 tofu init \
   -backend-config=bucket=nanohype-eks-fleet-tfstate \
   -backend-config=key=fleet/<name>/terraform.tfstate \

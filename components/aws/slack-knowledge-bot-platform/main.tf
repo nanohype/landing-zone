@@ -1,5 +1,5 @@
 /**
- * slack-knowledge-bot-platform — AWS substrate for the slack-knowledge-bot Slack-knowledge-bot
+ * slack-knowledge-bot-platform — AWS substrate for the slack-knowledge-bot Slack knowledge bot
  * Platform tenant. Single-tenant by design (same rationale as
  * incident-response-platform).
  *

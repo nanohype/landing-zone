@@ -113,23 +113,23 @@ git clone <repo-url> && cd landing-zone
 ./scripts/init-backend-azure.sh <subscription_id> <region>
 
 # 3. Plan all AWS dev components
-make plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 
 # 4. Apply a single component
-make apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
 ```
 
 ## Makefile Targets
 
 ```
-make fmt              Format all OpenTofu files
-make fmt-check        Check formatting without modifying files
-make validate         Validate all components for CLOUD (default: aws)
-make lint             Run TFLint for CLOUD (default: aws)
-make plan             Plan for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT
-make apply            Apply for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT
-make init-backend     Create backend storage for CLOUD
-make help             Show all targets
+task fmt              Format all OpenTofu files
+task fmt:check        Check formatting without modifying files
+task validate         Validate all components for CLOUD (default: aws)
+task lint             Run TFLint for CLOUD (default: aws)
+task plan             Plan for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT
+task apply            Apply for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT
+task init-backend     Create backend storage for CLOUD
+task help             Show all targets
 ```
 
 ## CI/CD

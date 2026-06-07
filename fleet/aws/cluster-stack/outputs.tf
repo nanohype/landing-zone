@@ -1,4 +1,4 @@
-# Returned to the provider-terraform Workspace's status.atProvider.outputs, which
+# Returned to the provider-opentofu Workspace's status.atProvider.outputs, which
 # the eks-fleet Cluster composition maps onto the claim's status. Names match the
 # Cluster XRD's status fields.
 
