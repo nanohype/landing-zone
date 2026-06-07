@@ -19,15 +19,15 @@ variable "oidc_issuer" {
 }
 
 variable "namespace" {
-  description = "Kubernetes namespace where the marshal Platform tenant runs. Matches the Platform CR's metadata.namespace (typically tenants-protohype)."
+  description = "Kubernetes namespace where the incident-response Platform tenant runs. Matches the Platform CR's metadata.namespace (typically tenants-protohype)."
   type        = string
   default     = "tenants-protohype"
 }
 
 variable "service_account" {
-  description = "Kubernetes ServiceAccount name marshal's chart binds to. Matches the chart's serviceaccount.yaml output and the Platform CR's spec.irsa.serviceAccount."
+  description = "Kubernetes ServiceAccount name incident-response's chart binds to. Matches the chart's serviceaccount.yaml output and the Platform CR's spec.irsa.serviceAccount."
   type        = string
-  default     = "marshal"
+  default     = "incident-response"
 }
 
 variable "deletion_protection" {
@@ -55,7 +55,7 @@ variable "identity_cache_ttl_seconds" {
 }
 
 variable "sqs_visibility_timeout_seconds" {
-  description = "SQS visibility timeout for the incident-events queue. Marshal's processor uses 300s per its SqsConsumer config."
+  description = "SQS visibility timeout for the incident-events queue. IncidentResponse's processor uses 300s per its SqsConsumer config."
   type        = number
   default     = 300
 }

@@ -1,7 +1,7 @@
 /**
  * slack-knowledge-bot-platform — AWS substrate for the slack-knowledge-bot Slack-knowledge-bot
  * Platform tenant. Single-tenant by design (same rationale as
- * marshal-platform).
+ * incident-response-platform).
  *
  * Resources:
  *   - KMS key for per-user OAuth token envelope encryption

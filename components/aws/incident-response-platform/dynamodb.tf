@@ -1,10 +1,10 @@
 /**
- * DynamoDB tables for marshal.
+ * DynamoDB tables for incident-response.
  *
  * incidents:
  *   PK: incident_id (String)
  *   GSI slack-channel-index: channel_id → incident_id (used by
- *   src/utils/incident-lookup.ts for channel-scoped /marshal subcommands)
+ *   src/utils/incident-lookup.ts for channel-scoped /incident-response subcommands)
  *
  * audit:
  *   PK: incident_id (String)

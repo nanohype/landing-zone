@@ -1,5 +1,5 @@
 /**
- * IRSA role for marshal's shared ServiceAccount (used by both webhook and
+ * IRSA role for incident-response's shared ServiceAccount (used by both webhook and
  * processor Deployments in the chart). The role bundles every permission
  * the Platform CR's placeholder ARNs reference into one inline policy.
  *
@@ -8,7 +8,7 @@
  * an output below for the operator-side wiring layer to consume.
  */
 
-module "marshal_irsa" {
+module "incident_response_irsa" {
   source = "../../../modules/aws/workload-identity"
 
   role_name         = "${local.prefix}-platform"
@@ -97,12 +97,12 @@ module "marshal_irsa" {
       ]
     },
     {
-      # Secrets Manager reads — marshal seeds these via scripts/seed-secrets.sh
+      # Secrets Manager reads — incident-response seeds these via scripts/seed-secrets.sh
       # before any deploy; the chart's ExternalSecret pulls them at runtime.
       Effect = "Allow"
       Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
       Resource = [
-        "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:marshal/${var.environment}/*",
+        "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:incident-response/${var.environment}/*",
       ]
     },
     {

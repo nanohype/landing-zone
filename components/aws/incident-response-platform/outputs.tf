@@ -1,6 +1,6 @@
 output "irsa_role_arn" {
-  description = "IAM role ARN for the marshal ServiceAccount. The eks-agent-platform operator reconciles this onto the chart's ServiceAccount's eks.amazonaws.com/role-arn annotation."
-  value       = module.marshal_irsa.iam_role_arn
+  description = "IAM role ARN for the incident-response ServiceAccount. The eks-agent-platform operator reconciles this onto the chart's ServiceAccount's eks.amazonaws.com/role-arn annotation."
+  value       = module.incident_response_irsa.iam_role_arn
 }
 
 output "incidents_table_name" {
@@ -44,7 +44,7 @@ output "scheduler_role_arn" {
 }
 
 output "scheduler_group_name" {
-  description = "EventBridge Scheduler group name marshal's processor creates per-incident schedules under."
+  description = "EventBridge Scheduler group name incident-response's processor creates per-incident schedules under."
   value       = aws_scheduler_schedule_group.nudges.name
 }
 

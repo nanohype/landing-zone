@@ -1,5 +1,5 @@
 /**
- * SQS FIFO queues for marshal.
+ * SQS FIFO queues for incident-response.
  *
  * incident-events: webhook ingress → processor. FIFO because each
  *   incident must dispatch through the war-room assembler exactly once.

@@ -6,7 +6,7 @@ You're an AI client (or the author of one) about to provision cloud substrate. T
 
 OpenTofu + Terragrunt monorepo for the cloud substrate every nanohype-stack app lands on. Three providers, three concerns:
 
-- **`components/aws/`** — VPC, base IAM, KMS keys, EKS cluster, cluster bootstrap, observability, secrets, gateway, governance, plus per-app `<app>-platform` single-tenant components (marshal-platform, slack-knowledge-bot-platform, digest-pipeline-platform). Shared multi-tenant components: `rag`, `pipeline`, `llm`, `governance`.
+- **`components/aws/`** — VPC, base IAM, KMS keys, EKS cluster, cluster bootstrap, observability, secrets, gateway, governance, plus per-app `<app>-platform` single-tenant components (incident-response-platform, slack-knowledge-bot-platform, digest-pipeline-platform). Shared multi-tenant components: `rag`, `pipeline`, `llm`, `governance`.
 - **`components/gcp/`** — equivalents for GCP (GKE, project IAM, KMS, observability, etc.). Same component shape, GCP primitives.
 - **`components/azure/`** — equivalents for Azure (AKS, resource-group IAM, Key Vault, etc.). Same shape, Azure primitives.
 
@@ -25,7 +25,7 @@ Every component:
 - Tags every resource with `Environment`, `ManagedBy`, `Project`, `CostCenter`, `BusinessUnit`, `DataClassification`, `Compliance`, `Repository` (default tags emitted by `live/root.hcl`).
 - For AWS: uses IRSA via the shared `modules/aws/workload-identity` module. Trust policies target the EKS cluster's OIDC provider and constrain to a specific SA in a specific namespace.
 
-The per-app `<app>-platform` pattern: when an app's resource shape doesn't generalize into existing multi-tenant components, ship a single-tenant component named `<app>-platform`. Examples: `marshal-platform`, `slack-knowledge-bot-platform`, `digest-pipeline-platform`. Each provisions the app's bespoke DDB tables, SQS queues, S3 buckets, RDS clusters, KMS keys, and the IRSA role with the consolidated inline policy. Emits `irsa_role_arn` as the output the app's chart consumes via `aws.platformRoleArn`.
+The per-app `<app>-platform` pattern: when an app's resource shape doesn't generalize into existing multi-tenant components, ship a single-tenant component named `<app>-platform`. Examples: `incident-response-platform`, `slack-knowledge-bot-platform`, `digest-pipeline-platform`. Each provisions the app's bespoke DDB tables, SQS queues, S3 buckets, RDS clusters, KMS keys, and the IRSA role with the consolidated inline policy. Emits `irsa_role_arn` as the output the app's chart consumes via `aws.platformRoleArn`.
 
 ## Add a new component
 
@@ -39,7 +39,7 @@ The per-app `<app>-platform` pattern: when an app's resource shape doesn't gener
 
 When the app's resource shape is bespoke (custom DDB schema, queues, multiple S3 buckets, app-specific KMS keys, SES identity, etc.):
 
-1. Create `components/aws/<app>-platform/` following the marshal/slack-knowledge-bot/digest-pipeline shape.
+1. Create `components/aws/<app>-platform/` following the incident-response/slack-knowledge-bot/digest-pipeline shape.
 2. Provision the app's resources directly (not as `var.tenants` entries on multi-tenant components).
 3. Consolidate all the app's IAM permissions into a single inline policy on a single IRSA role via `modules/aws/workload-identity`.
 4. Output `irsa_role_arn` (the app's chart consumes this) plus every resource name/URL the chart needs (`<table>_name`, `<queue>_url`, etc.).

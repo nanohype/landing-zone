@@ -1,12 +1,12 @@
 /**
- * EventBridge Scheduler group + role for marshal's per-incident 15-min
+ * EventBridge Scheduler group + role for incident-response's per-incident 15-min
  * nudges. The processor pod's IRSA role calls scheduler:CreateSchedule
  * inside the group when assembling each war room; the schedule's target
  * is the nudge-events SQS queue, invoked via the schedule_role assumed
  * by Scheduler itself.
  *
- * Group + Role isolation is per-environment (marshal-staging-nudges vs.
- * marshal-production-nudges). The processor's SCHEDULER_GROUP_NAME +
+ * Group + Role isolation is per-environment (incident-response-staging-nudges vs.
+ * incident-response-production-nudges). The processor's SCHEDULER_GROUP_NAME +
  * SCHEDULER_ROLE_ARN env vars come from this component's outputs.
  */
 
