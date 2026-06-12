@@ -17,7 +17,7 @@ variable "cluster_name" {
 variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "1.35"
+  default     = "1.36"
 }
 
 # Network inputs (from network component)
