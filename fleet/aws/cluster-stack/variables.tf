@@ -34,6 +34,12 @@ variable "bootstrap_access_role_arn" {
   default     = ""
 }
 
+variable "portal_access_role_arn" {
+  description = "The portal worker's per-account spoke role ARN, granted a read EKS access entry so portal can reach this cluster's API (mint tokens, watch tenants) with the same role it uses for eks:DescribeCluster. Empty (default) = portal not wired for this cluster."
+  type        = string
+  default     = ""
+}
+
 variable "cluster_iam_role_path" {
   description = "IAM path for the cluster's IAM roles + policies. \"/eks-fleet/\" for cross-account fleet-vend gating; \"/\" (default) for same-account."
   type        = string
