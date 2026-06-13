@@ -26,25 +26,19 @@ locals {
     }
   }
 
-  # portal's per-account spoke role gets a READ access entry so portal can reach
-  # the cluster API with the same role it uses for eks:DescribeCluster — mint EKS
-  # tokens + watch tenants. AmazonEKSAdminViewPolicy, not AmazonEKSViewPolicy:
-  # portal's tenant watcher lists the platform.nanohype.dev/tenants CRD, and
-  # AmazonEKSViewPolicy only covers built-in API groups (no wildcard) so that list
-  # 403s; AmazonEKSAdminViewPolicy is get/list/watch on all groups (incl. CRDs).
-  # It is read-only (no write), but DOES include Secrets — tightening this to a
-  # narrow portal-reader ClusterRole bound via kubernetes_groups is tracked in
-  # portal#49. The control-plane badge (eks:DescribeCluster) needs no entry — it's
-  # the AWS API. Empty = portal not wired for this cluster.
+  # portal's per-account spoke role gets an access entry so portal can reach the
+  # cluster API with the same role it uses for eks:DescribeCluster — mint EKS
+  # tokens + watch tenants. It maps the role to the "portal-reader" Kubernetes
+  # GROUP (no AWS managed access policy): the eks-gitops catalog binds that group
+  # to a narrow portal-reader ClusterRole (read the platform.nanohype.dev
+  # tenant/platform CRs + nodes — no Secrets, unlike the managed view policies,
+  # which either miss CRDs (View) or expose Secrets (AdminView)). The control-plane
+  # badge (eks:DescribeCluster) needs no entry — it's the AWS API. Empty = portal
+  # not wired for this cluster.
   portal_access_entries = var.portal_access_role_arn == "" ? {} : {
     portal-read = {
-      principal_arn = var.portal_access_role_arn
-      policy_associations = {
-        read = {
-          policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy"
-          access_scope = { type = "cluster" }
-        }
-      }
+      principal_arn     = var.portal_access_role_arn
+      kubernetes_groups = ["portal-reader"]
     }
   }
 }
