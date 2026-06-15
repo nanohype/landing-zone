@@ -1,10 +1,10 @@
 data "azurerm_client_config" "current" {}
 
 locals {
-  tags = {
+  tags = merge(var.tags, {
     Component = "secrets"
     Team      = var.team
-  }
+  })
 }
 
 ################################################################################

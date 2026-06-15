@@ -1,8 +1,8 @@
 locals {
-  tags = {
+  tags = merge(var.tags, {
     Component = "org-networking"
     Team      = var.team
-  }
+  })
 }
 
 ################################################################################

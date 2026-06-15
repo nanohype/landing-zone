@@ -5,4 +5,5 @@ locals {
   data_classification = "confidential"
   compliance          = "soc2"
   repository          = "nanohype/landing-zone"
+  owner               = "platform-engineering"
 }

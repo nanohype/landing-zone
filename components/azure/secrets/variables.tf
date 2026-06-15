@@ -34,3 +34,9 @@ variable "purge_protection_enabled" {
   type        = bool
   default     = true
 }
+
+variable "tags" {
+  description = "Org-wide tags injected by the root config (azurerm has no provider default_tags)."
+  type        = map(string)
+  default     = {}
+}

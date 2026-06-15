@@ -27,5 +27,4 @@ inputs = {
   oidc_provider_arn                  = dependency.cluster.outputs.oidc_provider_arn
   oidc_issuer                        = dependency.cluster.outputs.oidc_issuer
   vpc_id                             = dependency.network.outputs.vpc_id
-  team                               = "platform"
 }

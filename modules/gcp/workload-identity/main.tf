@@ -1,3 +1,7 @@
+# google_service_account has no labels argument — GCP service accounts can't
+# carry labels (unlike AWS IAM roles / Azure user-assigned identities, which
+# take var.tags). So the org-dimension tags don't attach here; the SA is
+# audited via its IAM bindings below. See the resource-tagging standard.
 resource "google_service_account" "this" {
   account_id   = var.role_name
   display_name = var.role_name

@@ -1,10 +1,10 @@
 data "azurerm_subscription" "current" {}
 
 locals {
-  tags = {
+  tags = merge(var.tags, {
     Component = "org-cost"
     Team      = var.team
-  }
+  })
 }
 
 ################################################################################

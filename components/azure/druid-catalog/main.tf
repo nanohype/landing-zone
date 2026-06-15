@@ -11,11 +11,11 @@ locals {
   postgres_admin   = "druidadmin"
   k8s_namespace    = "druid-${var.tenant_name}"
 
-  tags = {
+  tags = merge(var.tags, {
     Component = "druid-catalog"
     Tenant    = var.tenant_name
     Team      = var.team
-  }
+  })
 }
 
 data "azurerm_resource_group" "this" {

@@ -38,11 +38,6 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "team" {
-  description = "Owning team for this component"
-  type        = string
-}
-
 variable "cilium_version" {
   description = "Cilium Helm chart version"
   type        = string
@@ -89,12 +84,6 @@ variable "gitops_repo_branch" {
   description = "GitOps repository branch"
   type        = string
   default     = "main"
-}
-
-variable "tags" {
-  description = "Additional tags"
-  type        = map(string)
-  default     = {}
 }
 
 variable "enable_portal_reader" {

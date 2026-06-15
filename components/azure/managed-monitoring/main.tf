@@ -4,10 +4,10 @@ locals {
   grafana_name        = "${var.cluster_name}-grafana"
   identity_prefix     = "${var.cluster_name}-wi"
 
-  tags = {
+  tags = merge(var.tags, {
     Component = "managed-monitoring"
     Team      = var.team
-  }
+  })
 }
 
 data "azurerm_resource_group" "this" {
