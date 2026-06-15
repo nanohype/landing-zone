@@ -7,7 +7,25 @@
 
 data "aws_partition" "current" {}
 
+# Captures the vend time once and persists it in state — so Expiry is stable
+# across re-applies (a raw timestamp() would drift every plan). Only created for
+# ephemeral spokes (ttl_days > 0); persistent spokes need no expiry.
+resource "time_static" "vend" {
+  count = var.ttl_days > 0 ? 1 : 0
+}
+
 locals {
+  # resource-tagging lifecycle/expiry. Ephemeral spokes carry Expiry = vend date
+  # + ttl_days (YYYY-MM-DD); the hub reaper deletes the Cluster CR past it. These
+  # merge into the modules' var.tags (provider default_tags can't reference a
+  # resource like time_static; module inputs can).
+  lifecycle_tags = var.ttl_days > 0 ? {
+    Lifecycle = "ephemeral"
+    Expiry    = formatdate("YYYY-MM-DD", timeadd(time_static.vend[0].rfc3339, "${var.ttl_days * 24}h"))
+  } : { Lifecycle = "persistent" }
+
+  spoke_tags = merge(var.tags, local.lifecycle_tags)
+
   # Cross-account bootstrap auth: grant the hub role cluster-admin on the spoke via
   # an EKS access entry. The bootstrap Workspace mints its k8s token with ambient
   # creds (the hub IRSA) — it can't assume the vend role through `aws eks get-token`
@@ -53,7 +71,7 @@ module "network" {
   max_azs                       = var.max_azs
   nat_gateways                  = var.nat_gateways
   team                          = var.team
-  tags                          = var.tags
+  tags                          = local.spoke_tags
   enable_eks_interface_endpoint = var.enable_eks_interface_endpoint
 }
 
@@ -84,5 +102,5 @@ module "cluster" {
   access_entries = merge(local.bootstrap_access_entries, local.portal_access_entries)
 
   team = var.team
-  tags = var.tags
+  tags = local.spoke_tags
 }

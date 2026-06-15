@@ -143,3 +143,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "ttl_days" {
+  description = "Days-to-live for an ephemeral spoke. 0 (default) tags the cluster Lifecycle=persistent and it is never auto-reaped. >0 tags Lifecycle=ephemeral + Expiry=<vend date + ttl_days> (resource-tagging standard) and the hub reaper deletes the Cluster CR past that date."
+  type        = number
+  default     = 0
+}
