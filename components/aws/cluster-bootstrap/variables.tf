@@ -114,3 +114,9 @@ variable "enable_agent_platform" {
   type        = bool
   default     = true
 }
+
+variable "enable_eval_runtime" {
+  description = "Republish the eval-runner IRSA wiring (role ARN + reports bucket) as cluster-Secret annotations, read from the SSM parameters the eks-agent-platform eval-runtime component writes under /eks-agent-platform/<env>/eval-runtime/. Requires that component to have applied first. Default false; the eks-gitops operator ApplicationSet tolerates the annotations being absent (eval simply gets no IRSA), so leave it off on clusters without eval-runtime."
+  type        = bool
+  default     = false
+}
