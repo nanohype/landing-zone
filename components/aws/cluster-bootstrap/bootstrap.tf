@@ -270,11 +270,15 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
     # them as Helm values, so the operator gets its IRSA without the account ID
     # ever being committed to the public gitops repos. Annotations (not labels)
     # because ARNs contain characters that label values disallow.
-    annotations = {
+    annotations = merge({
       "eks-agent-platform/oidc-provider-arn" = var.oidc_provider_arn
       "eks-agent-platform/oidc-issuer-host"  = var.oidc_issuer
       "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.environment}-eks-agent-platform-operator"
-    }
+      }, var.enable_eval_runtime ? {
+      # eval-runner IRSA + reports bucket, read from the eval-runtime SSM params.
+      "eks-agent-platform/eval-runner-role-arn" = data.aws_ssm_parameter.eval_runner_role_arn[0].value
+      "eks-agent-platform/eval-reports-bucket"  = data.aws_ssm_parameter.eval_reports_bucket[0].value
+    } : {})
   }
 
   data = {
