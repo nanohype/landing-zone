@@ -4,10 +4,10 @@ locals {
   # Cilium pod CIDR (see components/azure/cluster + aks-gitops cilium values).
   cluster_name = "${var.environment}-${var.cluster_name}"
 
-  tags = {
+  tags = merge(var.tags, {
     Component = "network"
     Team      = var.team
-  }
+  })
 }
 
 ################################################################################

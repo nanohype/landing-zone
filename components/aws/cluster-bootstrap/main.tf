@@ -17,12 +17,12 @@ data "aws_ssm_parameter" "eval_reports_bucket" {
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-
-  tags = merge(var.tags, {
-    Component = "cluster-bootstrap"
-    Team      = var.team
-  })
 }
+
+# This component manages no taggable AWS resources — it only configures the
+# kubernetes/helm/github providers to bootstrap Cilium + ArgoCD on the cluster.
+# So it carries no tag/label set (the resource-tagging standard applies to
+# components that create cloud resources; there are none here).
 
 ################################################################################
 # Kubernetes & Helm Provider Config

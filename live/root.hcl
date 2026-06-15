@@ -24,16 +24,45 @@ locals {
   data_classification = local.env_vars.locals.data_classification
   compliance          = local.env_vars.locals.compliance
   repository          = local.env_vars.locals.repository
+
+  # Recommended-tier (own/trace/expire — see the resource-tagging standard).
+  # owner auto-fills from the env-level owner, falling back to cost_center (an
+  # env.hcl may set `owner` to override). revision is the CI commit (GITHUB_SHA),
+  # "local" off-CI. The base substrate is persistent; the vend layer is what sets
+  # lifecycle = ephemeral + an expiry on the spokes it builds.
+  owner    = try(local.env_vars.locals.owner, local.cost_center)
+  revision = substr(get_env("GITHUB_SHA", "local"), 0, 7)
+
+  # azurerm has no provider-level default_tags, so the org dims that AWS and GCP
+  # pick up from default_tags / default_labels are handed to Azure components as
+  # inputs.tags and merged onto every resource (mirrors the AWS var.tags pattern).
+  azure_tags = {
+    Environment        = local.environment
+    ManagedBy          = "opentofu"
+    Project            = "landing-zone"
+    Repository         = local.repository
+    CostCenter         = local.cost_center
+    BusinessUnit       = local.business_unit
+    DataClassification = local.data_classification
+    Compliance         = local.compliance
+    Owner              = local.owner
+    Revision           = local.revision
+    Lifecycle          = "persistent"
+  }
 }
 
 # --- Common inputs ---
 # region + environment are declared (no default) by every component, so the
 # root passes the resolved values down. Component-specific inputs (team,
-# cluster_name, tenants, …) come from each component's _envcommon/*.hcl.
-inputs = {
-  region      = local.region
-  environment = local.environment
-}
+# cluster_name, tenants, …) come from each component's _envcommon/*.hcl. Azure
+# additionally takes the org-dimension tags (no provider default_tags there).
+inputs = merge(
+  {
+    region      = local.region
+    environment = local.environment
+  },
+  local.cloud == "azure" ? { tags = local.azure_tags } : {},
+)
 
 # --- AWS Provider ---
 generate "provider_aws" {
@@ -53,6 +82,9 @@ provider "aws" {
       DataClassification = "${local.data_classification}"
       Compliance         = "${local.compliance}"
       Repository         = "${local.repository}"
+      Owner              = "${local.owner}"
+      Revision           = "${local.revision}"
+      Lifecycle          = "persistent"
     }
   }
 }
@@ -77,6 +109,9 @@ provider "google" {
     data_classification  = "${lower(replace(local.data_classification, "-", "_"))}"
     compliance           = "${lower(local.compliance)}"
     repository           = "${lower(replace(local.repository, "/", "_"))}"
+    owner                = "${lower(replace(local.owner, "-", "_"))}"
+    revision             = "${lower(local.revision)}"
+    lifecycle            = "persistent"
   }
 }
 EOF

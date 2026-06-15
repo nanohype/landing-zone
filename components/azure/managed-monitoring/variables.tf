@@ -57,3 +57,9 @@ variable "grafana_zone_redundancy_enabled" {
   type        = bool
   default     = false
 }
+
+variable "tags" {
+  description = "Org-wide tags injected by the root config (azurerm has no provider default_tags)."
+  type        = map(string)
+  default     = {}
+}

@@ -1,10 +1,10 @@
 locals {
   cluster_name = "${var.resource_group_name}-aks"
 
-  tags = {
+  tags = merge(var.tags, {
     Component = "cluster"
     Team      = var.team
-  }
+  })
 }
 
 ################################################################################

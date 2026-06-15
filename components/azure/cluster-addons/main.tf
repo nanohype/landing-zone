@@ -3,10 +3,10 @@ locals {
   resource_group_name = trimsuffix(var.cluster_name, "-aks")
   identity_prefix     = "${var.cluster_name}-wi"
 
-  tags = {
+  tags = merge(var.tags, {
     Component = "cluster-addons"
     Team      = var.team
-  }
+  })
 }
 
 data "azurerm_kubernetes_cluster" "this" {

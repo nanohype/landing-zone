@@ -131,3 +131,9 @@ variable "system_node_disk_size" {
   type        = number
   default     = 100
 }
+
+variable "tags" {
+  description = "Org-wide tags injected by the root config (azurerm has no provider default_tags)."
+  type        = map(string)
+  default     = {}
+}
