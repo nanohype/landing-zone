@@ -12,11 +12,11 @@ include "envcommon" {
 # per-addon roles via their ServiceAccount annotations; the envcommon wires the
 # hub cluster's OIDC, so the roles auto-name hub-eks-<addon> (hub-eks-external-secrets,
 # hub-eks-loki, hub-eks-tempo, hub-eks-opencost, hub-eks-cert-manager, ...).
-# opencost on for cost visibility; velero/keda/argo off (workload-plane concerns
-# the hub doesn't run).
+# velero/keda/argo off (workload-plane concerns the hub doesn't run); the rest —
+# opencost, cert-manager, external-secrets, loki/tempo, lb-controller, external-dns —
+# stay on by the component defaults.
 inputs = {
   velero_enabled         = false
-  opencost_enabled       = true
   keda_enabled           = false
   argo_events_enabled    = false
   argo_workflows_enabled = false

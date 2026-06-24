@@ -17,5 +17,5 @@ include "envcommon" {
 # Populate amg_admin_user_ids with fleet-account Identity Center user ids to grant
 # console access; left empty the workspace comes up with no assigned users.
 inputs = {
-  amp_alert_rules_enabled = false
+  amp_alert_rules_enabled = true
 }
