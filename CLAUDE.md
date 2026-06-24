@@ -19,8 +19,8 @@ task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 
 ## Architecture
 
-- **33 AWS components**, **17 GCP components**, **19 Azure components** across 3 clouds
-- **4 environments** per cloud: dev, staging, production, org (AWS management account)
+- **AWS, GCP, and Azure components** across the three clouds
+- **Environments** per cloud: dev, staging, production, org (AWS management account)
 - **Multi-account isolation:** workload-dev, workload-staging, workload-prod, management (AWS)
 - **Multi-region support:** us-west-2 (AWS), us-central1 (GCP), westus2 (Azure)
 - **Dependency chain:** `network → cluster → {druid, pipeline, llm, gateway, rag, mlops, governance, observability, secrets, cluster-addons, cluster-bootstrap}`
@@ -46,7 +46,7 @@ task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 
 ## Multi-Tenant Pattern (AWS only)
 
-7 components use `var.tenants = map(object({...}))` with `for_each`:
+The multi-tenant components use `var.tenants = map(object({...}))` with `for_each`:
 druid, pipeline, gateway, llm, mlops, rag, governance.
 
 Each tenant gets isolated AWS resources (databases, buckets, queues, IRSA roles).
@@ -56,16 +56,16 @@ Tenant modules live in `components/aws/{name}/modules/tenant/`.
 
 ```
 components/
-  aws/                     # 33 AWS OpenTofu root modules
+  aws/                     # AWS OpenTofu root modules
     {name}/
       main.tf
       variables.tf
       outputs.tf
       versions.tf
       modules/tenant/      # sub-module for multi-tenant components
-  gcp/                     # 17 GCP OpenTofu root modules
+  gcp/                     # GCP OpenTofu root modules
     {name}/
-  azure/                   # 17 Azure OpenTofu root modules
+  azure/                   # Azure OpenTofu root modules
     {name}/
 modules/
   aws/workload-identity/   # AWS IRSA role factory
