@@ -53,9 +53,9 @@ live/{cloud}/{account}/{region}/{environment}/{component}/terragrunt.hcl
 ```
 landing-zone/
 ├── components/
-│   ├── aws/                # 24 AWS OpenTofu root modules
-│   ├── gcp/                # 17 GCP OpenTofu root modules
-│   └── azure/              # 17 Azure OpenTofu root modules
+│   ├── aws/                # AWS OpenTofu root modules
+│   ├── gcp/                # GCP OpenTofu root modules
+│   └── azure/              # Azure OpenTofu root modules
 ├── live/
 │   ├── terragrunt.hcl      # Root config (multi-cloud provider dispatch)
 │   ├── _envcommon/
