@@ -300,6 +300,16 @@ resource "aws_ssm_parameter" "operator_role_arn" {
   tags  = local.tags
 }
 
+# Published alongside the ARN so consumers that must attach a policy to the
+# operator role (e.g. the cost-pipeline operator-read grant) or name it in an
+# inline policy can resolve the role name without parsing the ARN.
+resource "aws_ssm_parameter" "operator_role_name" {
+  name  = "${local.ssm_prefix}/operator_role_name"
+  type  = "String"
+  value = aws_iam_role.operator.name
+  tags  = local.tags
+}
+
 resource "aws_ssm_parameter" "tenant_iam_path" {
   name  = "${local.ssm_prefix}/tenant_iam_path"
   type  = "String"
