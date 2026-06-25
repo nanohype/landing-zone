@@ -11,6 +11,13 @@ permissions:
   pull-requests: write
 
 jobs:
+  placeholders:
+    name: Zero-placeholder gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/no-placeholders.sh
+
   fmt:
     name: Format Check
     runs-on: ubuntu-latest
