@@ -94,7 +94,7 @@ CI uses Federated Identity Credentials with OIDC -- no client secrets.
 Run the local validation suite -- no cloud credentials needed:
 
 ```bash
-make fmt-check && make validate CLOUD=aws && make lint CLOUD=aws
+task fmt:check && task validate CLOUD=aws && task lint CLOUD=aws
 ```
 
 Replace `CLOUD=aws` with `gcp` or `azure` to validate other clouds. All three should pass. If `tflint` fails, make sure you ran `tflint --init -c .tflint-<cloud>.hcl` to install the plugin.
@@ -103,13 +103,13 @@ Replace `CLOUD=aws` with `gcp` or `azure` to validate other clouds. All three sh
 
 ```bash
 # AWS
-make plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
 
 # GCP
-make plan CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
+task plan CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
 
 # Azure
-make plan CLOUD=azure ACCOUNT=workload-dev REGION=westus2 ENVIRONMENT=dev COMPONENT=network
+task plan CLOUD=azure ACCOUNT=workload-dev REGION=westus2 ENVIRONMENT=dev COMPONENT=network
 ```
 
 This runs `terragrunt plan` for the network component in dev. You need valid cloud credentials for this step.

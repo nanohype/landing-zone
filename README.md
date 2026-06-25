@@ -86,7 +86,7 @@ landing-zone/
 │   ├── init-backend-aws.sh
 │   ├── init-backend-gcp.sh
 │   └── init-backend-azure.sh
-├── Makefile
+├── Taskfile.yaml
 ├── .tflint.hcl              # Base rules
 ├── .tflint-aws.hcl          # AWS plugin
 ├── .tflint-gcp.hcl          # GCP plugin
@@ -119,7 +119,7 @@ task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
 ```
 
-## Makefile Targets
+## Task Targets
 
 ```
 task fmt              Format all OpenTofu files

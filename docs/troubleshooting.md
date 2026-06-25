@@ -16,7 +16,7 @@ terragrunt plan
 Or use the Makefile:
 
 ```bash
-make plan ENVIRONMENT=<env> COMPONENT=<component>
+task plan ENVIRONMENT=<env> COMPONENT=<component>
 ```
 
 ## "Unsupported Terraform Core version"
