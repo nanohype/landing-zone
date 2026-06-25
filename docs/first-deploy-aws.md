@@ -182,27 +182,16 @@ terragrunt output -json s3_bucket_names
 
 Edit each `eks-gitops/addons/*/values-<env>.yaml`, replace the placeholder account IDs with the real values. Open PR → merge → ArgoCD reconciles.
 
-### Wire observability endpoints into eks-gitops
+### Observability endpoints (wired automatically)
 
-> **Do not skip this.** The whole observability stack is inert until these placeholders are filled. With them empty, grafana-agent remote-writes to nothing — **zero metrics reach AMP** and every dashboard + alert silently no-data. That reads as "nothing is wrong," not "nothing is observed."
+`managed-monitoring` (the AMP + AMG component) publishes its endpoints to source, and the gitops layer resolves them with no hand-editing:
 
-`managed-monitoring` (the AMP + AMG component) outputs the endpoints that replace the `ws-PLACEHOLDER` / `g-PLACEHOLDER` tokens:
+- The AMP query + remote-write URLs go to a Secrets Manager secret. External Secrets syncs them into the cluster, where **grafana-agent** reads `AMP_REMOTE_WRITE_URL` from the synced Secret and the **dashboards data source** templates its AMP URL from it via `GrafanaDatasource.valuesFrom`.
+- The AMG workspace URL goes to SSM. `cluster-bootstrap` reads it and stamps it onto the ArgoCD cluster Secret as the `monitoring/grafana-url` annotation, which the dashboards ApplicationSet injects into the `Grafana` CR's external URL.
 
-```bash
-cd live/aws/workload-<env>/us-west-2/<env>/managed-monitoring
-terragrunt output amp_remote_write_url    # → grafana-agent AMP_REMOTE_WRITE_URL
-terragrunt output amp_query_endpoint      # → dashboards datasource (AMP) URL
-terragrunt output grafana_endpoint        # → dashboards Grafana (AMG) external URL
-```
+So once `managed-monitoring` is applied and External Secrets plus the `aws-secrets-manager` ClusterSecretStore are healthy, the endpoints flow automatically — there is nothing to substitute by hand, in any environment including the hub.
 
-Substitute, per environment:
-
-- **`eks-gitops/addons/observability/grafana-agent/values-<env>.yaml`** — replace the `ws-PLACEHOLDER` in `AMP_REMOTE_WRITE_URL` with `amp_remote_write_url`, and set `CLUSTER_NAME` to the cluster's name (the metrics' `cluster` external label).
-- **`eks-gitops/dashboards/overlays/<env>/kustomization.yaml`** — replace `ws-PLACEHOLDER-<env>` (the `managed-prometheus` datasource URL patch) with the AMP workspace from `amp_query_endpoint`, and `g-PLACEHOLDER-<env>` (the `Grafana` external URL patch) with `grafana_endpoint`.
-
-Open PR → merge → ArgoCD reconciles. **Smoke test** (after the agent rolls out): the metrics path is live once AMP returns series — e.g. query `count(kube_customresource_status_phase)` in the AMG explore view and confirm it's non-zero, or check the grafana-agent pod logs for successful `prometheus.remote_write` to AMP (no 4xx/SigV4 errors).
-
-The hub environment (`live/aws/fleet/us-west-2/hub/managed-monitoring`) follows the same steps against `dashboards/overlays/hub` + `grafana-agent/values-hub.yaml`.
+**Smoke test** (after the agent rolls out): query `count(kube_customresource_status_phase)` in the AMG explore view and confirm it's non-zero, or check the grafana-agent pod logs for successful `prometheus.remote_write` to AMP (no 4xx/SigV4 errors).
 
 ### Verify
 
