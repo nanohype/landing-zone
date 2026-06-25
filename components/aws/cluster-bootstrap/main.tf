@@ -4,12 +4,9 @@ data "aws_partition" "current" {}
 # The eks-agent-platform eval-runtime component writes the eval-runner role ARN
 # and reports bucket to SSM; cluster-bootstrap republishes them as cluster-Secret
 # annotations for the operator ApplicationSet. Gated on enable_eval_runtime so a
-# cluster without eval-runtime applied doesn't fail the parameter read.
-data "aws_ssm_parameter" "eval_runner_role_arn" {
-  count = var.enable_eval_runtime ? 1 : 0
-  name  = "/eks-agent-platform/${var.environment}/eval-runtime/runner_role_arn"
-}
-
+# cluster without eval-runtime applied doesn't fail the parameter read. The
+# eval-runner role itself is bound by an EKS Pod Identity association, so only
+# the reports bucket needs republishing here.
 data "aws_ssm_parameter" "eval_reports_bucket" {
   count = var.enable_eval_runtime ? 1 : 0
   name  = "/eks-agent-platform/${var.environment}/eval-runtime/eval_reports_bucket"
