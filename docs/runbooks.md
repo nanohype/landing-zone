@@ -20,7 +20,7 @@ Step-by-step procedures for common operational scenarios.
 **If the drift should be reverted** (unauthorized change):
 
 ```bash
-make apply ENVIRONMENT=production COMPONENT=<component>
+task apply ENVIRONMENT=production COMPONENT=<component>
 ```
 
 This brings the resource back to the declared state.
@@ -28,7 +28,7 @@ This brings the resource back to the declared state.
 **If the drift should be adopted** (legitimate change):
 
 1. Update the component's `variables.tf` defaults or the environment's `terragrunt.hcl` inputs to match the current state
-2. Plan to confirm zero diff: `make plan ENVIRONMENT=production COMPONENT=<component>`
+2. Plan to confirm zero diff: `task plan ENVIRONMENT=production COMPONENT=<component>`
 3. Open a PR with the changes
 
 ### Close Out
@@ -124,7 +124,7 @@ A partial apply means some resources exist in state and in AWS. Running `destroy
 
 1. Run `plan` to see what OpenTofu thinks the current state is:
    ```bash
-   make plan ENVIRONMENT=<env> COMPONENT=<component>
+   task plan ENVIRONMENT=<env> COMPONENT=<component>
    ```
 2. Review the plan output — it will show what still needs to be created/updated
 
@@ -133,7 +133,7 @@ A partial apply means some resources exist in state and in AWS. Running `destroy
 1. Fix the root cause of the failure (permissions, quota, invalid input, etc.)
 2. Re-run apply:
    ```bash
-   make apply ENVIRONMENT=<env> COMPONENT=<component>
+   task apply ENVIRONMENT=<env> COMPONENT=<component>
    ```
 3. OpenTofu is idempotent — it will skip already-created resources and create/update the remaining ones
 
@@ -177,20 +177,20 @@ If the state file itself is corrupted:
 
 2. **Update org-identity** — add the account to `account_assignments` so SSO users can access it:
    ```bash
-   make plan ENVIRONMENT=org COMPONENT=org-identity
-   make apply ENVIRONMENT=org COMPONENT=org-identity
+   task plan ENVIRONMENT=org COMPONENT=org-identity
+   task apply ENVIRONMENT=org COMPONENT=org-identity
    ```
 
 3. **Update org-scp** — attach appropriate SCPs to the account's OU:
    ```bash
-   make plan ENVIRONMENT=org COMPONENT=org-scp
-   make apply ENVIRONMENT=org COMPONENT=org-scp
+   task plan ENVIRONMENT=org COMPONENT=org-scp
+   task apply ENVIRONMENT=org COMPONENT=org-scp
    ```
 
 4. **Update org-security** — add the account to `member_accounts` for GuardDuty/Security Hub:
    ```bash
-   make plan ENVIRONMENT=org COMPONENT=org-security
-   make apply ENVIRONMENT=org COMPONENT=org-security
+   task plan ENVIRONMENT=org COMPONENT=org-security
+   task apply ENVIRONMENT=org COMPONENT=org-security
    ```
 
 5. **Create the state bucket** in the new account:
@@ -207,7 +207,7 @@ If the state file itself is corrupted:
 
 8. **Deploy in dependency order:**
    ```bash
-   make apply ENVIRONMENT=<new-env>
+   task apply ENVIRONMENT=<new-env>
    ```
 
 ---
@@ -235,24 +235,24 @@ For each environment:
 
 2. **Plan and review:**
    ```bash
-   make plan ENVIRONMENT=<env> COMPONENT=cluster
+   task plan ENVIRONMENT=<env> COMPONENT=cluster
    ```
    Verify the plan shows an in-place update of the EKS cluster version, not a replacement.
 
 3. **Apply:**
    ```bash
-   make apply ENVIRONMENT=<env> COMPONENT=cluster
+   task apply ENVIRONMENT=<env> COMPONENT=cluster
    ```
    The EKS control plane upgrade takes 15–30 minutes.
 
 4. **Verify cluster-bootstrap** — Cilium and ArgoCD should continue running. Plan to check:
    ```bash
-   make plan ENVIRONMENT=<env> COMPONENT=cluster-bootstrap
+   task plan ENVIRONMENT=<env> COMPONENT=cluster-bootstrap
    ```
 
 5. **Verify cluster-addons:**
    ```bash
-   make plan ENVIRONMENT=<env> COMPONENT=cluster-addons
+   task plan ENVIRONMENT=<env> COMPONENT=cluster-addons
    ```
 
 6. **Validate workloads** — check that pods are running, services are healthy, and Karpenter is provisioning nodes with the new version

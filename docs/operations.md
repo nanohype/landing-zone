@@ -8,23 +8,23 @@ Day-to-day procedures for operating the landing-zone infrastructure across AWS, 
 
 ```bash
 # AWS
-make plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
-make apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
 
 # GCP
-make plan CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
-make apply CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
+task plan CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
+task apply CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
 
 # Azure
-make plan CLOUD=azure ACCOUNT=workload-dev REGION=westus2 ENVIRONMENT=dev COMPONENT=network
-make apply CLOUD=azure ACCOUNT=workload-dev REGION=westus2 ENVIRONMENT=dev COMPONENT=network
+task plan CLOUD=azure ACCOUNT=workload-dev REGION=westus2 ENVIRONMENT=dev COMPONENT=network
+task apply CLOUD=azure ACCOUNT=workload-dev REGION=westus2 ENVIRONMENT=dev COMPONENT=network
 ```
 
 ### All Components in an Environment
 
 ```bash
-make plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
-make apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 ```
 
 Terragrunt resolves the dependency graph and runs components in the correct order.
@@ -32,8 +32,8 @@ Terragrunt resolves the dependency graph and runs components in the correct orde
 ### Organization Components (AWS)
 
 ```bash
-make plan CLOUD=aws ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
-make apply CLOUD=aws ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
+task plan CLOUD=aws ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
+task apply CLOUD=aws ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
 ```
 
 ## Deployment Order
@@ -96,7 +96,7 @@ Steps 3-13 can run in parallel within their dependency tier. Steps 14-18 can run
 
 GCP and Azure have 11 workload components (no multi-tenant components). Steps 3-6 can run in parallel. Steps 7-11 can run at any time.
 
-Using `make apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run --all -- apply`, which handles ordering automatically.
+Using `task apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run --all -- apply`, which handles ordering automatically.
 
 ## CI/CD Workflows
 
@@ -165,8 +165,8 @@ Multi-tenant components are currently AWS-only (`druid`, `pipeline`, `gateway`, 
      }
    }
    ```
-4. Plan to verify: `make plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
-5. Apply: `make apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
+4. Plan to verify: `task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
+5. Apply: `task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
 
 ### Removing a Tenant
 
