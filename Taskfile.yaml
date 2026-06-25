@@ -53,7 +53,7 @@ tasks:
     cmds:
       - |
         if [ "{{.COMPONENT}}" = "all" ]; then
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run-all plan
+          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- plan
         else
           cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt plan
         fi
@@ -63,7 +63,7 @@ tasks:
     cmds:
       - |
         if [ "{{.COMPONENT}}" = "all" ]; then
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run-all apply
+          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- apply
         else
           cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt apply
         fi
@@ -73,7 +73,7 @@ tasks:
     cmds:
       - |
         if [ "{{.COMPONENT}}" = "all" ]; then
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run-all destroy
+          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- destroy
         else
           cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt destroy
         fi

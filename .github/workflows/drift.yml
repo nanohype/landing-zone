@@ -66,7 +66,7 @@ jobs:
           # installs tofu on the runner. Without this the action aborts every run
           # ("No mise.toml found, so 'tofu_version' is required").
           tofu_version: "1.11.5"
-          tg_version: "0.99.4"
+          tg_version: "1.0.8"
 
       - name: Configure AWS credentials
         if: matrix.cloud == 'aws'

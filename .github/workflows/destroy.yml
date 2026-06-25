@@ -55,7 +55,7 @@ jobs:
           tofu_version: "1.11.5"
       - uses: gruntwork-io/terragrunt-action@v3
         with:
-          tg_version: "0.99.4"
+          tg_version: "1.0.8"
 
       - name: Configure AWS credentials
         if: inputs.cloud == 'aws'
@@ -83,7 +83,7 @@ jobs:
         working-directory: live/${{ inputs.cloud }}/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
         run: |
           if [ "${{ inputs.component }}" = "all" ]; then
-            terragrunt run-all destroy --terragrunt-non-interactive
+            terragrunt run --all --non-interactive -- destroy
           else
             cd ${{ inputs.component }}
             terragrunt destroy

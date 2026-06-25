@@ -96,7 +96,7 @@ Steps 3-13 can run in parallel within their dependency tier. Steps 14-18 can run
 
 GCP and Azure have 11 workload components (no multi-tenant components). Steps 3-6 can run in parallel. Steps 7-11 can run at any time.
 
-Using `make apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run-all apply`, which handles ordering automatically.
+Using `make apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run --all -- apply`, which handles ordering automatically.
 
 ## CI/CD Workflows
 
@@ -124,7 +124,7 @@ Using `make apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<e
 - `component` -- specific component name or "all"
 - `action` -- plan or apply
 
-Uses GitHub environment protection rules -- production requires approval. When `component=all`, runs `terragrunt run-all <action>`. Otherwise targets the specific component directory.
+Uses GitHub environment protection rules -- production requires approval. When `component=all`, runs `terragrunt run --all -- <action>`. Otherwise targets the specific component directory.
 
 ### destroy.yml -- Manual Destroy
 
@@ -136,7 +136,7 @@ Uses GitHub environment protection rules -- production requires approval. When `
 - `component` -- specific component name or "all"
 - `confirm` -- must exactly match the environment name
 
-The confirmation guard (`confirm == environment`) prevents accidental destroys. Runs `terragrunt destroy` or `terragrunt run-all destroy`.
+The confirmation guard (`confirm == environment`) prevents accidental destroys. Runs `terragrunt destroy` or `terragrunt run --all -- destroy`.
 
 ### drift.yml -- Drift Detection
 

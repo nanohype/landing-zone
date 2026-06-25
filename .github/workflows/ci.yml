@@ -151,7 +151,7 @@ jobs:
           tofu_version: "1.11.5"
       - uses: gruntwork-io/terragrunt-action@v3
         with:
-          tg_version: "0.99.4"
+          tg_version: "1.0.8"
           # gruntwork-io/terragrunt-action@v3 manages its own tool versions
           # via mise. Without a mise.toml in the repo it requires tofu_version
           # to be passed explicitly — even though the previous opentofu/setup
