@@ -284,9 +284,9 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
     annotations = merge({
       "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.environment}-eks-agent-platform-operator"
       }, var.enable_eval_runtime ? {
-      # eval-runner IRSA + reports bucket, read from the eval-runtime SSM params.
-      "eks-agent-platform/eval-runner-role-arn" = data.aws_ssm_parameter.eval_runner_role_arn[0].value
-      "eks-agent-platform/eval-reports-bucket"  = data.aws_ssm_parameter.eval_reports_bucket[0].value
+      # eval-runner reports bucket, read from the eval-runtime SSM param. The
+      # eval-runner role is bound by Pod Identity, so no role ARN is published.
+      "eks-agent-platform/eval-reports-bucket" = data.aws_ssm_parameter.eval_reports_bucket[0].value
       } : {}, var.enable_managed_monitoring ? {
       # Amazon Managed Grafana workspace URL, read from the managed-monitoring SSM
       # param. The dashboards ApplicationSet injects it into the Grafana CR.
