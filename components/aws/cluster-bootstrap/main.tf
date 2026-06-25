@@ -15,6 +15,17 @@ data "aws_ssm_parameter" "eval_reports_bucket" {
   name  = "/eks-agent-platform/${var.environment}/eval-runtime/eval_reports_bucket"
 }
 
+# The managed-monitoring component writes the Amazon Managed Grafana workspace
+# URL to SSM; cluster-bootstrap stamps it onto the cluster Secret so the
+# dashboards ApplicationSet can inject it into the Grafana CR (whose url field
+# the grafana-operator can't template from a Secret). Gated on
+# enable_managed_monitoring so a cluster without managed-monitoring applied
+# doesn't fail the parameter read.
+data "aws_ssm_parameter" "grafana_url" {
+  count = var.enable_managed_monitoring ? 1 : 0
+  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/grafana_url"
+}
+
 locals {
   account_id = data.aws_caller_identity.current.account_id
 }

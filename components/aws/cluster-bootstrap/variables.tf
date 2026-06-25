@@ -94,6 +94,12 @@ variable "enable_agent_platform" {
   default     = true
 }
 
+variable "enable_managed_monitoring" {
+  description = "Stamp the Amazon Managed Grafana workspace URL (read from the SSM parameter the managed-monitoring component writes under /eks-agent-platform/<env>/managed-monitoring/) onto the cluster Secret, where the dashboards ApplicationSet injects it into the Grafana CR. Requires managed-monitoring to have applied first. Default true: the observability stack (AMP/AMG dashboards) is core substrate. Set false on a cluster that doesn't run managed-monitoring — the dashboards Grafana CR then renders without an external URL."
+  type        = bool
+  default     = true
+}
+
 variable "enable_eval_runtime" {
   description = "Republish the eval-runner IRSA wiring (role ARN + reports bucket) as cluster-Secret annotations, read from the SSM parameters the eks-agent-platform eval-runtime component writes under /eks-agent-platform/<env>/eval-runtime/. Requires that component to have applied first. Default false; the eks-gitops operator ApplicationSet tolerates the annotations being absent (eval simply gets no IRSA), so leave it off on clusters without eval-runtime."
   type        = bool

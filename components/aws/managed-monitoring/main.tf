@@ -176,3 +176,44 @@ resource "aws_grafana_role_association" "viewer" {
   user_ids     = var.amg_viewer_user_ids
   workspace_id = aws_grafana_workspace.this.id
 }
+
+################################################################################
+# Endpoint wiring — make the per-environment AMP/AMG endpoints available to the
+# in-cluster consumers without hand-edited placeholders.
+#
+#   - AMP query + remote-write URLs go to Secrets Manager. External Secrets
+#     Operator syncs them into the cluster (the aws-secrets-manager
+#     ClusterSecretStore), where the Grafana data source templates its url from
+#     the synced Secret and grafana-agent reads its remote-write url from an env
+#     var. The endpoints aren't sensitive; Secrets Manager is simply the store
+#     ESO is wired to, alongside the Grafana service-account token.
+#   - The AMG workspace URL goes to SSM. The Grafana CR's url field can't be
+#     templated from a Secret, so cluster-bootstrap reads it from here and stamps
+#     it onto the ArgoCD cluster Secret, where the dashboards ApplicationSet
+#     injects it into the Grafana CR via the cluster generator.
+################################################################################
+
+resource "aws_secretsmanager_secret" "monitoring_endpoints" {
+  name = "eks-managed-monitoring-endpoints"
+  # Endpoints, not credentials — drop the recovery window so a teardown/recreate
+  # cycle doesn't collide with a soft-deleted secret of the same name.
+  recovery_window_in_days = 0
+
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "monitoring_endpoints" {
+  secret_id = aws_secretsmanager_secret.monitoring_endpoints.id
+  secret_string = jsonencode({
+    AMP_QUERY_URL        = aws_prometheus_workspace.this.prometheus_endpoint
+    AMP_REMOTE_WRITE_URL = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
+  })
+}
+
+resource "aws_ssm_parameter" "grafana_url" {
+  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/grafana_url"
+  type  = "String"
+  value = "https://${aws_grafana_workspace.this.endpoint}"
+
+  tags = local.tags
+}
