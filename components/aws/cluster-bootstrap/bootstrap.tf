@@ -247,6 +247,16 @@ resource "helm_release" "argocd" {
 # ArgoCD Cluster Secret (drives ApplicationSet generators)
 ################################################################################
 
+# The eks-agent-platform operator reads the EKS cluster name from SSM
+# (operatorconfig sweeps /eks-agent-platform/<env>/) to create the tenant Pod
+# Identity associations. Published here because cluster-bootstrap is the
+# operator-wiring component that carries the cluster name.
+resource "aws_ssm_parameter" "operator_cluster_name" {
+  name  = "/eks-agent-platform/${var.environment}/cluster/name"
+  type  = "String"
+  value = var.cluster_name
+}
+
 resource "kubernetes_secret_v1" "argocd_cluster" {
   metadata {
     name      = "in-cluster"
@@ -272,7 +282,6 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
     # committed to the public gitops repos. Annotations (not labels) because ARNs
     # contain characters that label values disallow.
     annotations = merge({
-      "eks-agent-platform/cluster-name"      = var.cluster_name
       "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.environment}-eks-agent-platform-operator"
       }, var.enable_eval_runtime ? {
       # eval-runner IRSA + reports bucket, read from the eval-runtime SSM params.
