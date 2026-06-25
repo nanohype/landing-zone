@@ -23,16 +23,6 @@ variable "cluster_certificate_authority_data" {
   type        = string
 }
 
-variable "oidc_provider_arn" {
-  description = "EKS IAM OIDC provider ARN, published to the in-cluster ArgoCD Secret so the eks-agent-platform operator ApplicationSet can wire the operator's IRSA without committing the account ID to git"
-  type        = string
-}
-
-variable "oidc_issuer" {
-  description = "EKS OIDC issuer host without the https:// scheme (e.g. oidc.eks.us-west-2.amazonaws.com/id/<id>)"
-  type        = string
-}
-
 variable "vpc_id" {
   description = "VPC ID for the EKS cluster"
   type        = string

@@ -227,6 +227,37 @@ resource "aws_iam_role_policy" "operator" {
         }
       },
       {
+        # Create + manage the EKS Pod Identity associations that bind each
+        # tenant ServiceAccount (tenant-runtime) to its role. Scoped to this
+        # environment's cluster + its association resources.
+        Sid    = "TenantPodIdentityAssociations"
+        Effect = "Allow"
+        Action = [
+          "eks:CreatePodIdentityAssociation",
+          "eks:DeletePodIdentityAssociation",
+          "eks:DescribePodIdentityAssociation",
+          "eks:ListPodIdentityAssociations",
+          "eks:UpdatePodIdentityAssociation",
+        ]
+        Resource = [
+          "arn:${local.partition}:eks:${var.region}:${local.account_id}:cluster/${var.environment}-*",
+          "arn:${local.partition}:eks:${var.region}:${local.account_id}:podidentityassociation/${var.environment}-*/*",
+        ]
+      },
+      {
+        # CreatePodIdentityAssociation requires iam:PassRole on the tenant role,
+        # constrained to the EKS Pod Identity service principal.
+        Sid      = "PassTenantRoleToPodIdentity"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = local.tenant_role_arn
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "pods.eks.amazonaws.com"
+          }
+        }
+      },
+      {
         Sid    = "KMSGrants"
         Effect = "Allow"
         Action = [
