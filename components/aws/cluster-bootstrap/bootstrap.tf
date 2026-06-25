@@ -287,6 +287,10 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # eval-runner IRSA + reports bucket, read from the eval-runtime SSM params.
       "eks-agent-platform/eval-runner-role-arn" = data.aws_ssm_parameter.eval_runner_role_arn[0].value
       "eks-agent-platform/eval-reports-bucket"  = data.aws_ssm_parameter.eval_reports_bucket[0].value
+      } : {}, var.enable_managed_monitoring ? {
+      # Amazon Managed Grafana workspace URL, read from the managed-monitoring SSM
+      # param. The dashboards ApplicationSet injects it into the Grafana CR.
+      "monitoring/grafana-url" = data.aws_ssm_parameter.grafana_url[0].value
     } : {})
   }
 

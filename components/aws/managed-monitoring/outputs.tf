@@ -43,3 +43,13 @@ output "grafana_workspace_arn" {
   description = "Grafana workspace ARN"
   value       = aws_grafana_workspace.this.arn
 }
+
+output "monitoring_endpoints_secret_name" {
+  description = "Secrets Manager secret holding the AMP query + remote-write URLs (synced into the cluster by External Secrets Operator)"
+  value       = aws_secretsmanager_secret.monitoring_endpoints.name
+}
+
+output "grafana_url_ssm_parameter" {
+  description = "SSM parameter holding the AMG workspace URL (read by cluster-bootstrap to annotate the ArgoCD cluster Secret)"
+  value       = aws_ssm_parameter.grafana_url.name
+}
