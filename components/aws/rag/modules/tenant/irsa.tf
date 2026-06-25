@@ -1,11 +1,10 @@
 module "bedrock_api_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.prefix}-bedrock-api"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "bedrock-api"
+  role_name       = "${local.prefix}-bedrock-api"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "bedrock-api"
 
   policy_statements = [
     {

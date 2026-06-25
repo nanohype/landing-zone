@@ -11,11 +11,10 @@
 module "slack_knowledge_bot_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.prefix}-platform"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = var.namespace
-  service_account   = var.service_account
+  role_name       = "${local.prefix}-platform"
+  cluster_name    = var.cluster_name
+  namespace       = var.namespace
+  service_account = var.service_account
 
   policy_statements = [
     {

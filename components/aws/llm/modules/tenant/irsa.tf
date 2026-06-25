@@ -1,11 +1,10 @@
 module "inference_server_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.prefix}-inference-server"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "inference-server"
+  role_name       = "${local.prefix}-inference-server"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "inference-server"
 
   policy_statements = concat([
     {
@@ -47,11 +46,10 @@ module "inference_server_irsa" {
 module "api_gateway_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.prefix}-api-gateway"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "api-gateway"
+  role_name       = "${local.prefix}-api-gateway"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "api-gateway"
 
   policy_statements = [
     {

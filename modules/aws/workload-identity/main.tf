@@ -8,17 +8,26 @@ resource "aws_iam_role" "this" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        Federated = var.oidc_provider_arn
+        Service = "pods.eks.amazonaws.com"
       }
-      Action = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = {
-          "${var.oidc_issuer}:sub" = "system:serviceaccount:${var.namespace}:${var.service_account}"
-          "${var.oidc_issuer}:aud" = "sts.amazonaws.com"
-        }
-      }
+      Action = [
+        "sts:AssumeRole",
+        "sts:TagSession",
+      ]
     }]
   })
+
+  tags = var.tags
+}
+
+# Binds the (namespace, service_account) pair to this role through the EKS API.
+# EKS injects credentials into pods using the service account; no role-arn
+# annotation and no OIDC provider are involved.
+resource "aws_eks_pod_identity_association" "this" {
+  cluster_name    = var.cluster_name
+  namespace       = var.namespace
+  service_account = var.service_account
+  role_arn        = aws_iam_role.this.arn
 
   tags = var.tags
 }

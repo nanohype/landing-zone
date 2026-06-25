@@ -25,11 +25,10 @@ locals {
 module "worker_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-worker"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "pipeline-worker"
+  role_name       = "${local.irsa_prefix}-worker"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "pipeline-worker"
 
   policy_statements = [
     {
@@ -93,11 +92,10 @@ module "worker_irsa" {
 module "orchestrator_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-orchestrator"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "pipeline-orchestrator"
+  role_name       = "${local.irsa_prefix}-orchestrator"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "pipeline-orchestrator"
 
   policy_statements = concat(
     var.tenant_config.step_functions_enabled ? [
@@ -147,11 +145,10 @@ module "orchestrator_irsa" {
 module "connector_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-connector"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "pipeline-connector"
+  role_name       = "${local.irsa_prefix}-connector"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "pipeline-connector"
 
   policy_statements = concat(
     [

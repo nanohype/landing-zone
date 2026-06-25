@@ -3,13 +3,8 @@ variable "role_name" {
   type        = string
 }
 
-variable "oidc_provider_arn" {
-  description = "ARN of the OIDC provider"
-  type        = string
-}
-
-variable "oidc_issuer" {
-  description = "OIDC issuer URL (without https://)"
+variable "cluster_name" {
+  description = "Name of the EKS cluster the Pod Identity association targets"
   type        = string
 }
 

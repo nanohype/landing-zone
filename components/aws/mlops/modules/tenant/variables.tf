@@ -36,13 +36,8 @@ variable "tenant_config" {
   })
 }
 
-variable "oidc_provider" {
-  description = "EKS OIDC provider ARN"
-  type        = string
-}
-
-variable "oidc_issuer" {
-  description = "EKS OIDC issuer URL (without https://)"
+variable "cluster_name" {
+  description = "Name of the EKS cluster the Pod Identity association targets."
   type        = string
 }
 

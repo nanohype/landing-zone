@@ -26,11 +26,10 @@ locals {
 module "training_worker_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-training-worker"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "mlops-training-worker"
+  role_name       = "${local.irsa_prefix}-training-worker"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "mlops-training-worker"
 
   policy_statements = concat([
     {
@@ -112,11 +111,10 @@ module "training_worker_irsa" {
 module "model_registry_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-model-registry"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "mlops-model-registry"
+  role_name       = "${local.irsa_prefix}-model-registry"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "mlops-model-registry"
 
   policy_statements = [
     {
@@ -188,11 +186,10 @@ module "model_registry_irsa" {
 module "mlops_api_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-mlops-api"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "mlops-api"
+  role_name       = "${local.irsa_prefix}-mlops-api"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "mlops-api"
 
   policy_statements = concat([
     {

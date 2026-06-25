@@ -1,11 +1,10 @@
 module "gateway_admin_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.prefix}-gateway-admin"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "gateway-admin"
+  role_name       = "${local.prefix}-gateway-admin"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "gateway-admin"
 
   policy_statements = [
     {
@@ -57,11 +56,10 @@ module "gateway_admin_irsa" {
 module "gateway_auth_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.prefix}-gateway-auth"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "gateway-auth"
+  role_name       = "${local.prefix}-gateway-auth"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "gateway-auth"
 
   policy_statements = [
     {

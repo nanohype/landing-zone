@@ -6,11 +6,10 @@
 module "cert_manager_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_role_prefix}-cert-manager"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "cert-manager"
-  service_account   = "cert-manager"
+  role_name       = "${local.irsa_role_prefix}-cert-manager"
+  cluster_name    = var.cluster_name
+  namespace       = "cert-manager"
+  service_account = "cert-manager"
 
   policy_statements = [
     {
@@ -45,11 +44,10 @@ module "cert_manager_irsa" {
 module "external_secrets_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_role_prefix}-external-secrets"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "external-secrets"
-  service_account   = "external-secrets"
+  role_name       = "${local.irsa_role_prefix}-external-secrets"
+  cluster_name    = var.cluster_name
+  namespace       = "external-secrets"
+  service_account = "external-secrets"
 
   policy_statements = [
     {
@@ -87,11 +85,10 @@ module "external_secrets_irsa" {
 module "alb_controller_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_role_prefix}-aws-load-balancer-controller"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "kube-system"
-  service_account   = "aws-load-balancer-controller"
+  role_name       = "${local.irsa_role_prefix}-aws-load-balancer-controller"
+  cluster_name    = var.cluster_name
+  namespace       = "kube-system"
+  service_account = "aws-load-balancer-controller"
 
   policy_statements = [
     {
@@ -164,11 +161,10 @@ module "alb_controller_irsa" {
 module "external_dns_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_role_prefix}-external-dns"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "external-dns"
-  service_account   = "external-dns"
+  role_name       = "${local.irsa_role_prefix}-external-dns"
+  cluster_name    = var.cluster_name
+  namespace       = "external-dns"
+  service_account = "external-dns"
 
   policy_statements = [
     {
@@ -197,11 +193,10 @@ module "velero_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.velero_enabled ? 1 : 0
 
-  role_name         = "${local.irsa_role_prefix}-velero"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "velero"
-  service_account   = "velero"
+  role_name       = "${local.irsa_role_prefix}-velero"
+  cluster_name    = var.cluster_name
+  namespace       = "velero"
+  service_account = "velero"
 
   policy_statements = [
     {
@@ -243,11 +238,10 @@ module "velero_irsa" {
 module "loki_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_role_prefix}-loki"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "monitoring"
-  service_account   = "loki"
+  role_name       = "${local.irsa_role_prefix}-loki"
+  cluster_name    = var.cluster_name
+  namespace       = "monitoring"
+  service_account = "loki"
 
   policy_statements = [
     {
@@ -273,11 +267,10 @@ module "loki_irsa" {
 module "tempo_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_role_prefix}-tempo"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "monitoring"
-  service_account   = "tempo"
+  role_name       = "${local.irsa_role_prefix}-tempo"
+  cluster_name    = var.cluster_name
+  namespace       = "monitoring"
+  service_account = "tempo"
 
   policy_statements = [
     {
@@ -304,11 +297,10 @@ module "opencost_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.opencost_enabled ? 1 : 0
 
-  role_name         = "${local.irsa_role_prefix}-opencost"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "opencost"
-  service_account   = "opencost"
+  role_name       = "${local.irsa_role_prefix}-opencost"
+  cluster_name    = var.cluster_name
+  namespace       = "opencost"
+  service_account = "opencost"
 
   policy_statements = [
     {
@@ -333,11 +325,10 @@ module "keda_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.keda_enabled ? 1 : 0
 
-  role_name         = "${local.irsa_role_prefix}-keda-operator"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "keda"
-  service_account   = "keda-operator"
+  role_name       = "${local.irsa_role_prefix}-keda-operator"
+  cluster_name    = var.cluster_name
+  namespace       = "keda"
+  service_account = "keda-operator"
 
   policy_statements = [
     {
@@ -364,11 +355,10 @@ module "argo_events_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.argo_events_enabled ? 1 : 0
 
-  role_name         = "${local.irsa_role_prefix}-argo-events"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "argo-events"
-  service_account   = "argo-events-controller-manager"
+  role_name       = "${local.irsa_role_prefix}-argo-events"
+  cluster_name    = var.cluster_name
+  namespace       = "argo-events"
+  service_account = "argo-events-controller-manager"
 
   policy_statements = [
     {
@@ -391,11 +381,10 @@ module "argo_workflows_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.argo_workflows_enabled ? 1 : 0
 
-  role_name         = "${local.irsa_role_prefix}-argo-workflows"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "argo-workflows"
-  service_account   = "argo-workflows-server"
+  role_name       = "${local.irsa_role_prefix}-argo-workflows"
+  cluster_name    = var.cluster_name
+  namespace       = "argo-workflows"
+  service_account = "argo-workflows-server"
 
   policy_statements = [
     {

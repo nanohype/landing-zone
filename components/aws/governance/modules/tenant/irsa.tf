@@ -1,11 +1,10 @@
 module "audit_writer_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.prefix}-audit-writer"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "audit-writer"
+  role_name       = "${local.prefix}-audit-writer"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "audit-writer"
 
   policy_statements = concat([
     {
@@ -42,11 +41,10 @@ module "audit_writer_irsa" {
 module "governance_api_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.prefix}-governance-api"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.namespace
-  service_account   = "governance-api"
+  role_name       = "${local.prefix}-governance-api"
+  cluster_name    = var.cluster_name
+  namespace       = local.namespace
+  service_account = "governance-api"
 
   policy_statements = [
     {

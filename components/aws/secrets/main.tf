@@ -129,11 +129,10 @@ resource "aws_secretsmanager_secret_version" "this" {
 module "external_secrets_platform_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${var.environment}-eks-external-secrets-platform"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "external-secrets"
-  service_account   = "external-secrets"
+  role_name       = "${var.environment}-eks-external-secrets-platform"
+  cluster_name    = var.cluster_name
+  namespace       = "external-secrets"
+  service_account = "external-secrets"
 
   policy_statements = [
     {
