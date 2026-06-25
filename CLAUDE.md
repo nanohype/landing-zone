@@ -35,7 +35,7 @@ task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 - Component variables must have descriptions (enforced by tflint `terraform_documented_variables`)
 - Component outputs must have descriptions (enforced by tflint `terraform_documented_outputs`)
 - Snake_case for all resource names and variables (enforced by tflint `terraform_naming_convention`)
-- Default tags/labels (Environment, ManagedBy, Project) are injected by root terragrunt.hcl — do not duplicate in components
+- Default tags/labels (Environment, ManagedBy, Project) are injected by the root config (`live/root.hcl`) — do not duplicate in components
 - Every component lives in `components/{cloud}/{name}/` with its own `versions.tf`
 - Dependency wiring lives in `live/_envcommon/{cloud}/{name}.hcl`, not in the component itself
 - Environment-specific overrides go in `live/{cloud}/{account}/{region}/{env}/{component}/terragrunt.hcl`
@@ -72,7 +72,7 @@ modules/
   gcp/workload-identity/   # GKE Workload Identity binding
   azure/workload-identity/ # AKS federated credential
 live/
-  terragrunt.hcl           # root config (multi-cloud provider dispatch + state backend)
+  root.hcl                 # root config (multi-cloud provider dispatch + state backend)
   _envcommon/
     aws/{name}.hcl         # AWS dependency wiring + shared inputs
     gcp/{name}.hcl         # GCP dependency wiring

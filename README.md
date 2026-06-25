@@ -57,7 +57,7 @@ landing-zone/
 │   ├── gcp/                # GCP OpenTofu root modules
 │   └── azure/              # Azure OpenTofu root modules
 ├── live/
-│   ├── terragrunt.hcl      # Root config (multi-cloud provider dispatch)
+│   ├── root.hcl            # Root config (multi-cloud provider dispatch)
 │   ├── _envcommon/
 │   │   ├── aws/            # AWS dependency wiring (24 .hcl)
 │   │   ├── gcp/            # GCP dependency wiring

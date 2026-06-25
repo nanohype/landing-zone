@@ -126,7 +126,7 @@ Components define **what** to create. They are environment-agnostic -- no hardco
 
 Terragrunt configuration that wires components to environments.
 
-- **`terragrunt.hcl`** (root) -- generates the cloud-specific provider (AWS/GCP/Azure) with default tags/labels and configures the state backend (S3/GCS/Azure Blob). Every environment inherits this.
+- **`root.hcl`** (root) -- generates the cloud-specific provider (AWS/GCP/Azure) with default tags/labels and configures the state backend (S3/GCS/Azure Blob). Every environment inherits this.
 - **`_envcommon/{cloud}/{name}.hcl`** -- one per component per cloud. Declares dependencies (which other components' outputs this one needs) and shared inputs.
 - **`{cloud}/{account}/{region}/{env}/env.hcl`** -- environment-specific locals (identifiers, cost center, business unit, data classification, compliance, repository).
 - **`{cloud}/{account}/{region}/{env}/{component}/terragrunt.hcl`** -- per-environment overrides (e.g., node counts, feature toggles, tenant maps).
@@ -141,7 +141,7 @@ Shared sub-modules used across components:
 
 ### Key Files
 
-- **`Makefile`** -- build automation (`fmt`, `validate`, `lint`, `plan`, `apply`) with `CLOUD` parameter
+- **`Taskfile.yaml`** -- task automation (`fmt`, `validate`, `lint`, `plan`, `apply`) with `CLOUD` parameter
 - **`.tflint-aws.hcl`**, **`.tflint-gcp.hcl`**, **`.tflint-azure.hcl`** -- per-cloud TFLint configurations
 - **`scripts/init-backend-{aws,gcp,azure}.sh`** -- creates the state backend storage per cloud
 
@@ -167,7 +167,7 @@ OpenTofu manages cloud resources plus the initial bootstrap of Cilium (CNI) and 
 
 ### Default Tags / Labels
 
-The root `terragrunt.hcl` injects metadata on every resource. AWS uses `default_tags` (8 tags), GCP uses `default_labels` (8 labels, lowercase with underscores), and Azure tags are applied per-component. Components must not duplicate these.
+The root `root.hcl` injects metadata on every resource. AWS uses `default_tags` (8 tags), GCP uses `default_labels` (8 labels, lowercase with underscores), and Azure tags are applied per-component. Components must not duplicate these.
 
 ### State Management
 

@@ -11,7 +11,7 @@ OpenTofu is the open-source fork of Terraform, free from licensing restrictions.
 ### Why Terragrunt
 
 Terragrunt provides DRY environment management on top of OpenTofu:
-- **Single provider/backend config** -- the root `terragrunt.hcl` generates the cloud-specific `provider.tf` and `backend.tf` for every component
+- **Single provider/backend config** -- the root `root.hcl` generates the cloud-specific `provider.tf` and `backend.tf` for every component
 - **Dependency orchestration** -- `dependency` blocks in `_envcommon/{cloud}/` wire outputs between components without hardcoding
 - **Environment parity** -- same components, different inputs per environment
 - **Multi-cloud dispatch** -- a single root config conditionally generates the correct provider (AWS/GCP/Azure) and state backend (S3/GCS/Azure Blob)
