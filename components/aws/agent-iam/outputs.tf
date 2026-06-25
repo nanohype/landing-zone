@@ -3,6 +3,11 @@ output "operator_role_arn" {
   value       = aws_iam_role.operator.arn
 }
 
+output "operator_role_name" {
+  description = "Name of the eks-agent-platform operator IRSA role (for consumers that attach policies to it by name)"
+  value       = aws_iam_role.operator.name
+}
+
 output "tenant_baseline_policy_arn" {
   description = "ARN of the tenant baseline managed policy"
   value       = aws_iam_policy.tenant_baseline.arn
