@@ -16,7 +16,6 @@ module "tenant" {
   vpc_id          = var.vpc_id
   private_subnets = var.private_subnet_ids
   cluster_sg_id   = var.cluster_sg_id
-  oidc_provider   = var.oidc_provider_arn
-  oidc_issuer     = var.oidc_issuer
+  cluster_name    = var.cluster_name
   tags            = local.tags
 }

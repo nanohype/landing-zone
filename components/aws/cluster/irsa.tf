@@ -10,11 +10,10 @@ locals {
 module "ebs_csi_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_role_prefix}-ebs-csi"
-  oidc_provider_arn = local.oidc_provider_arn
-  oidc_issuer       = local.oidc_issuer
-  namespace         = "kube-system"
-  service_account   = "ebs-csi-controller-sa"
+  role_name       = "${local.irsa_role_prefix}-ebs-csi"
+  cluster_name    = local.cluster_name
+  namespace       = "kube-system"
+  service_account = "ebs-csi-controller-sa"
 
   managed_policy_arns = [
     "arn:${local.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy",

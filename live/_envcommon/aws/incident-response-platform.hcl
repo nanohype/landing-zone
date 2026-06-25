@@ -17,13 +17,11 @@ dependency "cluster" {
   config_path = "${get_path_relative_to_include("live")}/../cluster"
 
   mock_outputs = {
-    oidc_provider_arn = "arn:aws:iam::000000000000:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/MOCK"
-    oidc_issuer       = "oidc.eks.us-west-2.amazonaws.com/id/MOCK"
+    cluster_name = "mock-eks"
   }
   mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 inputs = {
-  oidc_provider_arn = dependency.cluster.outputs.oidc_provider_arn
-  oidc_issuer       = dependency.cluster.outputs.oidc_issuer
+  cluster_name = dependency.cluster.outputs.cluster_name
 }

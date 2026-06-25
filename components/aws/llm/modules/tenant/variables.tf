@@ -39,12 +39,9 @@ variable "cluster_sg_id" {
   type = string
 }
 
-variable "oidc_provider" {
-  type = string
-}
-
-variable "oidc_issuer" {
-  type = string
+variable "cluster_name" {
+  description = "Name of the EKS cluster the Pod Identity association targets."
+  type        = string
 }
 
 variable "tags" {

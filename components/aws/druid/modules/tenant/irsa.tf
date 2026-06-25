@@ -37,11 +37,10 @@ locals {
 module "historical_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-historical"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.druid_namespace
-  service_account   = "druid-historical"
+  role_name       = "${local.irsa_prefix}-historical"
+  cluster_name    = var.cluster_name
+  namespace       = local.druid_namespace
+  service_account = "druid-historical"
 
   policy_statements = [
     {
@@ -62,11 +61,10 @@ module "historical_irsa" {
 module "ingestion_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-ingestion"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.druid_namespace
-  service_account   = "druid-ingestion"
+  role_name       = "${local.irsa_prefix}-ingestion"
+  cluster_name    = var.cluster_name
+  namespace       = local.druid_namespace
+  service_account = "druid-ingestion"
 
   policy_statements = concat(local.s3_policy_statements, var.tenant_config.msk_enabled ? [
     {
@@ -89,11 +87,10 @@ module "ingestion_irsa" {
 module "query_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_prefix}-query"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.druid_namespace
-  service_account   = "druid-query"
+  role_name       = "${local.irsa_prefix}-query"
+  cluster_name    = var.cluster_name
+  namespace       = local.druid_namespace
+  service_account = "druid-query"
 
   policy_statements = local.s3_policy_statements
 
@@ -105,11 +102,10 @@ module "msk_client_irsa" {
   source = "../../../../../modules/aws/workload-identity"
   count  = var.tenant_config.msk_enabled ? 1 : 0
 
-  role_name         = "${local.irsa_prefix}-msk-client"
-  oidc_provider_arn = var.oidc_provider
-  oidc_issuer       = var.oidc_issuer
-  namespace         = local.druid_namespace
-  service_account   = "druid-msk-client"
+  role_name       = "${local.irsa_prefix}-msk-client"
+  cluster_name    = var.cluster_name
+  namespace       = local.druid_namespace
+  service_account = "druid-msk-client"
 
   policy_statements = [
     {

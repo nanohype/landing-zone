@@ -14,8 +14,7 @@ dependency "cluster" {
   config_path = "../cluster"
   mock_outputs = {
     cluster_security_group_id = "sg-mock"
-    oidc_provider_arn         = "arn:aws:iam::123456789012:oidc-provider/mock"
-    oidc_issuer               = "oidc.eks.us-west-2.amazonaws.com/id/MOCK"
+    cluster_name = "mock-eks"
   }
 }
 
@@ -23,7 +22,6 @@ inputs = {
   vpc_id             = dependency.network.outputs.vpc_id
   private_subnet_ids = dependency.network.outputs.private_subnet_ids
   cluster_sg_id      = dependency.cluster.outputs.cluster_security_group_id
-  oidc_provider_arn  = dependency.cluster.outputs.oidc_provider_arn
-  oidc_issuer        = dependency.cluster.outputs.oidc_issuer
+  cluster_name = dependency.cluster.outputs.cluster_name
   team               = "data-platform"
 }

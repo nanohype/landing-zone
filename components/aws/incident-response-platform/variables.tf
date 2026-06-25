@@ -8,13 +8,8 @@ variable "region" {
   type        = string
 }
 
-variable "oidc_provider_arn" {
-  description = "EKS OIDC provider ARN (from the cluster component)."
-  type        = string
-}
-
-variable "oidc_issuer" {
-  description = "EKS OIDC issuer URL without the https:// prefix."
+variable "cluster_name" {
+  description = "Name of the EKS cluster the Pod Identity association targets."
   type        = string
 }
 

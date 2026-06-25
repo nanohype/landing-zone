@@ -13,16 +13,6 @@ variable "cluster_name" {
   type        = string
 }
 
-variable "oidc_provider_arn" {
-  description = "OIDC provider ARN for IRSA (grafana-agent role)"
-  type        = string
-}
-
-variable "oidc_issuer" {
-  description = "OIDC issuer URL (without https://)"
-  type        = string
-}
-
 variable "team" {
   description = "Owning team for this component"
   type        = string

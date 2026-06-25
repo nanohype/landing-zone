@@ -16,7 +16,6 @@ module "tenant" {
   region        = var.region
   tenant_id     = each.key
   tenant_config = each.value
-  oidc_provider = var.oidc_provider_arn
-  oidc_issuer   = var.oidc_issuer
+  cluster_name  = var.cluster_name
   tags          = local.tags
 }

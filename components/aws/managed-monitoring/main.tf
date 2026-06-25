@@ -45,11 +45,10 @@ resource "aws_prometheus_alert_manager_definition" "this" {
 module "grafana_agent_amp_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name         = "${local.irsa_role_prefix}-grafana-agent-amp"
-  oidc_provider_arn = var.oidc_provider_arn
-  oidc_issuer       = var.oidc_issuer
-  namespace         = "monitoring"
-  service_account   = "grafana-agent"
+  role_name       = "${local.irsa_role_prefix}-grafana-agent-amp"
+  cluster_name    = var.cluster_name
+  namespace       = "monitoring"
+  service_account = "grafana-agent"
 
   policy_statements = [
     {
