@@ -263,16 +263,16 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # Disable to install the operator out of band (see enable_agent_platform).
       "eks-agent-platform/enabled" = "true"
     } : {})
-    # Per-cluster IRSA wiring for the agent-platform operator: the cluster OIDC
-    # outputs + the deterministic operator role ARN (path-scoped, named by
-    # agent-iam as <env>-eks-agent-platform-operator). The eks-gitops operator
-    # ApplicationSet reads these via the ArgoCD cluster generator and injects
-    # them as Helm values, so the operator gets its IRSA without the account ID
-    # ever being committed to the public gitops repos. Annotations (not labels)
-    # because ARNs contain characters that label values disallow.
+    # Per-cluster wiring for the agent-platform operator: the EKS cluster name
+    # (the operator creates the tenant Pod Identity associations on it) + the
+    # deterministic operator role ARN (path-scoped, named by agent-iam as
+    # <env>-eks-agent-platform-operator). The eks-gitops operator ApplicationSet
+    # reads these via the ArgoCD cluster generator and injects them as Helm
+    # values, so the operator gets its config without the account ID ever being
+    # committed to the public gitops repos. Annotations (not labels) because ARNs
+    # contain characters that label values disallow.
     annotations = merge({
-      "eks-agent-platform/oidc-provider-arn" = var.oidc_provider_arn
-      "eks-agent-platform/oidc-issuer-host"  = var.oidc_issuer
+      "eks-agent-platform/cluster-name"      = var.cluster_name
       "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.environment}-eks-agent-platform-operator"
       }, var.enable_eval_runtime ? {
       # eval-runner IRSA + reports bucket, read from the eval-runtime SSM params.
