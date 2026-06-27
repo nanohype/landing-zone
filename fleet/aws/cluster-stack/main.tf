@@ -24,7 +24,14 @@ locals {
     Expiry    = formatdate("YYYY-MM-DD", timeadd(time_static.vend[0].rfc3339, "${var.ttl_days * 24}h"))
   } : { Lifecycle = "persistent" }
 
-  spoke_tags = merge(var.tags, local.lifecycle_tags)
+  # Per-cluster discovery key. The break-glass unwedge teardown targets exactly
+  # this cluster's resources by matching BOTH ProvisionedBy=eks-fleet (provider
+  # default_tags) AND this Cluster tag — so a teardown can never reach into a
+  # sibling spoke in the same account. Mirrors the EKS cluster's own name
+  # (the component prefixes cluster_name with the environment).
+  spoke_tags = merge(var.tags, local.lifecycle_tags, {
+    Cluster = "${var.environment}-${var.cluster_name}"
+  })
 
   # Cross-account bootstrap auth: grant the hub role cluster-admin on the spoke via
   # an EKS access entry. The bootstrap Workspace mints its k8s token with ambient
