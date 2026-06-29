@@ -61,7 +61,11 @@ module "eks" {
     aws-ebs-csi-driver = {
       most_recent                 = true
       resolve_conflicts_on_create = "OVERWRITE"
-      service_account_role_arn    = module.ebs_csi_irsa.iam_role_arn
+      # Credentials come from the ebs_csi_irsa Pod Identity association
+      # (pods.eks.amazonaws.com trust) + the eks-pod-identity-agent addon, so the
+      # addon takes no service_account_role_arn — that annotates the SA for
+      # IRSA/web-identity, which a Pod-Identity-only role can't satisfy and the
+      # controller crashloops on.
     }
     eks-pod-identity-agent = {
       most_recent                 = true

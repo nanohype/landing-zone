@@ -95,9 +95,9 @@ variable "enable_agent_platform" {
 }
 
 variable "enable_managed_monitoring" {
-  description = "Stamp the Amazon Managed Grafana workspace URL (read from the SSM parameter the managed-monitoring component writes under /eks-agent-platform/<env>/managed-monitoring/) onto the cluster Secret, where the dashboards ApplicationSet injects it into the Grafana CR. Requires managed-monitoring to have applied first. Default true: the observability stack (AMP/AMG dashboards) is core substrate. Set false on a cluster that doesn't run managed-monitoring — the dashboards Grafana CR then renders without an external URL."
+  description = "Stamp the Amazon Managed Grafana workspace URL (read from the SSM parameter the managed-monitoring component writes under /eks-agent-platform/<env>/managed-monitoring/) onto the cluster Secret, where the dashboards ApplicationSet injects it into the Grafana CR. Opt-in (default false), mirroring enable_eval_runtime: set true only on a cluster whose managed-monitoring component has already applied and published the parameter — a default-true fails the SSM read on any cluster that doesn't run managed-monitoring. Left false, the dashboards Grafana CR renders without an external URL."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "enable_eval_runtime" {
