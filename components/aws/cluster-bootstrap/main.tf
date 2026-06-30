@@ -36,27 +36,29 @@ locals {
 # Kubernetes & Helm Provider Config
 ################################################################################
 
+# The k8s/helm/kubectl providers authenticate with a short-lived EKS token minted
+# by the AWS SDK (data.aws_eks_cluster_auth), NOT the `aws eks get-token` exec
+# plugin. The exec plugin requires the `aws` CLI on PATH, which the provider-opentofu
+# pod that runs this root during a fleet vend does not have (the terragrunt path
+# does; the pod does not). The data-source token inherits this root's AWS identity
+# — including the cross-account assume_role — so same- and cross-account vends both
+# reach the spoke API. provider-opentofu re-reads the data source each reconcile,
+# keeping the 15-minute token fresh across the bootstrap apply loop.
+data "aws_eks_cluster_auth" "this" {
+  name = var.cluster_name
+}
+
 provider "kubernetes" {
   host                   = var.cluster_endpoint
   cluster_ca_certificate = base64decode(var.cluster_certificate_authority_data)
-
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", var.cluster_name, "--region", var.region]
-  }
+  token                  = data.aws_eks_cluster_auth.this.token
 }
 
 provider "helm" {
   kubernetes = {
     host                   = var.cluster_endpoint
     cluster_ca_certificate = base64decode(var.cluster_certificate_authority_data)
-
-    exec = {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", var.cluster_name, "--region", var.region]
-    }
+    token                  = data.aws_eks_cluster_auth.this.token
   }
 }
 
@@ -64,12 +66,7 @@ provider "kubectl" {
   host                   = var.cluster_endpoint
   cluster_ca_certificate = base64decode(var.cluster_certificate_authority_data)
   load_config_file       = false
-
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", var.cluster_name, "--region", var.region]
-  }
+  token                  = data.aws_eks_cluster_auth.this.token
 }
 
 ################################################################################

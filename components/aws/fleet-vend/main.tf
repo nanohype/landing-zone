@@ -400,6 +400,17 @@ resource "aws_iam_role_policy" "vend" {
         ]
         Resource = local.agent_platform_ssm_arn
       },
+      {
+        # agent-iam: tofu refreshes each aws_ssm_parameter via ssm:DescribeParameters
+        # (a metadata read on plan/observe). DescribeParameters is a list action that
+        # does NOT support resource-level permissions, so it must be granted on "*"
+        # — it enumerates parameter metadata account-wide; value read/write stays
+        # path-scoped by AgentPlatformSSMState above. Keep in sync with fleet-hub.
+        Sid      = "AgentPlatformSSMDescribe"
+        Effect   = "Allow"
+        Action   = ["ssm:DescribeParameters"]
+        Resource = "*"
+      },
     ]
   })
 }
