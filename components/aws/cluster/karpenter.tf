@@ -19,6 +19,15 @@ module "karpenter" {
   node_iam_role_path                 = var.cluster_iam_role_path
   node_iam_role_permissions_boundary = local.cluster_permissions_boundary
 
+  # The node role name is a cross-repo contract: eks-gitops karpenter-resources
+  # pins the EC2NodeClass spec.role to "${cluster_name}-karpenter-node" (its
+  # convention across dev/staging/production). The module's default name
+  # (Karpenter-<cluster>-<random>) is unpredictable and unreferenceable, so the
+  # EC2NodeClass and the controller's auto-scoped PassRole would point at
+  # different roles and Karpenter could never launch a node. Pin to the convention.
+  node_iam_role_name            = "${module.eks.cluster_name}-karpenter-node"
+  node_iam_role_use_name_prefix = false
+
   # The generated controller policy exceeds the 6144-char limit on standard
   # customer-managed IAM policies; the module's documented workaround is to
   # attach it inline (10240-char limit) instead.
