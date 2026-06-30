@@ -265,3 +265,69 @@ EKS does not support in-place downgrades. If the upgrade fails:
 - Karpenter nodes will continue running the old kubelet version until recycled
 - Fix forward by addressing compatibility issues
 - In extreme cases, restore from backup and rebuild the cluster at the old version
+
+## RB-007: Tearing Down a Wedged EKS Fleet Vend
+
+The `fleet-vend` / `fleet-hub` roles provision EKS spokes. Teardown — a
+`tofu destroy` driven by deleting the Crossplane `Cluster` — can wedge for two
+reasons: a vend role that is create-complete may be destroy-incomplete, and
+Karpenter + EKS leave AWS residue that `tofu destroy` never owned. This is the
+order and the known wedges from live spoke teardowns.
+
+### Let the Composition Drive the Order
+
+1. Delete the tenant ApplicationSets (eks-gitops) first.
+2. Delete the `Cluster` CR. This cascades both Workspaces' `tofu destroy`. The
+   composition's `Usage` (of: cluster-stack, by: cluster-bootstrap) blocks
+   cluster-stack's teardown until cluster-bootstrap is gone, so the bootstrap
+   destroys against a live API endpoint (its `tofu destroy` needs the spoke API)
+   before the cluster itself is torn down.
+3. Destroy the standalone substrate: the `fleet-vend` / `fleet-hub` roles, the
+   tfstate bucket, the hub cluster.
+
+### Create-Complete ≠ Destroy-Complete
+
+The vend/hub roles minted everything on the create path but were missing a few
+destroy-path permissions; each surfaced as a `tofu destroy` 403:
+
+- `iam:ListInstanceProfilesForRole` / `iam:GetInstanceProfile` — the pre-delete
+  role read.
+- `iam:RemoveRoleFromInstanceProfile` + `iam:DeleteInstanceProfile` on
+  Karpenter's **root-path** node instance profile `<cluster>_<hash>`. Karpenter
+  (v1) creates it outside the `/eks-fleet/` path, so the path-scoped grant
+  didn't cover it; the roles now also scope `instance-profile/<environment>-*`.
+
+A fresh 403 on a destroy action is a missing permission on the vend/hub role —
+fix the role and file it, don't reach for the manual workaround as the answer.
+
+### The Residue tofu Doesn't Own
+
+`tofu destroy` tears down what tofu created; Karpenter and EKS leave their own:
+
+- **Karpenter EC2 instances** — terminate by tag `karpenter.sh/nodepool`; they
+  block subnet/VPC deletion.
+- **Karpenter SQS queue + EventBridge rules**, **EKS CloudWatch log groups** —
+  `cloudgov orphans --profile <p>` finds these; reap them.
+- **Versioned tfstate bucket** — `DeleteBucket` returns 409 `BucketNotEmpty`
+  even when it looks empty. Purge every object *version* and delete marker
+  first, then delete the bucket.
+
+### When It's Truly Wedged (external-create-pending)
+
+A Workspace stuck `external-create-pending` blocks both create and delete.
+**Never cycle the `provider-opentofu` pod mid-apply** — it orphans the vend
+(live AWS, empty S3 state). To clear:
+
+1. Drop the Workspace finalizer so the managed resource deletes.
+2. Delete the live AWS resources directly, in dependency order: EKS control
+   plane → ENIs / security groups / subnets / VPC → IAM roles + instance
+   profiles → CloudWatch log groups.
+3. Refresh expired provider credentials through the `aws-creds` secret — not a
+   pod restart.
+
+### Close Out
+
+Run `cloudgov orphans --profile <p>` in every touched account until clean.
+Confirm zero EKS / NAT / VPC / EC2 / EBS / ELB / EIP before walking away. A
+COMPLIANCE-locked S3 bucket (e.g. a Bedrock invocation-log bucket) stays
+undeletable until its retention elapses — that's expected; leave it.
