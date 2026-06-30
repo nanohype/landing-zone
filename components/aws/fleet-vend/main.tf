@@ -358,6 +358,9 @@ resource "aws_iam_role_policy" "vend" {
           "iam:DeleteRolePolicy",
           "iam:ListRolePolicies",
           "iam:ListAttachedRolePolicies",
+          # the AWS provider lists a role's instance profiles before DeleteRole
+          # (to detach first) — required to tear an agent-platform role down.
+          "iam:ListInstanceProfilesForRole",
           "iam:DeleteRole",
         ]
         Resource = local.agent_platform_role_arn
