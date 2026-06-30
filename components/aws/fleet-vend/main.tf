@@ -39,6 +39,15 @@ locals {
   managed_policy_arn        = "arn:${local.partition}:iam::${local.account_id}:policy${local.iam_path}*"
   managed_instance_prof_arn = "arn:${local.partition}:iam::${local.account_id}:instance-profile${local.iam_path}*"
 
+  # agent-iam provisioning surface — the eks-agent-platform operator IRSA role, the
+  # two tenant managed policies, and the operator-startup SSM params all land under
+  # /eks-agent-platform/. When the bootstrap runs cross-account, module.agent_iam
+  # runs as THIS vend role; the ARNs resolve to the spoke account. The vend boundary
+  # already allows iam:*/ssm:* on "*", so only the path-scoped statements are needed.
+  agent_platform_role_arn   = "arn:${local.partition}:iam::${local.account_id}:role/eks-agent-platform/*"
+  agent_platform_policy_arn = "arn:${local.partition}:iam::${local.account_id}:policy/eks-agent-platform/*"
+  agent_platform_ssm_arn    = "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter/eks-agent-platform/*"
+
   tags = merge(var.tags, {
     Component = "fleet-vend"
     Team      = var.team
@@ -328,6 +337,68 @@ resource "aws_iam_role_policy" "vend" {
           "iam:TagPolicy",
         ]
         Resource = local.managed_policy_arn
+      },
+      {
+        # agent-iam (eks-agent-platform): create + manage the operator IRSA role
+        # under /eks-agent-platform/ during a vend. Path-scoped — the vend boundary
+        # is the escalation ceiling, same gate model as ManageClusterRolesByPath.
+        # The operator role carries no permissions_boundary, so no boundary
+        # condition. Keep in sync with fleet-hub's ManageAgentPlatform* statements.
+        Sid    = "ManageAgentPlatformRolesByPath"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateRole",
+          "iam:GetRole",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:UpdateAssumeRolePolicy",
+          "iam:UpdateRoleDescription",
+          "iam:PutRolePolicy",
+          "iam:GetRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:DeleteRole",
+        ]
+        Resource = local.agent_platform_role_arn
+      },
+      {
+        # agent-iam: the tenant-boundary + tenant-baseline managed policies under
+        # /eks-agent-platform/ — the agent-platform sibling of ManageClusterPolicies.
+        # Keep in sync with fleet-hub.
+        Sid    = "ManageAgentPlatformPolicies"
+        Effect = "Allow"
+        Action = [
+          "iam:CreatePolicy",
+          "iam:GetPolicy",
+          "iam:GetPolicyVersion",
+          "iam:ListPolicyVersions",
+          "iam:CreatePolicyVersion",
+          "iam:DeletePolicyVersion",
+          "iam:TagPolicy",
+          "iam:UntagPolicy",
+          "iam:ListPolicyTags",
+          "iam:DeletePolicy",
+        ]
+        Resource = local.agent_platform_policy_arn
+      },
+      {
+        # agent-iam: the operator-startup SSM params under
+        # /eks-agent-platform/<env>/agent-iam/* — the agent-platform sibling of
+        # SSMState. Keep in sync with fleet-hub.
+        Sid    = "AgentPlatformSSMState"
+        Effect = "Allow"
+        Action = [
+          "ssm:PutParameter",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+          "ssm:DeleteParameter",
+          "ssm:AddTagsToResource",
+          "ssm:RemoveTagsFromResource",
+          "ssm:ListTagsForResource",
+        ]
+        Resource = local.agent_platform_ssm_arn
       },
     ]
   })
