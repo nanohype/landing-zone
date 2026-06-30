@@ -45,6 +45,14 @@ locals {
   managed_policy_arn        = "arn:${local.partition}:iam::${local.account_id}:policy${local.iam_path}*"
   managed_instance_prof_arn = "arn:${local.partition}:iam::${local.account_id}:instance-profile${local.iam_path}*"
 
+  # Karpenter (v1) mints its node instance profile at the ROOT path as
+  # <cluster>_<hash>; the EKS cluster name is env-prefixed (see cluster-stack),
+  # so every Karpenter profile in this account shares the ${var.environment}-
+  # prefix. The hub role never creates these — but at teardown (after Karpenter
+  # is uninstalled) it must detach + delete them to drop the node role, which
+  # falls outside the /eks-fleet/ path.
+  managed_karpenter_instance_prof_arn = "arn:${local.partition}:iam::${local.account_id}:instance-profile/${var.environment}-*"
+
   # agent-iam provisioning surface — the eks-agent-platform operator IRSA role, the
   # two tenant managed policies, and the operator-startup SSM params all land under
   # /eks-agent-platform/. The hub role provisions them in a same-account vend
@@ -379,12 +387,24 @@ resource "aws_iam_role_policy" "hub" {
         Action = [
           "iam:DeleteRole",
           "iam:CreateInstanceProfile",
-          "iam:DeleteInstanceProfile",
           "iam:AddRoleToInstanceProfile",
-          "iam:RemoveRoleFromInstanceProfile",
           "iam:TagInstanceProfile",
         ]
         Resource = [local.managed_role_arn, local.managed_instance_prof_arn]
+      },
+      {
+        # Detach + delete instance profiles at teardown. Karpenter's node
+        # instance profile lives at the root path (<cluster>_<hash>), so these
+        # two destructive actions also cover the env-prefixed root-path profiles
+        # — without it `tofu destroy` 403s removing the node role from its
+        # profile once Karpenter is already uninstalled (issue #84).
+        Sid    = "DetachAndDeleteInstanceProfiles"
+        Effect = "Allow"
+        Action = [
+          "iam:DeleteInstanceProfile",
+          "iam:RemoveRoleFromInstanceProfile",
+        ]
+        Resource = [local.managed_instance_prof_arn, local.managed_karpenter_instance_prof_arn]
       },
       {
         Sid    = "ManageClusterPolicies"
