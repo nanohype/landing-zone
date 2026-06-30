@@ -29,11 +29,7 @@ module "cluster_bootstrap" {
   cluster_name                       = var.cluster_name
   cluster_endpoint                   = var.cluster_endpoint
   cluster_certificate_authority_data = var.cluster_certificate_authority_data
-  oidc_provider_arn                  = var.oidc_provider_arn
-  oidc_issuer                        = var.oidc_issuer
   vpc_id                             = var.vpc_id
-  team                               = var.team
-  tags                               = var.tags
 
   enable_agent_platform = var.enable_agent_platform
   tenants_repo_url      = var.tenants_repo_url
