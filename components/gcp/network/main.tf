@@ -47,12 +47,14 @@ resource "google_compute_subnetwork" "private" {
 }
 
 resource "google_compute_subnetwork" "public" {
-  name                     = "${local.name_prefix}-public"
-  project                  = var.project_id
-  region                   = var.region
-  network                  = google_compute_network.this.id
+  name    = "${local.name_prefix}-public"
+  project = var.project_id
+  region  = var.region
+  network = google_compute_network.this.id
+  # Private Google access costs nothing and lets anything in this subnet
+  # without an external IP still reach Google APIs.
   ip_cidr_range            = "10.1.0.0/20"
-  private_ip_google_access = false
+  private_ip_google_access = true
 
   dynamic "log_config" {
     for_each = var.enable_flow_logs ? [1] : []

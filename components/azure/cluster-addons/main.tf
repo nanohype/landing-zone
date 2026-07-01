@@ -240,6 +240,8 @@ resource "azurerm_storage_account" "loki" {
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
 
+  allow_nested_items_to_be_public = false
+
   blob_properties {
     delete_retention_policy {
       days = 7
@@ -266,6 +268,8 @@ resource "azurerm_storage_account" "tempo" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
+
+  allow_nested_items_to_be_public = false
 
   blob_properties {
     delete_retention_policy {
@@ -294,6 +298,8 @@ resource "azurerm_storage_account" "velero" {
   account_replication_type = "GRS"
   min_tls_version          = "TLS1_2"
 
+  allow_nested_items_to_be_public = false
+
   blob_properties {
     delete_retention_policy {
       days = 30
@@ -320,6 +326,8 @@ resource "azurerm_storage_account" "argo_workflows" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
+
+  allow_nested_items_to_be_public = false
 
   blob_properties {
     delete_retention_policy {
