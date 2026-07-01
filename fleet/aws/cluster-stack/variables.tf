@@ -66,9 +66,9 @@ variable "cluster_version" {
 }
 
 variable "cluster_endpoint_public_access" {
-  description = "Enable the public EKS API endpoint"
+  description = "Enable the public EKS API endpoint — explicit opt-in; private by default"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cluster_endpoint_public_access_cidrs" {

@@ -38,9 +38,9 @@ variable "public_subnet_ids" {
 
 # Cluster access
 variable "cluster_endpoint_public_access" {
-  description = "Enable public API endpoint (requires VPC endpoints for eks and eks-auth if false)"
+  description = "Enable public API endpoint — explicit opt-in; private by default (requires VPC endpoints for eks and eks-auth when false)"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cluster_endpoint_public_access_cidrs" {
