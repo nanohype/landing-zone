@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        cloud: [aws, gcp, azure]
+        cloud: [aws, gcp]
     steps:
       - uses: actions/checkout@v4
       - uses: terraform-linters/setup-tflint@v6
@@ -115,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cloud: [aws, gcp, azure]
+        cloud: [aws, gcp]
     steps:
       - uses: actions/checkout@v4
       - uses: bridgecrewio/checkov-action@v12
@@ -123,8 +123,8 @@ jobs:
           directory: components/${{ matrix.cloud }}/
           framework: terraform
           # HARD gate: any finding not covered by .checkov.yaml fails the
-          # build. The deliberately-accepted posture trade-offs (single-RG
-          # isolation, provider-managed encryption, public endpoints with IP
+          # build. The deliberately-accepted posture trade-offs (single-region
+          # durability, provider-managed encryption, public endpoints with IP
           # allowlists) and checkov false positives are enumerated there as
           # skip-check entries, one line of rationale each — accepted and
           # documented, never silently advisory.
@@ -135,8 +135,8 @@ jobs:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]
     runs-on: ubuntu-latest
-    # The plan jobs need cloud credentials (vars.AWS_ROLE_ARN and the GCP /
-    # Azure equivalents). Until those repo variables are set, the plan is
+    # The plan jobs need cloud credentials (vars.AWS_ROLE_ARN and the GCP
+    # equivalents). Until those repo variables are set, the plan is
     # advisory: it still runs and surfaces output, but a missing-credentials
     # failure does not block the build. The hard gates are the placeholder
     # check, fmt, validate, tflint, and checkov (checkov gated by the
@@ -171,9 +171,8 @@ jobs:
       # so the matrix entry comes back green-skipped rather than red-fail.
       # Set these in repo settings (Actions → Variables) to enable real
       # plans:
-      #   AWS:   AWS_ROLE_ARN
-      #   GCP:   GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT
-      #   Azure: AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID
+      #   AWS: AWS_ROLE_ARN
+      #   GCP: GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT
       - name: Configure AWS credentials
         if: matrix.cloud == 'aws' && vars.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
@@ -188,22 +187,13 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
-      - name: Azure Login
-        if: matrix.cloud == 'azure' && vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' && vars.AZURE_SUBSCRIPTION_ID != ''
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
       - name: Detect credential availability
         id: creds
         run: |
           case "${{ matrix.cloud }}" in
-            aws)   [ -n "${{ vars.AWS_ROLE_ARN }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
-            gcp)   [ -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] && [ -n "${{ vars.GCP_SERVICE_ACCOUNT }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
-            azure) [ -n "${{ vars.AZURE_CLIENT_ID }}" ] && [ -n "${{ vars.AZURE_TENANT_ID }}" ] && [ -n "${{ vars.AZURE_SUBSCRIPTION_ID }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
-            *)     echo "available=false" >> "$GITHUB_OUTPUT" ;;
+            aws) [ -n "${{ vars.AWS_ROLE_ARN }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
+            gcp) [ -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] && [ -n "${{ vars.GCP_SERVICE_ACCOUNT }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "available=false" >> "$GITHUB_OUTPUT" ;;
           esac
 
       - name: Skip notice (no cloud credentials configured)

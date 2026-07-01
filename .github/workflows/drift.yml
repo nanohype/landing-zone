@@ -12,7 +12,6 @@ on:
         options:
           - aws
           - gcp
-          - azure
         default: "aws"
 
 permissions:
@@ -45,15 +44,6 @@ jobs:
           - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: cost }
           - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: observability }
           - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: secrets }
-          # Azure production components
-          - { cloud: azure, account: workload-prod, region: westus2, env: production, component: network }
-          - { cloud: azure, account: workload-prod, region: westus2, env: production, component: cluster }
-          - { cloud: azure, account: workload-prod, region: westus2, env: production, component: cluster-addons }
-          - { cloud: azure, account: workload-prod, region: westus2, env: production, component: cluster-bootstrap }
-          - { cloud: azure, account: workload-prod, region: westus2, env: production, component: dns }
-          - { cloud: azure, account: workload-prod, region: westus2, env: production, component: cost }
-          - { cloud: azure, account: workload-prod, region: westus2, env: production, component: observability }
-          - { cloud: azure, account: workload-prod, region: westus2, env: production, component: secrets }
     steps:
       - uses: actions/checkout@v4
       - uses: opentofu/setup-opentofu@v1
@@ -81,14 +71,6 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-
-      - name: Azure Login
-        if: matrix.cloud == 'azure'
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Plan
         id: plan

@@ -8,7 +8,6 @@
 # NOT sentinels (intentional public-repo conventions, deliberately unmatched):
 #   - example.com domains
 #   - the 111111111111 / 222222222222 fake AWS account ids
-#   - Azure subscription/tenant GUID placeholders (xxxxxxxx-…)
 # Excluded by path: docs (prose, not applied config — *.md isn't scanned),
 # examples, test fixtures, vendored copies, and the opt-in mcp-tunnel addon
 # (user-supplied Cloudflare IDs, off by default).

@@ -4,7 +4,6 @@
 ![Terragrunt](https://img.shields.io/badge/Terragrunt-latest-blue?logo=terraform)
 ![AWS](https://img.shields.io/badge/AWS-Platform-FF9900?logo=amazonaws)
 ![GCP](https://img.shields.io/badge/GCP-Platform-4285F4?logo=googlecloud)
-![Azure](https://img.shields.io/badge/Azure-Platform-0078D4?logo=microsoftazure)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructure.
@@ -54,50 +53,40 @@ live/{cloud}/{account}/{region}/{environment}/{component}/terragrunt.hcl
 landing-zone/
 ├── components/
 │   ├── aws/                # AWS OpenTofu root modules
-│   ├── gcp/                # GCP OpenTofu root modules
-│   └── azure/              # Azure OpenTofu root modules
+│   └── gcp/                # GCP OpenTofu root modules
 ├── live/
 │   ├── root.hcl            # Root config (multi-cloud provider dispatch)
 │   ├── _envcommon/
 │   │   ├── aws/            # AWS dependency wiring (24 .hcl)
-│   │   ├── gcp/            # GCP dependency wiring
-│   │   └── azure/          # Azure dependency wiring
+│   │   └── gcp/            # GCP dependency wiring
 │   ├── aws/
 │   │   ├── cloud.hcl
 │   │   ├── management/     # Management account (org components)
 │   │   ├── workload-dev/   # Dev account
 │   │   ├── workload-staging/
 │   │   └── workload-prod/
-│   ├── gcp/
-│   │   ├── cloud.hcl
-│   │   ├── workload-dev/
-│   │   ├── workload-staging/
-│   │   └── workload-prod/
-│   └── azure/
+│   └── gcp/
 │       ├── cloud.hcl
 │       ├── workload-dev/
 │       ├── workload-staging/
 │       └── workload-prod/
 ├── modules/
 │   ├── aws/workload-identity/    # AWS IRSA role factory
-│   ├── gcp/workload-identity/    # GKE Workload Identity binding
-│   └── azure/workload-identity/  # AKS federated credential
+│   └── gcp/workload-identity/    # GKE Workload Identity binding
 ├── scripts/
 │   ├── init-backend-aws.sh
-│   ├── init-backend-gcp.sh
-│   └── init-backend-azure.sh
+│   └── init-backend-gcp.sh
 ├── Taskfile.yaml
 ├── .tflint.hcl              # Base rules
 ├── .tflint-aws.hcl          # AWS plugin
-├── .tflint-gcp.hcl          # GCP plugin
-└── .tflint-azure.hcl        # Azure plugin
+└── .tflint-gcp.hcl          # GCP plugin
 ```
 
 ## Prerequisites
 
 - [OpenTofu](https://opentofu.org/) >= 1.10.0
 - [Terragrunt](https://terragrunt.gruntwork.io/) (latest)
-- Cloud CLI tools: [AWS CLI v2](https://aws.amazon.com/cli/), [gcloud](https://cloud.google.com/sdk), [az CLI](https://learn.microsoft.com/en-us/cli/azure/)
+- Cloud CLI tools: [AWS CLI v2](https://aws.amazon.com/cli/), [gcloud](https://cloud.google.com/sdk)
 - [TFLint](https://github.com/terraform-linters/tflint) with cloud-specific plugins
 
 ## Quick Start
@@ -110,7 +99,6 @@ git clone <repo-url> && cd landing-zone
 # 2. Create backend infrastructure
 ./scripts/init-backend-aws.sh <account_id> <region>
 ./scripts/init-backend-gcp.sh <project_id> <region>
-./scripts/init-backend-azure.sh <subscription_id> <region>
 
 # 3. Plan all AWS dev components
 task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
@@ -134,7 +122,7 @@ task help             Show all targets
 
 ## CI/CD
 
-Four GitHub Actions workflows with conditional authentication per cloud (AWS OIDC, GCP Workload Identity Federation, Azure Federated Identity).
+Four GitHub Actions workflows with conditional authentication per cloud (AWS OIDC, GCP Workload Identity Federation).
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
@@ -149,7 +137,6 @@ Four GitHub Actions workflows with conditional authentication per cloud (AWS OID
 |----------|-------------|
 | [Onboarding Guide](docs/onboarding.md) | New engineer setup, tool installation, codebase walkthrough |
 | [First-time AWS Deploy](docs/first-deploy-aws.md) | Brand-new account → running EKS cluster (Identity Center, quotas, deploy order) |
-| [First-time Azure Deploy](docs/first-deploy-azure.md) | Brand-new subscription → running AKS cluster (Entra ID admin user, NAP, quotas) |
 | [First-time GCP Deploy](docs/first-deploy-gcp.md) | Brand-new project → running GKE cluster (APIs, Workload Identity, quotas) |
 | [Architecture](docs/architecture.md) | Design rationale, dependency graph, layer breakdown, security model |
 | [Operations](docs/operations.md) | Day-to-day procedures, CI/CD details, tenant management |

@@ -33,7 +33,6 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
    |-------|-----------|
    | AWS | Use `default_tags` (injected by provider). Resource names: `{project}-{env}-{component}-{resource}`. |
    | GCP | Use `default_labels` (injected by provider). Labels must be lowercase with underscores -- the root config handles this. Resource names must comply with GCP's 63-character limit. |
-   | Azure | Tags applied per-component. Resources must be placed in a resource group. Use `azurerm_resource_group` data source or create one per component. |
 
 5. Create `live/_envcommon/{cloud}/{name}.hcl` with:
    - `terraform` block pointing to `components/{cloud}/{name}/`

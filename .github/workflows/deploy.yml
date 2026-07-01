@@ -10,14 +10,13 @@ on:
         options:
           - aws
           - gcp
-          - azure
       account:
         description: "Target account/project (e.g., workload-dev, workload-staging, workload-prod, management)"
         required: true
         type: string
         default: "workload-dev"
       region:
-        description: "Target region (e.g., us-west-2, us-central1, westus2)"
+        description: "Target region (e.g., us-west-2, us-central1)"
         required: true
         type: string
         default: "us-west-2"
@@ -73,14 +72,6 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-
-      - name: Azure Login
-        if: inputs.cloud == 'azure'
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Run Terragrunt
         working-directory: live/${{ inputs.cloud }}/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}

@@ -105,6 +105,6 @@ tasks:
       - |
         echo ""
         echo "Usage:"
-        echo "  task <target> [CLOUD=aws|gcp|azure] [ACCOUNT=workload-dev|workload-staging|workload-prod|management] [REGION=us-west-2] [ENVIRONMENT=dev|staging|production|org] [COMPONENT=network|cluster|all]"
+        echo "  task <target> [CLOUD=aws|gcp] [ACCOUNT=workload-dev|workload-staging|workload-prod|management] [REGION=us-west-2] [ENVIRONMENT=dev|staging|production|org] [COMPONENT=network|cluster|all]"
         echo ""
         task --list
