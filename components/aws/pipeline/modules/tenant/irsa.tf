@@ -16,6 +16,16 @@ locals {
     "${module.staging_bucket.s3_bucket_arn}/*",
     "${module.curated_bucket.s3_bucket_arn}/*",
   ]
+
+  # Glue authorizes catalog operations against the catalog + database + table
+  # ARNs together, so the worker grant names all three — scoped to THIS tenant's
+  # database only, mirroring how the bucket/KMS statements above scope to the
+  # tenant's own resources.
+  glue_catalog_arns = [
+    "arn:aws:glue:${var.region}:${var.account_id}:catalog",
+    aws_glue_catalog_database.this.arn,
+    "arn:aws:glue:${var.region}:${var.account_id}:table/${aws_glue_catalog_database.this.name}/*",
+  ]
 }
 
 ################################################################################
@@ -69,7 +79,7 @@ module "worker_irsa" {
         "glue:UpdatePartition",
         "glue:DeletePartition",
       ]
-      Resource = ["*"]
+      Resource = local.glue_catalog_arns
     },
     {
       Effect = "Allow"

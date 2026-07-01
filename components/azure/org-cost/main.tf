@@ -75,6 +75,8 @@ resource "azurerm_storage_account" "cost_export" {
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
 
+  allow_nested_items_to_be_public = false
+
   tags = merge(local.tags, { Name = var.export_storage_account_name })
 }
 

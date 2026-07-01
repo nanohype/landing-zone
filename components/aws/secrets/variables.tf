@@ -26,7 +26,7 @@ variable "enable_key_rotation" {
 }
 
 variable "secrets" {
-  description = "Platform secrets to create"
+  description = "Platform secrets to create. Sensitive: secret_string payloads must never surface in plan output, CLI diffs, or CI logs."
   type = map(object({
     description             = optional(string, "")
     recovery_window_in_days = optional(number, 30)
@@ -34,7 +34,8 @@ variable "secrets" {
     generate_random         = optional(bool, false)
     random_length           = optional(number, 32)
   }))
-  default = {}
+  default   = {}
+  sensitive = true
 }
 
 variable "secret_path_prefix" {

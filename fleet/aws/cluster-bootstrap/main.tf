@@ -17,8 +17,14 @@ module "agent_iam" {
   region            = var.region
   oidc_provider_arn = var.oidc_provider_arn
   oidc_issuer       = var.oidc_issuer
-  team              = var.team
-  tags              = var.tags
+
+  # The vend/hub boundary — the fleet role running this Workspace may only
+  # create roles that carry its own ceiling (fleet-vend/fleet-hub CreateRole
+  # gates), so the operator role must be minted with it.
+  operator_permissions_boundary_arn = var.operator_permissions_boundary_arn
+
+  team = var.team
+  tags = var.tags
 }
 
 module "cluster_bootstrap" {

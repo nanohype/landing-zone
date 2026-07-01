@@ -39,6 +39,7 @@ resource "aws_security_group" "msk" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "MSK broker egress (inter-broker replication, CloudWatch)"
   }
 
   tags = merge(local.tenant_tags, { Name = "${local.prefix}-msk" })

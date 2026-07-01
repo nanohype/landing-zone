@@ -41,13 +41,13 @@ variable "portal_access_role_arn" {
 }
 
 variable "cluster_iam_role_path" {
-  description = "IAM path for the cluster's IAM roles + policies. \"/eks-fleet/\" for cross-account fleet-vend gating; \"/\" (default) for same-account."
+  description = "IAM path for the cluster's IAM roles + policies. \"/eks-fleet/\" for fleet-vend/fleet-hub gating; \"/\" (default) outside the fleet gate."
   type        = string
   default     = "/"
 }
 
 variable "cluster_permissions_boundary_arn" {
-  description = "Permissions-boundary ARN for the cluster's IAM roles. Empty (default) = no boundary; inert under fleet-vend's path-only gate."
+  description = "Permissions-boundary ARN for the cluster's IAM roles. Fleet vends MUST set it to the boundary of the fleet role running this Workspace — fleet-vend's for cross-account (SSM /eks-fleet/<env>/fleet-vend/vend_permissions_boundary_arn), fleet-hub's for same-account (SSM /eks-fleet/<env>/fleet-hub/hub_permissions_boundary_arn) — because the fleet roles' CreateRole gate rejects any cluster role that doesn't carry their ceiling. Empty (default) = no boundary (running outside the fleet gate)."
   type        = string
   default     = ""
 }
@@ -66,9 +66,9 @@ variable "cluster_version" {
 }
 
 variable "cluster_endpoint_public_access" {
-  description = "Enable the public EKS API endpoint"
+  description = "Enable the public EKS API endpoint — explicit opt-in; private by default"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cluster_endpoint_public_access_cidrs" {

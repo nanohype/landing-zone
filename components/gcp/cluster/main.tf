@@ -57,6 +57,14 @@ resource "google_container_cluster" "this" {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
+  # Legacy client-certificate auth stays off (IAM + OAuth only) — explicit so
+  # the posture is declared, not inherited from a provider default.
+  master_auth {
+    client_certificate_config {
+      issue_client_certificate = false
+    }
+  }
+
   # Secrets encryption with Cloud KMS
   database_encryption {
     state    = "ENCRYPTED"

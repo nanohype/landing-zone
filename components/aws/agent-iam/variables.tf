@@ -18,6 +18,12 @@ variable "oidc_issuer" {
   type        = string
 }
 
+variable "operator_permissions_boundary_arn" {
+  description = "Permissions-boundary ARN for the operator role. Fleet vends MUST set this to the vend/hub boundary ARN (published in SSM as /eks-fleet/<env>/fleet-vend/vend_permissions_boundary_arn or /eks-fleet/<env>/fleet-hub/hub_permissions_boundary_arn) — the fleet roles' CreateRole gate rejects an operator role that doesn't carry it. Empty (default) = no boundary (direct terragrunt applies, where the deploy role is not boundary-gated)."
+  type        = string
+  default     = ""
+}
+
 variable "team" {
   description = "Owning team tag"
   type        = string

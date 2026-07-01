@@ -46,6 +46,7 @@ resource "aws_security_group" "batch" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Batch compute egress (image pulls, S3, Glue, CloudWatch)"
   }
 
   tags = merge(local.tenant_tags, { Name = "${local.prefix}-batch" })

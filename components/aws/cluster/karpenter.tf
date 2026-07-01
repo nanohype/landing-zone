@@ -9,11 +9,12 @@ module "karpenter" {
   cluster_name = module.eks.cluster_name
 
   # Cross-account fleet-vend gating: the controller + node roles land under
-  # var.cluster_iam_role_path (role/eks-fleet/*). NOTE the asymmetric upstream names
-  # (verified against the resolved submodule): the CONTROLLER boundary input is
-  # iam_role_permissions_boundary_arn (with _arn), the NODE is
-  # node_iam_role_permissions_boundary (no _arn). Boundary inert under the path-only
-  # gate; path defaults "/" = same-account.
+  # var.cluster_iam_role_path (role/eks-fleet/*) and carry the vend/hub boundary
+  # (the fleet roles' CreateRole gate rejects unbounded roles). NOTE the
+  # asymmetric upstream names (verified against the resolved submodule): the
+  # CONTROLLER boundary input is iam_role_permissions_boundary_arn (with _arn),
+  # the NODE is node_iam_role_permissions_boundary (no _arn). Path + boundary
+  # default "/" + empty = outside the fleet gate.
   iam_role_path                      = var.cluster_iam_role_path
   iam_role_permissions_boundary_arn  = local.cluster_permissions_boundary
   node_iam_role_path                 = var.cluster_iam_role_path
