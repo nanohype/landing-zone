@@ -3,6 +3,14 @@ data "aws_caller_identity" "current" {}
 locals {
   account_id = data.aws_caller_identity.current.account_id
 
+  # var.secrets is sensitive, and for_each cannot iterate a sensitive value.
+  # Secret NAMES are not secret — only the payloads are — so iterate unmarked
+  # key sets and index back into var.secrets where a value is needed; the
+  # secret_string stays sensitive end to end.
+  secret_keys           = nonsensitive(toset(keys(var.secrets)))
+  generated_secret_keys = toset([for k in local.secret_keys : k if nonsensitive(var.secrets[k].generate_random)])
+  versioned_secret_keys = toset([for k in local.secret_keys : k if nonsensitive(var.secrets[k].secret_string != null || var.secrets[k].generate_random)])
+
   tags = merge(var.tags, {
     Component = "secrets"
     Team      = var.team
@@ -93,9 +101,9 @@ resource "aws_kms_alias" "secrets" {
 ################################################################################
 
 resource "random_password" "this" {
-  for_each = { for k, v in var.secrets : k => v if v.generate_random }
+  for_each = local.generated_secret_keys
 
-  length  = each.value.random_length
+  length  = nonsensitive(var.secrets[each.key].random_length)
   special = true
 }
 
@@ -104,22 +112,24 @@ resource "random_password" "this" {
 ################################################################################
 
 resource "aws_secretsmanager_secret" "this" {
-  for_each = var.secrets
+  for_each = local.secret_keys
 
-  name        = "${var.environment}${var.secret_path_prefix}/${each.key}"
-  description = each.value.description != "" ? each.value.description : "Platform secret: ${each.key}"
+  name = "${var.environment}${var.secret_path_prefix}/${each.key}"
+  # nonsensitive: metadata inherits the variable's mark, but description and
+  # recovery window are not secret — unmark them so plans stay readable.
+  description = nonsensitive(var.secrets[each.key].description != "" ? var.secrets[each.key].description : "Platform secret: ${each.key}")
   kms_key_id  = aws_kms_key.secrets.arn
 
-  recovery_window_in_days = each.value.recovery_window_in_days
+  recovery_window_in_days = nonsensitive(var.secrets[each.key].recovery_window_in_days)
 
   tags = merge(local.tags, { Name = each.key })
 }
 
 resource "aws_secretsmanager_secret_version" "this" {
-  for_each = { for k, v in var.secrets : k => v if v.secret_string != null || v.generate_random }
+  for_each = local.versioned_secret_keys
 
   secret_id     = aws_secretsmanager_secret.this[each.key].id
-  secret_string = each.value.generate_random ? random_password.this[each.key].result : each.value.secret_string
+  secret_string = var.secrets[each.key].generate_random ? random_password.this[each.key].result : var.secrets[each.key].secret_string
 }
 
 ################################################################################
