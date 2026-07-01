@@ -1,6 +1,6 @@
 # Operations
 
-Day-to-day procedures for operating the landing-zone infrastructure across AWS, GCP, and Azure.
+Day-to-day procedures for operating the landing-zone infrastructure across AWS and GCP.
 
 ## Planning and Applying
 
@@ -14,10 +14,6 @@ task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPO
 # GCP
 task plan CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
 task apply CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
-
-# Azure
-task plan CLOUD=azure ACCOUNT=workload-dev REGION=westus2 ENVIRONMENT=dev COMPONENT=network
-task apply CLOUD=azure ACCOUNT=workload-dev REGION=westus2 ENVIRONMENT=dev COMPONENT=network
 ```
 
 ### All Components in an Environment
@@ -51,7 +47,7 @@ For a from-scratch deployment, components must be applied in dependency order. T
 6. org-networking
 ```
 
-Order within the org layer is flexible -- these components have no inter-dependencies. GCP and Azure have equivalent org-level components (`org-policy`, `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`).
+Order within the org layer is flexible -- these components have no inter-dependencies. GCP has equivalent org-level components (`org-policy`, `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`).
 
 ### AWS Per Environment (dev -> staging -> production)
 
@@ -78,7 +74,7 @@ Order within the org layer is flexible -- these components have no inter-depende
 
 Steps 3-13 can run in parallel within their dependency tier. Steps 14-18 can run at any time.
 
-### GCP / Azure Per Environment
+### GCP Per Environment
 
 ```
 1. network
@@ -94,7 +90,7 @@ Steps 3-13 can run in parallel within their dependency tier. Steps 14-18 can run
 11. service-quotas            (standalone)
 ```
 
-GCP and Azure have 11 workload components (no multi-tenant components). Steps 3-6 can run in parallel. Steps 7-11 can run at any time.
+GCP has 11 workload components (no multi-tenant components). Steps 3-6 can run in parallel. Steps 7-11 can run at any time.
 
 Using `task apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run --all -- apply`, which handles ordering automatically.
 
@@ -107,8 +103,8 @@ Using `task apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<e
 | Job | Details |
 |-----|---------|
 | **fmt** | Runs `tofu fmt -check -recursive` on `components/` and `modules/`. Fails if any file is unformatted. |
-| **validate** | Matrix of all components per cloud (24 AWS, 17 GCP, 17 Azure). Runs `tofu init -backend=false` then `tofu validate`. Catches syntax errors and missing variable definitions. |
-| **tflint** | Runs TFLint recursively per cloud with the appropriate plugin (`.tflint-aws.hcl`, `.tflint-gcp.hcl`, `.tflint-azure.hcl`). Enforces naming conventions, documented variables/outputs, and cloud-specific rules. |
+| **validate** | Matrix of all components per cloud (24 AWS, 17 GCP). Runs `tofu init -backend=false` then `tofu validate`. Catches syntax errors and missing variable definitions. |
+| **tflint** | Runs TFLint recursively per cloud with the appropriate plugin (`.tflint-aws.hcl`, `.tflint-gcp.hcl`). Enforces naming conventions, documented variables/outputs, and cloud-specific rules. |
 | **checkov** | Security scan on `components/`. Skips `CKV_AWS_144` (cross-region replication) and `CKV_AWS_145` (KMS encryption). |
 | **plan** | PRs only. Matrix across clouds and environments. Runs `terragrunt plan` to show what would change. |
 
@@ -117,8 +113,8 @@ Using `task apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<e
 **Trigger:** Workflow dispatch (manual).
 
 **Inputs:**
-- `cloud` -- aws, gcp, or azure
-- `account` -- target account/project/subscription alias
+- `cloud` -- aws or gcp
+- `account` -- target account/project alias
 - `region` -- target region
 - `environment` -- dev, staging, or production
 - `component` -- specific component name or "all"
@@ -131,7 +127,7 @@ Uses GitHub environment protection rules -- production requires approval. When `
 **Trigger:** Workflow dispatch (manual).
 
 **Inputs:**
-- `cloud` -- aws, gcp, or azure
+- `cloud` -- aws or gcp
 - `environment` -- dev or staging only (production excluded)
 - `component` -- specific component name or "all"
 - `confirm` -- must exactly match the environment name
@@ -142,7 +138,7 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 **Trigger:** Cron schedule, 6 AM UTC Monday-Friday. Also supports manual dispatch.
 
-**Scope:** Currently AWS production only, 8 components: `network`, `cluster`, `cluster-addons`, `cluster-bootstrap`, `dns`, `cost`, `observability`, `secrets`. GCP and Azure drift detection is planned for a future release.
+**Scope:** AWS and GCP production, 8 components each: `network`, `cluster`, `cluster-addons`, `cluster-bootstrap`, `dns`, `cost`, `observability`, `secrets`.
 
 **Behavior:** Runs `terragrunt plan -detailed-exitcode` for each component. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output.
 
@@ -197,7 +193,6 @@ Each multi-tenant component has different tenant fields. Check the `variables.tf
 |-------|---------|-----------|
 | AWS | CloudWatch alarms (CPU, memory, node count, API errors), SNS topics (critical/warning/info) | `observability` |
 | GCP | Cloud Monitoring alert policies, notification channels | `observability` |
-| Azure | Azure Monitor metric alerts, Action Groups | `observability` |
 
 The `observability` component on each cloud creates alarms/alerts for configurable thresholds. Subscribe team emails via `alert_email_endpoints` or a Slack webhook via `slack_webhook_url`.
 
@@ -207,7 +202,6 @@ The `observability` component on each cloud creates alarms/alerts for configurab
 |-------|---------|-----------|
 | AWS | AWS Budgets + Cost Anomaly Detection | `cost` |
 | GCP | Cloud Billing budgets + programmatic alerts | `cost` |
-| Azure | Azure Cost Management budgets + anomaly alerts | `cost` |
 
 The `cost` component creates budget alerts at configurable thresholds (e.g., 50%, 80%, 100% of `monthly_budget_limit`). Notifications go to `budget_alert_emails`.
 
@@ -219,11 +213,10 @@ The `service-quotas` component monitors cloud service limits and creates alarms 
 |-------|-----------------|
 | AWS | VPCs per region, EIPs, NAT gateways, EKS clusters, Lambda concurrent executions |
 | GCP | VPC networks, external IPs, GKE clusters, CPU/GPU quotas per region |
-| Azure | VNets per subscription, public IPs, AKS clusters, vCPU quotas per region |
 
 ### Drift Detection (drift.yml)
 
-Production infrastructure is checked for drift every weekday morning. Currently AWS-only; GCP and Azure drift detection is planned. Drift issues appear in GitHub with the `drift` label. See the CI/CD section above for details.
+Production infrastructure is checked for drift every weekday morning across AWS and GCP. Drift issues appear in GitHub with the `drift` label. See the CI/CD section above for details.
 
 ## Secrets Management
 
@@ -233,7 +226,6 @@ The `secrets` component manages encryption and secrets infrastructure per cloud:
 |-------|-----------|---------------|------------|
 | AWS | KMS (customer-managed, auto-rotation) | Secrets Manager | IRSA for External Secrets Operator |
 | GCP | Cloud KMS (automatic rotation) | Secret Manager | Workload Identity for External Secrets Operator |
-| Azure | Key Vault (software or HSM keys) | Key Vault Secrets | Workload Identity for External Secrets Operator |
 
 The flow: secrets are stored in the cloud secrets store, External Secrets Operator (running in the Kubernetes cluster, authenticated via workload identity) syncs them, and Kubernetes Secrets are created for pod consumption.
 
@@ -245,13 +237,12 @@ The `backup` component manages backup infrastructure per cloud:
 |-------|---------|-------------|
 | AWS | AWS Backup | Configurable plans, vault lock for production, KMS encryption, cross-region copy |
 | GCP | Cloud Storage versioning + scheduled snapshots | Lifecycle policies, retention configuration |
-| Azure | Azure Backup + Recovery Services Vault | Configurable policies, soft delete, geo-redundant storage |
 
 Backup plans are configurable via the `backup_plans` map (schedule, retention, cold storage transition). Email notifications go to `notification_emails`.
 
 ### Restore Procedure
 
-1. Open the backup console for the relevant cloud (AWS Backup / GCP Console / Azure Recovery Services)
+1. Open the backup console for the relevant cloud (AWS Backup / GCP Console)
 2. Navigate to the vault and find the recovery point
 3. Select "Restore" and configure the target resource settings
 4. Monitor the restore job in the console

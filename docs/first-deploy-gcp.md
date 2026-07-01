@@ -16,7 +16,7 @@ Assumes you have a Google account, a Cloud billing account, and Owner on at leas
 
 ## Account & Identity Setup
 
-GCP's identity model is closer to Azure's than AWS's — there's a Google Account (yours, free) and Cloud IAM is layered on top, scoped to organizations / folders / projects.
+GCP's identity model differs from AWS's — there's a Google Account (yours, free) and Cloud IAM is layered on top, scoped to organizations / folders / projects.
 
 ### 1. Create your projects
 
@@ -102,7 +102,7 @@ for api in container.googleapis.com compute.googleapis.com iam.googleapis.com cl
 done
 ```
 
-`--async` if you want them to start in parallel (most return quickly anyway). GCP's "enable an API" is the equivalent of Azure's "register a resource provider."
+`--async` if you want them to start in parallel (most return quickly anyway).
 
 ### 8. Bootstrap the state backend
 
@@ -156,7 +156,7 @@ inputs = {
 cd <repo-root>
 
 task apply CLOUD=gcp ACCOUNT=workload-<env> REGION=us-central1 ENVIRONMENT=<env> COMPONENT=network            # ~3-5 min
-task apply CLOUD=gcp ACCOUNT=workload-<env> REGION=us-central1 ENVIRONMENT=<env> COMPONENT=cluster            # ~10-15 min (faster than EKS/AKS)
+task apply CLOUD=gcp ACCOUNT=workload-<env> REGION=us-central1 ENVIRONMENT=<env> COMPONENT=cluster            # ~10-15 min (faster than EKS)
 task apply CLOUD=gcp ACCOUNT=workload-<env> REGION=us-central1 ENVIRONMENT=<env> COMPONENT=secrets            # ~2 min
 task apply CLOUD=gcp ACCOUNT=workload-<env> REGION=us-central1 ENVIRONMENT=<env> COMPONENT=cluster-bootstrap  # ~5-10 min
 task apply CLOUD=gcp ACCOUNT=workload-<env> REGION=us-central1 ENVIRONMENT=<env> COMPONENT=cluster-addons     # ~5-10 min

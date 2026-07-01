@@ -3,11 +3,11 @@
 #
 # Every skip below is either a deliberate, documented posture decision or a
 # checkov false positive, one line of rationale each. The platform template
-# intentionally trades portfolio-realistic posture (single-region/single-RG
-# isolation, provider-managed encryption at rest, public endpoints behind IP
-# allowlists) for regulated-cluster hardening; a fork going to a regulated
-# estate should delete the "posture" skips and remediate. If a skip loses its
-# rationale, delete the skip and let CI fail until the finding is fixed.
+# intentionally trades portfolio-realistic posture (single-region durability,
+# provider-managed encryption at rest, public endpoints behind IP allowlists)
+# for regulated-cluster hardening; a fork going to a regulated estate should
+# delete the "posture" skips and remediate. If a skip loses its rationale,
+# delete the skip and let CI fail until the finding is fixed.
 
 skip-check:
   # ── AWS: provider-managed encryption at rest (SSE-S3 / AWS-managed keys) ──
@@ -89,40 +89,3 @@ skip-check:
   - CKV_GCP_65 # Google Groups RBAC — requires a Workspace group; not applicable to this org
   - CKV_GCP_61 # VPC flow logs + intranode visibility — flow logs are var-gated; intranode visibility is a cost posture
   - CKV2_GCP_18 # network firewall — firewall rules live in the cluster/network layering, not the shared-VPC resource
-
-  # ── Azure: public endpoints behind allowlists / single-RG isolation ──
-  - CKV_AZURE_59 # storage public network access — public endpoint + allowlist posture; no private DNS estate
-  - CKV2_AZURE_33 # storage private endpoint — same; private endpoints need the hub-spoke DNS estate this template omits
-  - CKV2_AZURE_32 # key vault private endpoint — same private-endpoint posture
-  - CKV_AZURE_189 # key vault public network access — same public-endpoint + allowlist posture
-  - CKV2_AZURE_57 # PostgreSQL private endpoint — server uses delegated-subnet VNet integration instead
-  - CKV_AZURE_109 # key vault network ACLs default-deny — same public-endpoint + allowlist posture
-  - CKV_AZURE_115 # AKS private cluster — public API endpoint + allowlist posture, matching the EKS/GKE shape
-
-  # ── Azure: storage/ops posture ──
-  - CKV2_AZURE_40 # shared key auth — Loki/Tempo/Velero authenticate with account keys by design
-  - CKV2_AZURE_41 # SAS expiration policy — no SAS tokens are issued; policy would be inert
-  - CKV2_AZURE_21 # blob read logging — storage-analytics log volume/cost accepted
-  - CKV_AZURE_33 # queue logging — no queue workloads; setting is inert
-  - CKV2_AZURE_1 # storage CMK — Microsoft-managed keys accepted (same posture as AWS/GCP)
-  - CKV_AZURE_206 # storage replication — LRS on rebuildable telemetry/exports; GRS where it matters (velero, audit)
-  - CKV2_AZURE_38 # soft delete — enabled via delete_retention where data warrants; flow/cost exports are rebuildable
-  - CKV_AZURE_41 # KV secret expiration — platform secrets are long-lived; expiry without a rotation pipeline breaks consumers
-  - CKV_AZURE_43 # storage naming — FALSE POSITIVE: names are var/expression-driven, checkov cannot resolve
-  - CKV_AZURE_12 # NSG flow-log retention >90d — retention tuned for cost
-  - CKV_AZURE_136 # PostgreSQL geo-redundant backup — single-region posture
-  - CKV2_AZURE_35 # Recovery Services Vault identity — vault consumes no Azure-resource access; identity unused
-  - CKV_AZURE_20 # security contact phone — FALSE POSITIVE: var-driven value checkov cannot resolve
-  - CKV_AZURE_131 # security contact email — FALSE POSITIVE: var-driven value checkov cannot resolve
-  - CKV_AZURE_160 # HTTP 80 from internet — public NSG serves the HTTP→HTTPS redirect listener
-
-  # ── Azure: AKS (BYO-CNI Cilium + NAP cluster shape) ──
-  - CKV2_AZURE_29 # Azure CNI — FALSE POSITIVE: network_plugin "none" is the BYO-Cilium contract
-  - CKV_AZURE_7 # network policy — FALSE POSITIVE: Cilium enforces NetworkPolicy, installed by bootstrap
-  - CKV_AZURE_141 # local admin — kept as the AKS break-glass path; Entra ID is the primary auth
-  - CKV_AZURE_116 # Azure Policy add-on — policy enforcement is Kyverno via the gitops catalog, not the AKS add-on
-  - CKV_AZURE_171 # upgrade channel — manual upgrades by choice, mirroring the EKS flow
-  - CKV_AZURE_168 # ≥50 max pods — Node Auto Provisioning sizes pods-per-node per SKU
-  - CKV_AZURE_226 # ephemeral OS disks — SKU-dependent; NAP picks SKUs dynamically
-  - CKV_AZURE_227 # host encryption — requires the EncryptionAtHost subscription feature; not assumed
-  - CKV_AZURE_117 # disk encryption set — platform-managed keys accepted (same CMK posture)

@@ -4,11 +4,10 @@ You're an AI client (or the author of one) about to provision cloud substrate. T
 
 ## What this repo gives you
 
-OpenTofu + Terragrunt monorepo for the cloud substrate every nanohype-stack app lands on. Three providers, three concerns:
+OpenTofu + Terragrunt monorepo for the cloud substrate every nanohype-stack app lands on. Two providers, two concerns:
 
 - **`components/aws/`** — VPC, base IAM, KMS keys, EKS cluster, cluster bootstrap, observability, secrets, gateway, governance, plus per-app `<app>-platform` single-tenant components (incident-response-platform, slack-knowledge-bot-platform, digest-pipeline-platform). Shared multi-tenant components: `rag`, `pipeline`, `llm`, `governance`.
 - **`components/gcp/`** — equivalents for GCP (GKE, project IAM, KMS, observability, etc.). Same component shape, GCP primitives.
-- **`components/azure/`** — equivalents for Azure (AKS, resource-group IAM, Key Vault, etc.). Same shape, Azure primitives.
 
 Plus:
 

@@ -1,6 +1,6 @@
 # landing-zone
 
-Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructure (AWS, GCP, Azure).
+Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructure (AWS, GCP).
 
 ## Build & Validate
 
@@ -9,20 +9,18 @@ task fmt                                              # format all .tf files
 task fmt:check                                        # check formatting (CI uses this)
 task validate CLOUD=aws                               # init + validate every AWS component
 task validate CLOUD=gcp                               # init + validate every GCP component
-task validate CLOUD=azure                             # init + validate every Azure component
 task lint CLOUD=aws                                   # tflint with AWS plugin
 task lint CLOUD=gcp                                   # tflint with GCP plugin
-task lint CLOUD=azure                                 # tflint with Azure plugin
 task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
 task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 ```
 
 ## Architecture
 
-- **AWS, GCP, and Azure components** across the three clouds
+- **AWS and GCP components** across the two clouds
 - **Environments** per cloud: dev, staging, production, org (AWS management account)
 - **Multi-account isolation:** workload-dev, workload-staging, workload-prod, management (AWS)
-- **Multi-region support:** us-west-2 (AWS), us-central1 (GCP), westus2 (Azure)
+- **Multi-region support:** us-west-2 (AWS), us-central1 (GCP)
 - **Dependency chain:** `network → cluster → {druid, pipeline, llm, gateway, rag, mlops, governance, observability, secrets, cluster-addons, cluster-bootstrap}`
 - `cost`, `dns`, `backup`, `break-glass`, and `service-quotas` are standalone (no dependencies)
 - `org-*` components deploy to management/org accounts only
@@ -42,7 +40,6 @@ task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 - State paths:
   - AWS: `s3://{account_id}-{region}-tfstate/{env}/{component}/terraform.tfstate` (native S3 locking)
   - GCP: `gs://{project_id}-{region}-tfstate/{env}/{component}/`
-  - Azure: `tfstate-rg/{storage_account}/tfstate/{env}/{component}/terraform.tfstate`
 
 ## Multi-Tenant Pattern (AWS only)
 
@@ -65,18 +62,14 @@ components/
       modules/tenant/      # sub-module for multi-tenant components
   gcp/                     # GCP OpenTofu root modules
     {name}/
-  azure/                   # Azure OpenTofu root modules
-    {name}/
 modules/
   aws/workload-identity/   # AWS IRSA role factory
   gcp/workload-identity/   # GKE Workload Identity binding
-  azure/workload-identity/ # AKS federated credential
 live/
   root.hcl                 # root config (multi-cloud provider dispatch + state backend)
   _envcommon/
     aws/{name}.hcl         # AWS dependency wiring + shared inputs
     gcp/{name}.hcl         # GCP dependency wiring
-    azure/{name}.hcl       # Azure dependency wiring
   aws/
     cloud.hcl              # cloud = "aws"
     {account}/
@@ -90,15 +83,6 @@ live/
     cloud.hcl              # cloud = "gcp"
     {account}/
       account.hcl          # project_id, account_alias
-      {region}/
-        region.hcl
-        {env}/
-          env.hcl
-          {component}/terragrunt.hcl
-  azure/
-    cloud.hcl              # cloud = "azure"
-    {account}/
-      account.hcl          # subscription_id, tenant_id, account_alias
       {region}/
         region.hcl
         {env}/
@@ -119,4 +103,4 @@ live/
 - `deploy.yml` — manual dispatch: cloud/account/region/environment/component, plan or apply
 - `destroy.yml` — manual dispatch: dev/staging only, requires confirmation string
 - `drift.yml` — scheduled weekday drift detection on production, creates GitHub issues
-- Auth: AWS OIDC, GCP Workload Identity Federation, Azure Federated Identity (conditional per cloud)
+- Auth: AWS OIDC, GCP Workload Identity Federation (conditional per cloud)

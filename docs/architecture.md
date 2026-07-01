@@ -14,7 +14,7 @@ Terragrunt provides DRY environment management on top of OpenTofu:
 - **Single provider/backend config** -- the root `root.hcl` generates the cloud-specific `provider.tf` and `backend.tf` for every component
 - **Dependency orchestration** -- `dependency` blocks in `_envcommon/{cloud}/` wire outputs between components without hardcoding
 - **Environment parity** -- same components, different inputs per environment
-- **Multi-cloud dispatch** -- a single root config conditionally generates the correct provider (AWS/GCP/Azure) and state backend (S3/GCS/Azure Blob)
+- **Multi-cloud dispatch** -- a single root config conditionally generates the correct provider (AWS/GCP) and state backend (S3/GCS)
 
 ### Why Components (not a Monolith)
 
@@ -26,7 +26,7 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated cloud res
 
 ## Dependency Graph
 
-The core dependency chain applies to all three clouds. AWS has additional workload-layer components.
+The core dependency chain applies to both clouds. AWS has additional workload-layer components.
 
 ### AWS (24 components)
 
@@ -60,7 +60,7 @@ The core dependency chain applies to all three clouds. AWS has additional worklo
   org-cost, org-networking, org-scp
 ```
 
-### GCP / Azure (17 components each)
+### GCP (17 components)
 
 ```
                     +-----------+
@@ -109,7 +109,7 @@ The core dependency chain applies to all three clouds. AWS has additional worklo
 | **cost** | -- | -- |
 | **dns** | -- | -- |
 
-GCP and Azure follow the same `network -> cluster -> {cluster-addons, cluster-bootstrap, observability, secrets}` chain. Standalone components have no dependencies on any cloud.
+GCP follows the same `network -> cluster -> {cluster-addons, cluster-bootstrap, observability, secrets}` chain. Standalone components have no dependencies on either cloud.
 
 ## Layer Breakdown
 
@@ -117,14 +117,14 @@ GCP and Azure follow the same `network -> cluster -> {cluster-addons, cluster-bo
 
 Components deployed once in the management/org account to establish cross-account governance and shared infrastructure.
 
-| Component | AWS | GCP | Azure |
-|-----------|-----|-----|-------|
-| **org-identity** | IAM Identity Center (SSO) -- permission sets, groups, account assignments | Cloud Identity groups, IAM bindings across projects | Entra ID groups, role assignments across subscriptions |
-| **org-security** | GuardDuty (S3/EKS/malware/RDS/Lambda), Security Hub (CIS + AWS Foundational) | Security Command Center, Web Security Scanner | Defender for Cloud, Sentinel integration |
-| **org-compliance** | Shared KMS, organization CloudTrail, AWS Config rules + conformance packs | Organization audit logging, Cloud Asset Inventory, access transparency logs | Azure Policy assignments, compliance dashboards, Activity Log export |
-| **org-cost** | Organization budget, cost categories, anomaly detection, CUR 2.0 export | Billing budgets, BigQuery billing export, commitment analysis | Cost Management budgets, anomaly alerts, reservation recommendations |
-| **org-networking** | Transit Gateway + RAM sharing, IPAM, Route53 Resolver rules | Shared VPC, VPC peering, Cloud DNS policies | Virtual WAN / Hub-Spoke, Azure DNS Private Resolver |
-| **org-scp / org-policy** | Service Control Policies on OUs/accounts | Organization Policies (constraints on folders/projects) | Azure Policy definitions + initiatives on management groups |
+| Component | AWS | GCP |
+|-----------|-----|-----|
+| **org-identity** | IAM Identity Center (SSO) -- permission sets, groups, account assignments | Cloud Identity groups, IAM bindings across projects |
+| **org-security** | GuardDuty (S3/EKS/malware/RDS/Lambda), Security Hub (CIS + AWS Foundational) | Security Command Center, Web Security Scanner |
+| **org-compliance** | Shared KMS, organization CloudTrail, AWS Config rules + conformance packs | Organization audit logging, Cloud Asset Inventory, access transparency logs |
+| **org-cost** | Organization budget, cost categories, anomaly detection, CUR 2.0 export | Billing budgets, BigQuery billing export, commitment analysis |
+| **org-networking** | Transit Gateway + RAM sharing, IPAM, Route53 Resolver rules | Shared VPC, VPC peering, Cloud DNS policies |
+| **org-scp / org-policy** | Service Control Policies on OUs/accounts | Organization Policies (constraints on folders/projects) |
 
 ### Network Layer
 
@@ -132,23 +132,23 @@ Components deployed once in the management/org account to establish cross-accoun
 
 Provisions the network foundation for each environment:
 
-| Feature | AWS | GCP | Azure |
-|---------|-----|-----|-------|
-| Network | VPC with configurable CIDR | VPC network with subnets | VNet with configurable address space |
-| Subnet tiers | public, private, intra (across AZs) | public, private (across zones) | public, private (across availability zones) |
-| NAT | NAT gateways (1/2/3 by env) | Cloud NAT (1/2/3 by env) | NAT Gateway (1/2/3 by env) |
-| Service access | VPC endpoints (optional) | Private Google Access, Private Service Connect | Service endpoints, Private Link |
-| Flow logs | VPC flow logs (staging + prod) | VPC Flow Logs (staging + prod) | NSG flow logs (staging + prod) |
+| Feature | AWS | GCP |
+|---------|-----|-----|
+| Network | VPC with configurable CIDR | VPC network with subnets |
+| Subnet tiers | public, private, intra (across AZs) | public, private (across zones) |
+| NAT | NAT gateways (1/2/3 by env) | Cloud NAT (1/2/3 by env) |
+| Service access | VPC endpoints (optional) | Private Google Access, Private Service Connect |
+| Flow logs | VPC flow logs (staging + prod) | VPC Flow Logs (staging + prod) |
 
 ### Cluster Layer
 
 **Components:** `cluster`, `cluster-bootstrap`, `cluster-addons`
 
-| Feature | AWS | GCP | Azure |
-|---------|-----|-----|-------|
-| **cluster** | EKS control plane, Karpenter, system node group, access entries | GKE Standard/Autopilot, node pools, workload identity | AKS, system node pool, workload identity |
-| **cluster-bootstrap** | Helm-based Cilium CNI + ArgoCD bootstrap | Cilium CNI + ArgoCD bootstrap | Cilium CNI + ArgoCD bootstrap |
-| **cluster-addons** | IRSA roles for Velero, OpenCost, KEDA, Argo Events/Workflows | Workload Identity bindings for cluster tools | Workload Identity bindings for cluster tools |
+| Feature | AWS | GCP |
+|---------|-----|-----|
+| **cluster** | EKS control plane, Karpenter, system node group, access entries | GKE Standard/Autopilot, node pools, workload identity |
+| **cluster-bootstrap** | Helm-based Cilium CNI + ArgoCD bootstrap | Cilium CNI + ArgoCD bootstrap |
+| **cluster-addons** | IRSA roles for Velero, OpenCost, KEDA, Argo Events/Workflows | Workload Identity bindings for cluster tools |
 
 `cluster-bootstrap` is the GitOps boundary -- after bootstrap, ArgoCD manages in-cluster workloads from `eks-gitops`.
 
@@ -168,17 +168,17 @@ Seven multi-tenant components, each accepting a `var.tenants` map:
 
 ### Operational Layer
 
-Components shared across all three clouds (implementations differ per cloud):
+Components shared across both clouds (implementations differ per cloud):
 
 | Component | Purpose | Team |
 |-----------|---------|------|
-| **observability** | Monitoring alarms/alerts, dashboards, notification channels (CloudWatch / Cloud Monitoring / Azure Monitor) | sre |
-| **secrets** | Encryption keys + secrets store + External Secrets Operator workload identity (KMS+Secrets Manager / Cloud KMS+Secret Manager / Key Vault) | security |
-| **backup** | Backup plans with configurable schedules/retention, vault lock for production (AWS Backup / GCP snapshots / Azure Backup) | sre |
+| **observability** | Monitoring alarms/alerts, dashboards, notification channels (CloudWatch / Cloud Monitoring) | sre |
+| **secrets** | Encryption keys + secrets store + External Secrets Operator workload identity (KMS+Secrets Manager / Cloud KMS+Secret Manager) | security |
+| **backup** | Backup plans with configurable schedules/retention, vault lock for production (AWS Backup / GCP snapshots) | sre |
 | **break-glass** | Emergency access roles with alerts on assumption (IAM roles / privileged Google SA / PIM-eligible roles) | security |
-| **service-quotas** | Alarms for cloud service quota utilization (CloudWatch / Cloud Monitoring / Azure Monitor) | platform |
-| **cost** | Budget alerts, anomaly detection (AWS Budgets / GCP Billing / Azure Cost Management) | finops |
-| **dns** | DNS zones, subdomain delegation, certificates (Route53+ACM / Cloud DNS+Certificate Manager / Azure DNS+App Service Certificates) | platform |
+| **service-quotas** | Alarms for cloud service quota utilization (CloudWatch / Cloud Monitoring) | platform |
+| **cost** | Budget alerts, anomaly detection (AWS Budgets / GCP Billing) | finops |
+| **dns** | DNS zones, subdomain delegation, certificates (Route53+ACM / Cloud DNS+Certificate Manager) | platform |
 
 ## Environment Differentiation
 
@@ -208,7 +208,7 @@ Components shared across all three clouds (implementations differ per cloud):
 |                                  |     |                              |
 |  Manages:                        |     |  Manages:                    |
 |  - Cloud resources (VPC/VNet,    |     |  - Kubernetes workloads      |
-|    EKS/GKE/AKS, databases,      |     |  - Helm releases             |
+|    EKS/GKE, databases,          |     |  - Helm releases             |
 |    storage, IAM, etc.)           |     |  - ConfigMaps, Secrets       |
 |  - Cilium CNI (bootstrap)       |     |  - Ingress, Services         |
 |  - ArgoCD (bootstrap)           |     |  - CRDs, Operators           |
@@ -230,7 +230,6 @@ After `cluster-bootstrap` deploys Cilium and ArgoCD, ArgoCD watches the GitOps r
 |-------|-----------|---------|
 | AWS | OIDC federation | GitHub Actions assumes `AWS_ROLE_ARN` via OIDC -- no long-lived credentials. Trust policy scoped to the repository. |
 | GCP | Workload Identity Federation | GitHub Actions exchanges OIDC token for short-lived GCP credentials via a Workload Identity Pool. No service account keys. |
-| Azure | Federated Identity Credentials | GitHub Actions uses OIDC to authenticate as an app registration with federated credentials. No client secrets. |
 
 Each environment has its own role/identity with a trust policy scoped to the repository.
 
@@ -240,7 +239,6 @@ Each environment has its own role/identity with a trust policy scoped to the rep
 |-------|-----------|--------|
 | AWS | IRSA (IAM Roles for Service Accounts) | `modules/aws/workload-identity/` |
 | GCP | GKE Workload Identity (KSA-to-GSA binding) | `modules/gcp/workload-identity/` |
-| Azure | AKS Workload Identity (federated credential on managed identity) | `modules/azure/workload-identity/` |
 
 Each module creates a cloud IAM identity scoped to a specific Kubernetes namespace and service account. Multi-tenant AWS components create one IRSA role per tenant.
 
@@ -250,7 +248,6 @@ Each module creates a cloud IAM identity scoped to a specific Kubernetes namespa
 |-------|-----------|-----------|
 | AWS | Service Control Policies (SCPs) on OUs/accounts | `org-scp` |
 | GCP | Organization Policy constraints on folders/projects | `org-policy` |
-| Azure | Azure Policy definitions + initiatives on management groups | `org-policy` |
 
 Guardrails prevent actions like disabling audit logging, leaving the organization, or using unapproved regions.
 
@@ -262,7 +259,6 @@ The `break-glass` component provisions emergency access roles per cloud:
 |-------|-----------|
 | AWS | IAM roles with SNS alerts on assumption, configurable `max_session_duration` (default 1 hour) |
 | GCP | Privileged Google service accounts with audit logging, time-bound access |
-| Azure | PIM-eligible roles with approval workflows, time-bound activation |
 
 ### SSO / Identity
 
@@ -272,7 +268,6 @@ The `org-identity` component manages identity and access per cloud:
 |-------|-----------|
 | AWS | IAM Identity Center -- 5 permission sets (Admin, PowerUser, ReadOnly, PlatformEngineer, Developer), groups, account assignments |
 | GCP | Cloud Identity groups, project-level IAM bindings, custom roles |
-| Azure | Entra ID groups, subscription-level role assignments, custom role definitions |
 
 ## State Management
 
@@ -280,9 +275,8 @@ The `org-identity` component manages identity and access per cloud:
 |-------|---------|---------|------------------------|-------------|
 | AWS | S3 (versioned, AES-256 encrypted) | Native conditional writes (`use_lockfile`) | `{account_id}-{region}-tfstate` | `scripts/init-backend-aws.sh` |
 | GCP | GCS (versioned) | Native GCS locking | `{project_id}-{region}-tfstate` | `scripts/init-backend-gcp.sh` |
-| Azure | azurerm Blob (versioned) | Native blob leasing | `tfstate-rg` / `tfstate{sub_id_prefix}` | `scripts/init-backend-azure.sh` |
 
-Key convention: `{environment}/{component}/terraform.tfstate` (AWS/Azure) or `{environment}/{component}/` prefix (GCP).
+Key convention: `{environment}/{component}/terraform.tfstate` (AWS) or `{environment}/{component}/` prefix (GCP).
 
 Each component in each environment has independent state, enabling parallel operations and isolated blast radius.
 
