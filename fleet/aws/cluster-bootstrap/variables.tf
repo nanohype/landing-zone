@@ -73,6 +73,12 @@ variable "vpc_id" {
   type        = string
 }
 
+variable "operator_permissions_boundary_arn" {
+  description = "Permissions-boundary ARN the agent-platform operator role is minted with. The composition sets it to the boundary of whichever fleet role runs this Workspace — fleet-vend's for cross-account vends (SSM /eks-fleet/<env>/fleet-vend/vend_permissions_boundary_arn), fleet-hub's for same-account (SSM /eks-fleet/<env>/fleet-hub/hub_permissions_boundary_arn) — because the fleet roles' CreateRole gate rejects an operator role that doesn't carry their ceiling. Empty (default) = no boundary (running outside the fleet gate)."
+  type        = string
+  default     = ""
+}
+
 # --- bootstrap behavior -----------------------------------------------------
 variable "enable_agent_platform" {
   description = "Label the cluster into the eks-agent-platform operator ApplicationSet so eks-gitops installs the operator via GitOps from the per-cluster OIDC/role annotations. False installs the operator out of band."

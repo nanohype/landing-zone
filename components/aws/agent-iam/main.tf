@@ -182,7 +182,13 @@ resource "aws_iam_role" "operator" {
   path               = "/eks-agent-platform/"
   assume_role_policy = data.aws_iam_policy_document.operator_trust.json
   description        = "IRSA role for the eks-agent-platform operator"
-  tags               = local.tags
+
+  # Fleet vends pass the vend/hub boundary here — the fleet roles' CreateRole
+  # gate requires the operator role to carry the ceiling of whichever role is
+  # minting it. Empty = no boundary (direct terragrunt applies).
+  permissions_boundary = var.operator_permissions_boundary_arn != "" ? var.operator_permissions_boundary_arn : null
+
+  tags = local.tags
 }
 
 resource "aws_iam_role_policy" "operator" {

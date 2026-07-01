@@ -11,11 +11,15 @@
 # to SSM for the hub/portal to discover.
 #
 # CONTRACT: the cluster-stack entrypoint sets cluster_iam_role_path = "/eks-fleet/"
-# for cross-account vends (terraform-aws-eks / karpenter / workload-identity all
-# create their roles under that path), which is what satisfies this role's path
-# gate. No per-role permissions boundary is required — the vend role's own boundary
-# is the ceiling. (The vend boundary ARN is still published to SSM so the gate can
-# be re-tightened to require a per-role boundary later without rewiring.)
+# AND cluster_permissions_boundary_arn = this component's vend boundary ARN for
+# cross-account vends (terraform-aws-eks / karpenter / workload-identity put their
+# roles under that path carrying that boundary); the cluster-bootstrap entrypoint
+# sets agent-iam's operator_permissions_boundary_arn the same way. Both halves are
+# enforced here: path-scoping picks WHICH roles the vend role may touch, and an
+# iam:PermissionsBoundary condition on every role-creating/widening action
+# guarantees anything it mints carries the vend boundary — so a compromised vend
+# session can never create a role that exceeds its own ceiling. The boundary ARN
+# is published to SSM (vend_permissions_boundary_arn) for the composition to wire.
 ################################################################################
 
 data "aws_caller_identity" "current" {}
@@ -30,6 +34,15 @@ locals {
 
   vend_role_name = "${local.role_prefix}-vend"
   vend_role_arn  = "arn:${local.partition}:iam::${local.account_id}:role${local.iam_path}${local.vend_role_name}"
+
+  vend_boundary_name = "${local.role_prefix}-vend-boundary"
+  vend_boundary_arn  = "arn:${local.partition}:iam::${local.account_id}:policy${local.iam_path}${local.vend_boundary_name}"
+
+  # agent-iam's tenant permissions boundary — created under /eks-agent-platform/
+  # during the vend and carried by every operator-minted tenant role. Named here
+  # so DenyUnboundedRoleWrites can accept it as the one other legitimate boundary
+  # a role written under the vend ceiling may carry.
+  tenant_boundary_arn = "arn:${local.partition}:iam::${local.account_id}:policy/eks-agent-platform/${var.environment}-eks-agent-platform-tenant-boundary"
 
   # Roles/policies/instance-profiles the vend role is allowed to manage — only
   # those minted under the eks-fleet path. Pre-create GetRole must also resolve
@@ -71,7 +84,7 @@ locals {
 ################################################################################
 
 resource "aws_iam_policy" "vend_boundary" {
-  name        = "${local.role_prefix}-vend-boundary"
+  name        = local.vend_boundary_name
   path        = local.iam_path
   description = "Permissions boundary ceiling for the eks-fleet vend role and the cluster roles it mints"
 
@@ -97,8 +110,48 @@ resource "aws_iam_policy" "vend_boundary" {
           "sts:AssumeRole",
           "sts:TagSession",
           "tag:GetResources",
+          # This boundary is also the RUNTIME ceiling for every cluster role
+          # minted with it (node, Karpenter controller, EBS CSI, operator): node
+          # image pulls (ECR read), SSM Session Manager channels, EKS Pod
+          # Identity handshakes, and Karpenter's pricing lookups live here even
+          # though the vend role itself never calls them.
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ec2messages:*",
+          "ssmmessages:*",
+          "eks-auth:AssumeRoleForPodIdentity",
+          "pricing:GetProducts",
         ]
         Resource = "*"
+      },
+      {
+        # Ceiling-level twin of the identity policy's WithBoundary gates, so the
+        # guarantee survives identity-policy tampering: any role write performed
+        # under this boundary must target a role carrying an approved boundary —
+        # this one (cluster infra roles, the agent-platform operator) or the
+        # agent-platform tenant boundary (operator-minted tenant roles, which
+        # that ceiling hard-caps: no iam, no sts:AssumeRole). A session capped by
+        # this boundary can therefore never mint or widen an unbounded principal,
+        # even transitively through a role it is allowed to write.
+        Sid    = "DenyUnboundedRoleWrites"
+        Effect = "Deny"
+        Action = [
+          "iam:CreateRole",
+          "iam:AttachRolePolicy",
+          "iam:PutRolePolicy",
+          "iam:PutRolePermissionsBoundary",
+        ]
+        Resource = "*"
+        Condition = {
+          StringNotEquals = {
+            "iam:PermissionsBoundary" = [
+              local.vend_boundary_arn,
+              local.tenant_boundary_arn,
+            ]
+          }
+        }
       },
       {
         # No vend session may ever create a human/long-lived principal, touch the
@@ -135,7 +188,7 @@ resource "aws_iam_policy" "vend_boundary" {
           "iam:PutRolePermissionsBoundary",
         ]
         Resource = [
-          "arn:${local.partition}:iam::${local.account_id}:policy${local.iam_path}${local.role_prefix}-vend-boundary",
+          local.vend_boundary_arn,
           local.vend_role_arn,
         ]
       },
@@ -297,24 +350,44 @@ resource "aws_iam_role_policy" "vend" {
         }
       },
       {
-        # Create + modify cluster roles created under the /eks-fleet/ path. The
-        # vend role's OWN permissions boundary (below) is the escalation ceiling —
-        # it already denies minting users, touching org/account, and widening
-        # itself — so a per-created-role boundary condition here is redundant
-        # belt-and-suspenders. Path-scoping is the gate; the cluster component just
-        # sets cluster_iam_role_path = /eks-fleet/ (no per-role boundary needed).
-        Sid    = "ManageClusterRolesByPath"
+        # Create + write cluster roles under /eks-fleet/ ONLY when the target
+        # role carries the vend boundary — the same condition-locked CreateRole
+        # gate agent-iam applies to tenant roles. Path-scoping picks WHICH roles
+        # the vend role may touch; the iam:PermissionsBoundary condition
+        # guarantees anything it mints or widens is capped by its own ceiling, so
+        # a compromised vend session cannot mint an unbounded admin role. The
+        # cluster-stack entrypoint satisfies it by setting
+        # cluster_permissions_boundary_arn to this boundary (published in SSM as
+        # vend_permissions_boundary_arn).
+        Sid    = "ManageClusterRolesWithBoundary"
         Effect = "Allow"
         Action = [
           "iam:CreateRole",
-          "iam:TagRole",
-          "iam:UntagRole",
           "iam:AttachRolePolicy",
           "iam:DetachRolePolicy",
           "iam:PutRolePolicy",
           "iam:DeleteRolePolicy",
-          "iam:UpdateAssumeRolePolicy",
           "iam:PutRolePermissionsBoundary",
+        ]
+        Resource = local.managed_role_arn
+        Condition = {
+          StringEquals = {
+            "iam:PermissionsBoundary" = local.vend_boundary_arn
+          }
+        }
+      },
+      {
+        # Role lifecycle actions whose request context carries no
+        # iam:PermissionsBoundary key (so they cannot be boundary-conditioned) —
+        # none of them can widen a role's effective permissions: the boundary set
+        # at create time keeps the cap, and a trust-policy edit only changes who
+        # may assume an already-capped role.
+        Sid    = "ManageClusterRoleLifecycle"
+        Effect = "Allow"
+        Action = [
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:UpdateAssumeRolePolicy",
         ]
         Resource = local.managed_role_arn
       },
@@ -359,23 +432,56 @@ resource "aws_iam_role_policy" "vend" {
         Resource = local.managed_policy_arn
       },
       {
-        # agent-iam (eks-agent-platform): create + manage the operator IRSA role
-        # under /eks-agent-platform/ during a vend. Path-scoped — the vend boundary
-        # is the escalation ceiling, same gate model as ManageClusterRolesByPath.
-        # The operator role carries no permissions_boundary, so no boundary
-        # condition. Keep in sync with fleet-hub's ManageAgentPlatform* statements.
-        Sid    = "ManageAgentPlatformRolesByPath"
+        # ManageClusterPolicies matches every policy under /eks-fleet/ —
+        # including the vend boundary itself. Explicitly deny rewriting or
+        # deleting the boundary so the ceiling the WithBoundary gates rely on
+        # stays immutable to the vend session. The boundary's own
+        # ProtectBoundaryAndSelf already denies this; this is the identity-layer
+        # half, so the protection never hinges on a single mechanism.
+        Sid    = "ProtectVendBoundary"
+        Effect = "Deny"
+        Action = [
+          "iam:CreatePolicyVersion",
+          "iam:DeletePolicyVersion",
+          "iam:SetDefaultPolicyVersion",
+          "iam:DeletePolicy",
+        ]
+        Resource = local.vend_boundary_arn
+      },
+      {
+        # agent-iam (eks-agent-platform): create + write the operator IRSA role
+        # under /eks-agent-platform/ during a vend — gated exactly like
+        # ManageClusterRolesWithBoundary: the operator role must carry the vend
+        # boundary (agent-iam's operator_permissions_boundary_arn input, which
+        # the cluster-bootstrap entrypoint sets from the SSM-published boundary
+        # ARN). Keep in sync with fleet-hub's ManageAgentPlatform* statements.
+        Sid    = "ManageAgentPlatformRolesWithBoundary"
         Effect = "Allow"
         Action = [
           "iam:CreateRole",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+        ]
+        Resource = local.agent_platform_role_arn
+        Condition = {
+          StringEquals = {
+            "iam:PermissionsBoundary" = local.vend_boundary_arn
+          }
+        }
+      },
+      {
+        # agent-iam: reads + the boundary-keyless lifecycle of the operator role
+        # (no iam:PermissionsBoundary in these request contexts; none can widen
+        # the role). Keep in sync with fleet-hub.
+        Sid    = "ManageAgentPlatformRoleLifecycle"
+        Effect = "Allow"
+        Action = [
           "iam:GetRole",
           "iam:TagRole",
           "iam:UntagRole",
           "iam:UpdateAssumeRolePolicy",
           "iam:UpdateRoleDescription",
-          "iam:PutRolePolicy",
           "iam:GetRolePolicy",
-          "iam:DeleteRolePolicy",
           "iam:ListRolePolicies",
           "iam:ListAttachedRolePolicies",
           # the AWS provider lists a role's instance profiles before DeleteRole
@@ -388,7 +494,10 @@ resource "aws_iam_role_policy" "vend" {
       {
         # agent-iam: the tenant-boundary + tenant-baseline managed policies under
         # /eks-agent-platform/ — the agent-platform sibling of ManageClusterPolicies.
-        # Keep in sync with fleet-hub.
+        # The tenant boundary stays vend-writable BY DESIGN: agent-iam owns its
+        # content and rolls updates out through the vend path, so it cannot be
+        # made immutable here the way the vend boundary is. Keep in sync with
+        # fleet-hub.
         Sid    = "ManageAgentPlatformPolicies"
         Effect = "Allow"
         Action = [
