@@ -1,4 +1,4 @@
-# Checkov policy — CI runs this as a HARD gate (ci.yml security-scan jobs,
+# Checkov policy — CI runs this as a HARD gate (ci.yml security-scan job,
 # soft_fail off): any finding not skipped here fails the build.
 #
 # Every skip below is either a deliberate, documented posture decision or a
@@ -77,15 +77,3 @@ skip-check:
 
   # ── AWS: tooling ──
   - CKV_TF_1 # module commit-hash pinning — registry modules pinned by exact version; readable upgrades preferred
-
-  # ── GCP ──
-  - CKV_GCP_62 # bucket access logging — log-noise/cost trade-off accepted (mirrors CKV_AWS_18)
-  - CKV_GCP_78 # bucket versioning — loki/tempo are high-churn telemetry; versioning off by design
-  - CKV_GCP_83 # PubSub CSEK — Google-managed keys accepted
-  - CKV_GCP_81 # BigQuery CSEK — Google-managed keys accepted
-  - CKV_GCP_43 # KMS rotation ≤90d — FALSE POSITIVE: rotation_period is var-driven, default exactly 90 days
-  - CKV_GCP_12 # GKE network policy — FALSE POSITIVE: Dataplane V2 (ADVANCED_DATAPATH) enforces NetworkPolicy natively
-  - CKV_GCP_69 # GKE metadata server — default node pool removed; managed pools set GKE_METADATA via Workload Identity
-  - CKV_GCP_65 # Google Groups RBAC — requires a Workspace group; not applicable to this org
-  - CKV_GCP_61 # VPC flow logs + intranode visibility — flow logs are var-gated; intranode visibility is a cost posture
-  - CKV2_GCP_18 # network firewall — firewall rules live in the cluster/network layering, not the shared-VPC resource

@@ -144,11 +144,11 @@ Production overlay defaults `cluster_endpoint_public_access = false`. Without a 
 ```bash
 cd <repo-root>
 
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=network            # ~3-5 min
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster            # ~15-25 min
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=secrets            # ~2 min
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster-bootstrap  # ~5-10 min
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster-addons     # ~5-10 min
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=network            # ~3-5 min
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster            # ~15-25 min
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=secrets            # ~2 min
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster-bootstrap  # ~5-10 min
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster-addons     # ~5-10 min
 ```
 
 Replace `<env>` with `dev`/`staging`/`production` and account accordingly.
@@ -204,13 +204,13 @@ kubectl get pods -A | grep -vE 'Running|Completed'
 
 ```bash
 # Amazon Managed Prometheus + Amazon Managed Grafana
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=managed-monitoring
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=managed-monitoring
 
 # Druid analytics tenant
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=druid
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=druid
 
 # Route 53 hosted zone (if attaching ingress hostnames)
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=dns
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=dns
 ```
 
 After `managed-monitoring`, bootstrap the Amazon Managed Grafana service-account token into Secrets Manager (one-time):
@@ -280,7 +280,7 @@ role). Apply it once per account with your admin/SSO creds, then wire its output
 into the GitHub Actions repo *variables*:
 
 ```bash
-task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=github-oidc
+task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=github-oidc
 cd live/aws/workload-<env>/us-west-2/<env>/github-oidc && terragrunt output -raw deploy_role_arn
 # Set the printed ARN as the AWS_ROLE_ARN (deploy.yml) and E2E_AWS_ROLE_ARN
 # (e2e.yml) repo variables. Local exec does not need this.

@@ -120,7 +120,7 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
 1. **Verify the OIDC provider + deploy role exist.** Both are provisioned by the
    `github-oidc` component — apply it once per account, then read the role ARN:
    ```bash
-   task apply CLOUD=aws ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=github-oidc
+   task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=github-oidc
    aws iam list-open-id-connect-providers
    ```
 

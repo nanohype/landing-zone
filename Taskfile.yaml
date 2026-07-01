@@ -1,7 +1,6 @@
 version: "3"
 
 vars:
-  CLOUD: '{{.CLOUD | default "aws"}}'
   ACCOUNT: '{{.ACCOUNT | default "workload-dev"}}'
   REGION: '{{.REGION | default "us-west-2"}}'
   ENVIRONMENT: '{{.ENVIRONMENT | default "dev"}}'
@@ -28,62 +27,60 @@ tasks:
       - tofu fmt -check -recursive modules/
 
   validate:
-    desc: "Validate all components for CLOUD (default: aws)"
+    desc: Validate all components
     cmds:
       - |
-        for dir in components/{{.CLOUD}}/*/; do
+        for dir in components/aws/*/; do
           name=$(basename "$dir")
-          echo "Validating {{.CLOUD}}/$name..."
+          echo "Validating aws/$name..."
           (cd "$dir" && tofu init -backend=false -input=false > /dev/null 2>&1 && tofu validate) || exit 1
         done
-        echo "All {{.CLOUD}} components valid."
+        echo "All components valid."
 
   lint:
-    desc: "Run tflint on all components for CLOUD (default: aws)"
-    vars:
-      CLOUD: '{{.CLOUD | default "aws"}}'
+    desc: Run tflint on all components
     cmds:
-      - tflint --init --config "$PWD/.tflint-{{.CLOUD}}.hcl"
-      - tflint --recursive --config "$PWD/.tflint-{{.CLOUD}}.hcl" --chdir=components/{{.CLOUD}} --minimum-failure-severity=error
+      - tflint --init --config "$PWD/.tflint-aws.hcl"
+      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=components/aws --minimum-failure-severity=error
 
   # === Planning ===
 
   plan:
-    desc: "Plan for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT"
+    desc: "Plan for ACCOUNT/REGION/ENVIRONMENT/COMPONENT"
     cmds:
       - |
         if [ "{{.COMPONENT}}" = "all" ]; then
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- plan
+          cd live/aws/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- plan
         else
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt plan
+          cd live/aws/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt plan
         fi
 
   apply:
-    desc: "Apply for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT"
+    desc: "Apply for ACCOUNT/REGION/ENVIRONMENT/COMPONENT"
     cmds:
       - |
         if [ "{{.COMPONENT}}" = "all" ]; then
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- apply
+          cd live/aws/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- apply
         else
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt apply
+          cd live/aws/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt apply
         fi
 
   destroy:
-    desc: "Destroy for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT. With COMPONENT=all, destroys in reverse dependency order."
+    desc: "Destroy for ACCOUNT/REGION/ENVIRONMENT/COMPONENT. With COMPONENT=all, destroys in reverse dependency order."
     cmds:
       - |
         if [ "{{.COMPONENT}}" = "all" ]; then
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- destroy
+          cd live/aws/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}} && terragrunt run --all -- destroy
         else
-          cd live/{{.CLOUD}}/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt destroy
+          cd live/aws/{{.ACCOUNT}}/{{.REGION}}/{{.ENVIRONMENT}}/{{.COMPONENT}} && terragrunt destroy
         fi
 
   # === Backend ===
 
   init-backend:
-    desc: "Create backend storage for CLOUD"
+    desc: "Create the S3 state backend"
     cmds:
-      - ./scripts/init-backend-{{.CLOUD}}.sh
+      - ./scripts/init-backend-aws.sh
 
   # === End-to-end (manual, real spend) ===
 
@@ -105,6 +102,6 @@ tasks:
       - |
         echo ""
         echo "Usage:"
-        echo "  task <target> [CLOUD=aws|gcp] [ACCOUNT=workload-dev|workload-staging|workload-prod|management] [REGION=us-west-2] [ENVIRONMENT=dev|staging|production|org] [COMPONENT=network|cluster|all]"
+        echo "  task <target> [ACCOUNT=workload-dev|workload-staging|workload-prod|management] [REGION=us-west-2] [ENVIRONMENT=dev|staging|production|org] [COMPONENT=network|cluster|all]"
         echo ""
         task --list

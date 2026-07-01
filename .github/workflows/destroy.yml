@@ -3,20 +3,13 @@ name: Destroy
 on:
   workflow_dispatch:
     inputs:
-      cloud:
-        description: "Target cloud"
-        required: true
-        type: choice
-        options:
-          - aws
-          - gcp
       account:
-        description: "Target account/project (e.g., workload-dev, workload-staging)"
+        description: "Target account (e.g., workload-dev, workload-staging)"
         required: true
         type: string
         default: "workload-dev"
       region:
-        description: "Target region (e.g., us-west-2, us-central1)"
+        description: "Target region (e.g., us-west-2)"
         required: true
         type: string
         default: "us-west-2"
@@ -43,7 +36,7 @@ permissions:
 
 jobs:
   destroy:
-    name: Destroy ${{ inputs.cloud }}/${{ inputs.environment }}/${{ inputs.component }}
+    name: Destroy ${{ inputs.environment }}/${{ inputs.component }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     if: inputs.confirm == inputs.environment
@@ -57,21 +50,13 @@ jobs:
           tg_version: "1.0.8"
 
       - name: Configure AWS credentials
-        if: inputs.cloud == 'aws'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
 
-      - name: Authenticate to GCP
-        if: inputs.cloud == 'gcp'
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-
       - name: Destroy
-        working-directory: live/${{ inputs.cloud }}/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
+        working-directory: live/aws/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
         run: |
           if [ "${{ inputs.component }}" = "all" ]; then
             terragrunt run --all --non-interactive -- destroy

@@ -96,31 +96,24 @@ jobs:
           tofu validate
 
   tflint:
-    name: TFLint (${{ matrix.cloud }})
+    name: TFLint
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        cloud: [aws, gcp]
     steps:
       - uses: actions/checkout@v4
       - uses: terraform-linters/setup-tflint@v6
         with:
           tflint_version: latest
-      - run: tflint --init --config .tflint-${{ matrix.cloud }}.hcl
-      - run: tflint --recursive --config "$PWD/.tflint-${{ matrix.cloud }}.hcl" --chdir=components/${{ matrix.cloud }} --minimum-failure-severity=error
+      - run: tflint --init --config .tflint-aws.hcl
+      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=components/aws --minimum-failure-severity=error
 
   checkov:
-    name: Security Scan (${{ matrix.cloud }})
+    name: Security Scan
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        cloud: [aws, gcp]
     steps:
       - uses: actions/checkout@v4
       - uses: bridgecrewio/checkov-action@v12
         with:
-          directory: components/${{ matrix.cloud }}/
+          directory: components/aws/
           framework: terraform
           # HARD gate: any finding not covered by .checkov.yaml fails the
           # build. The deliberately-accepted posture trade-offs (single-region
@@ -135,8 +128,8 @@ jobs:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]
     runs-on: ubuntu-latest
-    # The plan jobs need cloud credentials (vars.AWS_ROLE_ARN and the GCP
-    # equivalents). Until those repo variables are set, the plan is
+    # The plan jobs need AWS credentials (vars.AWS_ROLE_ARN). Until that repo
+    # variable is set, the plan is
     # advisory: it still runs and surfaces output, but a missing-credentials
     # failure does not block the build. The hard gates are the placeholder
     # check, fmt, validate, tflint, and checkov (checkov gated by the
@@ -165,41 +158,27 @@ jobs:
           # step put tofu on PATH already.
           tofu_version: "1.11.5"
 
-      # Credential guard. Each cloud's auth step runs only when both the
-      # matrix matches AND the corresponding repo variable is set. When
-      # unset, the auth step skips and the Plan step below skips with it,
-      # so the matrix entry comes back green-skipped rather than red-fail.
-      # Set these in repo settings (Actions → Variables) to enable real
-      # plans:
-      #   AWS: AWS_ROLE_ARN
-      #   GCP: GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT
+      # Credential guard. The auth step runs only when the AWS_ROLE_ARN repo
+      # variable is set. When unset, the auth step skips and the Plan step
+      # below skips with it, so the matrix entry comes back green-skipped
+      # rather than red-fail. Set AWS_ROLE_ARN in repo settings
+      # (Actions → Variables) to enable real plans.
       - name: Configure AWS credentials
-        if: matrix.cloud == 'aws' && vars.AWS_ROLE_ARN != ''
+        if: vars.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ matrix.region }}
 
-      - name: Authenticate to GCP
-        if: matrix.cloud == 'gcp' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-
       - name: Detect credential availability
         id: creds
         run: |
-          case "${{ matrix.cloud }}" in
-            aws) [ -n "${{ vars.AWS_ROLE_ARN }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
-            gcp) [ -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] && [ -n "${{ vars.GCP_SERVICE_ACCOUNT }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT" ;;
-            *)   echo "available=false" >> "$GITHUB_OUTPUT" ;;
-          esac
+          [ -n "${{ vars.AWS_ROLE_ARN }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT"
 
       - name: Skip notice (no cloud credentials configured)
         if: steps.creds.outputs.available != 'true'
         run: |
-          echo "::notice::Skipping plan for ${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }} — cloud credentials not configured in repo Variables."
+          echo "::notice::Skipping plan for ${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }} — AWS credentials not configured in repo Variables."
 
       - name: Plan
         if: steps.creds.outputs.available == 'true'
