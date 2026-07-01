@@ -113,6 +113,7 @@ jobs:
     name: Security Scan (${{ matrix.cloud }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         cloud: [aws, gcp, azure]
     steps:
@@ -121,16 +122,14 @@ jobs:
         with:
           directory: components/${{ matrix.cloud }}/
           framework: terraform
-          # soft_fail keeps the CI green while findings are still surfaced
-          # in the run output and (when enabled) the SARIF upload. Treat
-          # checkov as an advisory linter, not a build gate. The platform
-          # template intentionally trades portfolio-realistic posture
-          # (single-RG isolation, no KMS-managed encryption, public
-          # endpoints with IP allowlists) for not-prod-hardened best
-          # practice. Toggle to false in a fork that's going to a real
-          # regulated cluster.
-          soft_fail: true
-          skip_check: ${{ matrix.cloud == 'aws' && 'CKV_AWS_144,CKV_AWS_145' || '' }}
+          # HARD gate: any finding not covered by .checkov.yaml fails the
+          # build. The deliberately-accepted posture trade-offs (single-RG
+          # isolation, provider-managed encryption, public endpoints with IP
+          # allowlists) and checkov false positives are enumerated there as
+          # skip-check entries, one line of rationale each — accepted and
+          # documented, never silently advisory.
+          soft_fail: false
+          config_file: .checkov.yaml
 
   plan:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
@@ -139,8 +138,9 @@ jobs:
     # The plan jobs need cloud credentials (vars.AWS_ROLE_ARN and the GCP /
     # Azure equivalents). Until those repo variables are set, the plan is
     # advisory: it still runs and surfaces output, but a missing-credentials
-    # failure does not block the build. fmt, validate, tflint, and checkov
-    # remain hard gates.
+    # failure does not block the build. The hard gates are the placeholder
+    # check, fmt, validate, tflint, and checkov (checkov gated by the
+    # documented skip list in .checkov.yaml).
     continue-on-error: true
     if: github.event_name == 'pull_request'
     strategy:

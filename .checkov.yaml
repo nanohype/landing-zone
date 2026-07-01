@@ -1,0 +1,128 @@
+# Checkov policy — CI runs this as a HARD gate (ci.yml security-scan jobs,
+# soft_fail off): any finding not skipped here fails the build.
+#
+# Every skip below is either a deliberate, documented posture decision or a
+# checkov false positive, one line of rationale each. The platform template
+# intentionally trades portfolio-realistic posture (single-region/single-RG
+# isolation, provider-managed encryption at rest, public endpoints behind IP
+# allowlists) for regulated-cluster hardening; a fork going to a regulated
+# estate should delete the "posture" skips and remediate. If a skip loses its
+# rationale, delete the skip and let CI fail until the finding is fixed.
+
+skip-check:
+  # ── AWS: provider-managed encryption at rest (SSE-S3 / AWS-managed keys) ──
+  - CKV_AWS_145 # S3 SSE-KMS — SSE-S3 is the accepted at-rest posture; CMKs only where a design needs them
+  - CKV_AWS_149 # Secrets Manager CMK — AWS-managed key accepted outside the secrets component (which does use a CMK)
+  - CKV_AWS_119 # DynamoDB CMK — AWS-owned-key encryption (always on) accepted
+  - CKV_AWS_158 # CloudWatch log group KMS — provider-managed encryption accepted for platform logs
+  - CKV_AWS_184 # generic resource CMK — same provider-managed-key posture
+  - CKV_AWS_191 # ElastiCache CMK — provider-managed key accepted for the in-VPC rate-limit cache
+  - CKV_AWS_136 # ECR CMK — AES-256 default encryption accepted
+  - CKV_AWS_26 # SNS topic SSE — alert/fan-out topics carry no payload secrets; provider default accepted
+  - CKV2_AWS_64 # explicit KMS key policy — keys without one use the account-root default policy deliberately
+  - CKV2_AWS_34 # SSM SecureString — params published are discovery metadata (ARNs/names/paths), never secret values
+
+  # ── AWS: IAM wildcards checkov cannot model ──
+  # The fleet/break-glass boundary policies allow iam:*/service:* as CEILINGS
+  # whose Deny statements carry the control, and role-write grants are
+  # condition-locked to iam:PermissionsBoundary; telemetry/list actions
+  # (logs, cloudwatch, ssm:DescribeParameters, batch, kafka-cluster) do not
+  # support resource-level permissions. Checkov evaluates statements in
+  # isolation and sees only the wildcard.
+  - CKV_AWS_355 # "*" resource for restrictable actions
+  - CKV_AWS_290 # write access without constraints
+  - CKV_AWS_289 # permissions-management access without constraints
+  - CKV_AWS_287 # credentials exposure (boundary ceilings)
+  - CKV_AWS_288 # data exfiltration (boundary ceilings)
+  - CKV_AWS_286 # privilege escalation (boundary ceilings — the Deny+condition pair IS the control)
+  - CKV2_AWS_40 # full IAM privileges (boundary ceilings allow iam:* under hard Denies)
+  - CKV_AWS_62 # full *-* admin (break-glass role is a deliberate MFA-gated admin)
+  - CKV_AWS_63 # "*" action (break-glass boundary ceiling)
+
+  # ── AWS: durability/ops posture (single-region, cost-tuned template) ──
+  - CKV_AWS_144 # S3 cross-region replication — single-region platform by design
+  - CKV_AWS_18 # S3 access logging — log-noise/cost trade-off accepted
+  - CKV2_AWS_62 # S3 event notifications — no consumer; nothing to notify
+  - CKV2_AWS_61 # S3 lifecycle on every bucket — lifecycle set where data volume warrants it
+  - CKV_AWS_300 # abort-incomplete-multipart lifecycle — same selective-lifecycle posture
+  - CKV_AWS_21 # S3 versioning — flagged bucket (digest raw_aggregations) suspends versioning deliberately: debug snapshots
+  - CKV_AWS_28 # DynamoDB PITR — caches/idempotency tables are rebuildable
+  - CKV2_AWS_57 # Secrets Manager rotation — no rotation lambdas; rotation is a runbook, not automation, in this template
+  - CKV_AWS_338 # 1-year log retention — retention tuned per environment for cost
+  - CKV_AWS_252 # CloudTrail SNS topic — trail archives to S3; no push consumer
+  - CKV2_AWS_10 # CloudTrail → CW Logs — S3 archive is the query surface (Athena)
+  - CKV2_AWS_3 # GuardDuty org/region — detector enablement is an org-security decision documented there
+  - CKV2_AWS_45 # AWS Config all-resources recorder — scoped recording is the accepted cost posture
+  - CKV2_AWS_18 # EFS in AWS Backup plan — model cache is re-hydratable from S3
+  - CKV_AWS_42 # EFS encryption — FALSE POSITIVE: var-driven (tenant_config.efs_encryption, default true)
+  - CKV2_AWS_50 # ElastiCache Multi-AZ — single-node rate-limit cache; loss = cold cache
+  - CKV_AWS_31 # ElastiCache transit encryption/auth — in-VPC rate-limit cache on private subnets only
+  - CKV_AWS_51 # ECR immutable tags — mutable tags are the model-image retag flow
+  - CKV_AWS_382 # SG egress 0.0.0.0/0 — workers need general egress (pulls, AWS APIs) via NAT
+  - CKV2_AWS_5 # SG not attached — SGs are consumed by sibling components/tenants at deploy time
+  - CKV2_AWS_39 # Route53 query logging — DNS log volume/cost accepted trade-off
+  - CKV2_AWS_38 # Route53 DNSSEC — registrar/DS coordination out of template scope
+  - CKV_AWS_331 # TGW auto-accept attachments — attachments arrive only from RAM-shared org accounts
+
+  # ── AWS: API Gateway tenant surface (public endpoint + IP allowlist posture) ──
+  - CKV2_AWS_77 # WAFv2 Log4j AMR — WAF rule curation out of template scope
+  - CKV_AWS_192 # WAF log4j lookup — same WAF posture
+  - CKV2_AWS_31 # WAF logging config — same WAF posture
+  - CKV2_AWS_51 # API GW client certificates — callers authenticate with IAM/authorizers, not mTLS
+  - CKV2_AWS_4 # API GW stage logging level — access logs enabled; execution-log level left to tenants
+  - CKV_AWS_73 # API GW X-Ray — tracing rides OTel, not X-Ray
+  - CKV_AWS_120 # API GW caching — per-tenant cost decision, off by default
+  - CKV_AWS_225 # API GW method cache — same caching posture
+  - CKV_AWS_237 # API GW create-before-destroy — recreate window accepted for tenant APIs
+
+  # ── AWS: tooling ──
+  - CKV_TF_1 # module commit-hash pinning — registry modules pinned by exact version; readable upgrades preferred
+
+  # ── GCP ──
+  - CKV_GCP_62 # bucket access logging — log-noise/cost trade-off accepted (mirrors CKV_AWS_18)
+  - CKV_GCP_78 # bucket versioning — loki/tempo are high-churn telemetry; versioning off by design
+  - CKV_GCP_83 # PubSub CSEK — Google-managed keys accepted
+  - CKV_GCP_81 # BigQuery CSEK — Google-managed keys accepted
+  - CKV_GCP_43 # KMS rotation ≤90d — FALSE POSITIVE: rotation_period is var-driven, default exactly 90 days
+  - CKV_GCP_12 # GKE network policy — FALSE POSITIVE: Dataplane V2 (ADVANCED_DATAPATH) enforces NetworkPolicy natively
+  - CKV_GCP_69 # GKE metadata server — default node pool removed; managed pools set GKE_METADATA via Workload Identity
+  - CKV_GCP_65 # Google Groups RBAC — requires a Workspace group; not applicable to this org
+  - CKV_GCP_61 # VPC flow logs + intranode visibility — flow logs are var-gated; intranode visibility is a cost posture
+  - CKV2_GCP_18 # network firewall — firewall rules live in the cluster/network layering, not the shared-VPC resource
+
+  # ── Azure: public endpoints behind allowlists / single-RG isolation ──
+  - CKV_AZURE_59 # storage public network access — public endpoint + allowlist posture; no private DNS estate
+  - CKV2_AZURE_33 # storage private endpoint — same; private endpoints need the hub-spoke DNS estate this template omits
+  - CKV2_AZURE_32 # key vault private endpoint — same private-endpoint posture
+  - CKV_AZURE_189 # key vault public network access — same public-endpoint + allowlist posture
+  - CKV2_AZURE_57 # PostgreSQL private endpoint — server uses delegated-subnet VNet integration instead
+  - CKV_AZURE_109 # key vault network ACLs default-deny — same public-endpoint + allowlist posture
+  - CKV_AZURE_115 # AKS private cluster — public API endpoint + allowlist posture, matching the EKS/GKE shape
+
+  # ── Azure: storage/ops posture ──
+  - CKV2_AZURE_40 # shared key auth — Loki/Tempo/Velero authenticate with account keys by design
+  - CKV2_AZURE_41 # SAS expiration policy — no SAS tokens are issued; policy would be inert
+  - CKV2_AZURE_21 # blob read logging — storage-analytics log volume/cost accepted
+  - CKV_AZURE_33 # queue logging — no queue workloads; setting is inert
+  - CKV2_AZURE_1 # storage CMK — Microsoft-managed keys accepted (same posture as AWS/GCP)
+  - CKV_AZURE_206 # storage replication — LRS on rebuildable telemetry/exports; GRS where it matters (velero, audit)
+  - CKV2_AZURE_38 # soft delete — enabled via delete_retention where data warrants; flow/cost exports are rebuildable
+  - CKV_AZURE_41 # KV secret expiration — platform secrets are long-lived; expiry without a rotation pipeline breaks consumers
+  - CKV_AZURE_43 # storage naming — FALSE POSITIVE: names are var/expression-driven, checkov cannot resolve
+  - CKV_AZURE_12 # NSG flow-log retention >90d — retention tuned for cost
+  - CKV_AZURE_136 # PostgreSQL geo-redundant backup — single-region posture
+  - CKV2_AZURE_35 # Recovery Services Vault identity — vault consumes no Azure-resource access; identity unused
+  - CKV_AZURE_20 # security contact phone — FALSE POSITIVE: var-driven value checkov cannot resolve
+  - CKV_AZURE_131 # security contact email — FALSE POSITIVE: var-driven value checkov cannot resolve
+  - CKV_AZURE_160 # HTTP 80 from internet — public NSG serves the HTTP→HTTPS redirect listener
+
+  # ── Azure: AKS (BYO-CNI Cilium + NAP cluster shape) ──
+  - CKV2_AZURE_29 # Azure CNI — FALSE POSITIVE: network_plugin "none" is the BYO-Cilium contract
+  - CKV_AZURE_7 # network policy — FALSE POSITIVE: Cilium enforces NetworkPolicy, installed by bootstrap
+  - CKV_AZURE_141 # local admin — kept as the AKS break-glass path; Entra ID is the primary auth
+  - CKV_AZURE_116 # Azure Policy add-on — policy enforcement is Kyverno via the gitops catalog, not the AKS add-on
+  - CKV_AZURE_171 # upgrade channel — manual upgrades by choice, mirroring the EKS flow
+  - CKV_AZURE_168 # ≥50 max pods — Node Auto Provisioning sizes pods-per-node per SKU
+  - CKV_AZURE_226 # ephemeral OS disks — SKU-dependent; NAP picks SKUs dynamically
+  - CKV_AZURE_227 # host encryption — requires the EncryptionAtHost subscription feature; not assumed
+  - CKV_AZURE_117 # disk encryption set — platform-managed keys accepted (same CMK posture)
