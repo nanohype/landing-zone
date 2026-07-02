@@ -331,16 +331,3 @@ Run `cloudgov orphans --profile <p>` in every touched account until clean.
 Confirm zero EKS / NAT / VPC / EC2 / EBS / ELB / EIP before walking away. A
 COMPLIANCE-locked S3 bucket (e.g. a Bedrock invocation-log bucket) stays
 undeletable until its retention elapses — that's expected; leave it.
-
----
-
-## RB-008: Model-Access Cutover (App → Tenant Role)
-
-Binding an app workload's ServiceAccount to its operator-reconciled
-`<env>-<app>-tenant` role so Bedrock model access is declared once, in
-`Platform.spec.identity`. Four ordered steps — mint the app-access policy,
-declare the grant on the Platform CR, re-point the Pod Identity association,
-retire the old per-app role — each with IAM-level verification, plus
-rollback and fresh-environment ordering.
-
-Full procedure: [runbooks/model-access-cutover.md](runbooks/model-access-cutover.md).
