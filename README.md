@@ -3,10 +3,9 @@
 ![OpenTofu](https://img.shields.io/badge/OpenTofu-%3E%3D1.11-blue?logo=opentofu)
 ![Terragrunt](https://img.shields.io/badge/Terragrunt-latest-blue?logo=terraform)
 ![AWS](https://img.shields.io/badge/AWS-Platform-FF9900?logo=amazonaws)
-![GCP](https://img.shields.io/badge/GCP-Platform-4285F4?logo=googlecloud)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructure.
+OpenTofu + Terragrunt monorepo for enterprise platform infrastructure on AWS.
 
 **AI clients / agents start here:** [`AGENTS.md`](AGENTS.md). For the stack-wide view, see the [Platform Reference](https://github.com/nanohype/nanohype/blob/main/docs/platform-reference.md).
 
@@ -14,9 +13,9 @@ Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructur
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Organization Layer (management / org accounts)                     │
+│  Organization Layer (management account)                             │
 │  org-identity · org-security · org-compliance · org-cost            │
-│  org-networking · org-scp/org-policy                                │
+│  org-networking · org-scp                                            │
 └─────────────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -39,10 +38,10 @@ Multi-cloud OpenTofu + Terragrunt monorepo for enterprise platform infrastructur
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Multi-cloud hierarchy:**
+**Environment hierarchy:**
 
 ```
-live/{cloud}/{account}/{region}/{environment}/{component}/terragrunt.hcl
+live/aws/{account}/{region}/{environment}/{component}/terragrunt.hcl
 ```
 
 **GitOps boundary:** OpenTofu deploys cloud resources + Cilium + ArgoCD. ArgoCD manages everything else via [eks-gitops](https://github.com/nanohype/eks-gitops).
@@ -52,59 +51,48 @@ live/{cloud}/{account}/{region}/{environment}/{component}/terragrunt.hcl
 ```
 landing-zone/
 ├── components/
-│   ├── aws/                # AWS OpenTofu root modules
-│   └── gcp/                # GCP OpenTofu root modules
+│   └── aws/                # AWS OpenTofu root modules
 ├── live/
-│   ├── root.hcl            # Root config (multi-cloud provider dispatch)
+│   ├── root.hcl            # Root config (AWS provider + S3 state backend)
 │   ├── _envcommon/
-│   │   ├── aws/            # AWS dependency wiring (24 .hcl)
-│   │   └── gcp/            # GCP dependency wiring
-│   ├── aws/
-│   │   ├── cloud.hcl
-│   │   ├── management/     # Management account (org components)
-│   │   ├── workload-dev/   # Dev account
-│   │   ├── workload-staging/
-│   │   └── workload-prod/
-│   └── gcp/
+│   │   └── aws/            # Dependency wiring per component
+│   └── aws/
 │       ├── cloud.hcl
-│       ├── workload-dev/
+│       ├── management/     # Management account (org components)
+│       ├── workload-dev/   # Dev account
 │       ├── workload-staging/
 │       └── workload-prod/
 ├── modules/
-│   ├── aws/workload-identity/    # AWS IRSA role factory
-│   └── gcp/workload-identity/    # GKE Workload Identity binding
+│   └── aws/workload-identity/    # AWS IRSA role factory
 ├── scripts/
-│   ├── init-backend-aws.sh
-│   └── init-backend-gcp.sh
+│   └── init-backend-aws.sh
 ├── Taskfile.yaml
 ├── .tflint.hcl              # Base rules
-├── .tflint-aws.hcl          # AWS plugin
-└── .tflint-gcp.hcl          # GCP plugin
+└── .tflint-aws.hcl          # AWS plugin
 ```
 
 ## Prerequisites
 
 - [OpenTofu](https://opentofu.org/) >= 1.10.0
 - [Terragrunt](https://terragrunt.gruntwork.io/) (latest)
-- Cloud CLI tools: [AWS CLI v2](https://aws.amazon.com/cli/), [gcloud](https://cloud.google.com/sdk)
-- [TFLint](https://github.com/terraform-linters/tflint) with cloud-specific plugins
+- [AWS CLI v2](https://aws.amazon.com/cli/)
+- [TFLint](https://github.com/terraform-linters/tflint) with the AWS plugin
 
 ## Quick Start
 
 ```bash
 # 1. Clone and configure
 git clone <repo-url> && cd landing-zone
-# Update account IDs in live/{cloud}/{account}/account.hcl
+# Update account IDs in live/aws/{account}/account.hcl
 
 # 2. Create backend infrastructure
 ./scripts/init-backend-aws.sh <account_id> <region>
-./scripts/init-backend-gcp.sh <project_id> <region>
 
-# 3. Plan all AWS dev components
-task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+# 3. Plan all dev components
+task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 
 # 4. Apply a single component
-task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
 ```
 
 ## Task Targets
@@ -112,22 +100,22 @@ task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPO
 ```
 task fmt              Format all OpenTofu files
 task fmt:check        Check formatting without modifying files
-task validate         Validate all components for CLOUD (default: aws)
-task lint             Run TFLint for CLOUD (default: aws)
-task plan             Plan for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT
-task apply            Apply for CLOUD/ACCOUNT/REGION/ENVIRONMENT/COMPONENT
-task init-backend     Create backend storage for CLOUD
+task validate         Validate all components
+task lint             Run TFLint on all components
+task plan             Plan for ACCOUNT/REGION/ENVIRONMENT/COMPONENT
+task apply            Apply for ACCOUNT/REGION/ENVIRONMENT/COMPONENT
+task init-backend     Create the S3 state backend
 task help             Show all targets
 ```
 
 ## CI/CD
 
-Four GitHub Actions workflows with conditional authentication per cloud (AWS OIDC, GCP Workload Identity Federation).
+Four GitHub Actions workflows, all authenticating via AWS OIDC (`AWS_ROLE_ARN` repo variable — no long-lived credentials).
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR / push | fmt, validate, tflint, checkov, plan (per cloud matrix) |
-| `deploy.yml` | Manual | Plan or apply with cloud/account/region/env/component inputs |
+| `ci.yml` | PR / push | fmt, validate, tflint, checkov, plan (per-component matrix) |
+| `deploy.yml` | Manual | Plan or apply with account/region/env/component inputs |
 | `destroy.yml` | Manual | Dev/staging only, requires confirmation |
 | `drift.yml` | Scheduled | Weekday production drift detection, creates GitHub issues |
 
@@ -137,7 +125,6 @@ Four GitHub Actions workflows with conditional authentication per cloud (AWS OID
 |----------|-------------|
 | [Onboarding Guide](docs/onboarding.md) | New engineer setup, tool installation, codebase walkthrough |
 | [First-time AWS Deploy](docs/first-deploy-aws.md) | Brand-new account → running EKS cluster (Identity Center, quotas, deploy order) |
-| [First-time GCP Deploy](docs/first-deploy-gcp.md) | Brand-new project → running GKE cluster (APIs, Workload Identity, quotas) |
 | [Architecture](docs/architecture.md) | Design rationale, dependency graph, layer breakdown, security model |
 | [Operations](docs/operations.md) | Day-to-day procedures, CI/CD details, tenant management |
 | [Runbooks](docs/runbooks.md) | Step-by-step procedures for common operational scenarios |

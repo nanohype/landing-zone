@@ -4,15 +4,6 @@ on:
   schedule:
     - cron: "0 6 * * 1-5"
   workflow_dispatch:
-    inputs:
-      cloud:
-        description: "Cloud to check"
-        required: true
-        type: choice
-        options:
-          - aws
-          - gcp
-        default: "aws"
 
 permissions:
   id-token: write
@@ -21,29 +12,20 @@ permissions:
 
 jobs:
   detect-drift:
-    name: Drift Check (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
+    name: Drift Check (${{ matrix.env }}/${{ matrix.component }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { cloud: aws, account: workload-prod, region: us-west-2, env: production, component: network }
-          - { cloud: aws, account: workload-prod, region: us-west-2, env: production, component: cluster }
-          - { cloud: aws, account: workload-prod, region: us-west-2, env: production, component: cluster-addons }
-          - { cloud: aws, account: workload-prod, region: us-west-2, env: production, component: cluster-bootstrap }
-          - { cloud: aws, account: workload-prod, region: us-west-2, env: production, component: dns }
-          - { cloud: aws, account: workload-prod, region: us-west-2, env: production, component: cost }
-          - { cloud: aws, account: workload-prod, region: us-west-2, env: production, component: observability }
-          - { cloud: aws, account: workload-prod, region: us-west-2, env: production, component: secrets }
-          # GCP production components
-          - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: network }
-          - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: cluster }
-          - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: cluster-addons }
-          - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: cluster-bootstrap }
-          - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: dns }
-          - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: cost }
-          - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: observability }
-          - { cloud: gcp, account: workload-prod, region: us-central1, env: production, component: secrets }
+          - { account: workload-prod, region: us-west-2, env: production, component: network }
+          - { account: workload-prod, region: us-west-2, env: production, component: cluster }
+          - { account: workload-prod, region: us-west-2, env: production, component: cluster-addons }
+          - { account: workload-prod, region: us-west-2, env: production, component: cluster-bootstrap }
+          - { account: workload-prod, region: us-west-2, env: production, component: dns }
+          - { account: workload-prod, region: us-west-2, env: production, component: cost }
+          - { account: workload-prod, region: us-west-2, env: production, component: observability }
+          - { account: workload-prod, region: us-west-2, env: production, component: secrets }
     steps:
       - uses: actions/checkout@v4
       - uses: opentofu/setup-opentofu@v1
@@ -59,22 +41,14 @@ jobs:
           tg_version: "1.0.8"
 
       - name: Configure AWS credentials
-        if: matrix.cloud == 'aws'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ matrix.region }}
 
-      - name: Authenticate to GCP
-        if: matrix.cloud == 'gcp'
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-
       - name: Plan
         id: plan
-        working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
+        working-directory: live/aws/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
         run: |
           set +e
           terragrunt plan -detailed-exitcode -no-color 2>&1 | tee plan.txt
@@ -86,18 +60,18 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}/plan.txt', 'utf8');
+            const plan = fs.readFileSync('live/aws/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}/plan.txt', 'utf8');
             const truncated = plan.length > 60000 ? plan.substring(0, 60000) + '\n... truncated' : plan;
 
-            const title = `Drift detected: ${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }}`;
-            const body = `## Drift Detection Report\n\n**Cloud:** ${{ matrix.cloud }}\n**Account:** ${{ matrix.account }}\n**Region:** ${{ matrix.region }}\n**Environment:** ${{ matrix.env }}\n**Component:** ${{ matrix.component }}\n**Detected:** ${new Date().toISOString()}\n\n<details><summary>Plan output</summary>\n\n\`\`\`\n${truncated}\n\`\`\`\n\n</details>`;
+            const title = `Drift detected: ${{ matrix.env }}/${{ matrix.component }}`;
+            const body = `## Drift Detection Report\n\n**Account:** ${{ matrix.account }}\n**Region:** ${{ matrix.region }}\n**Environment:** ${{ matrix.env }}\n**Component:** ${{ matrix.component }}\n**Detected:** ${new Date().toISOString()}\n\n<details><summary>Plan output</summary>\n\n\`\`\`\n${truncated}\n\`\`\`\n\n</details>`;
 
             // Check for existing open issue
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
-              labels: 'drift,${{ matrix.cloud }}',
+              labels: 'drift',
             });
 
             const existing = issues.data.find(i => i.title === title);
@@ -114,6 +88,6 @@ jobs:
                 repo: context.repo.repo,
                 title: title,
                 body: body,
-                labels: ['drift', '${{ matrix.cloud }}'],
+                labels: ['drift'],
               });
             }

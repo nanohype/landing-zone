@@ -1,3 +1,0 @@
-locals {
-  cloud = "gcp"
-}

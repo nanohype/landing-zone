@@ -1,42 +1,37 @@
 # Operations
 
-Day-to-day procedures for operating the landing-zone infrastructure across AWS and GCP.
+Day-to-day procedures for operating the landing-zone infrastructure.
 
 ## Planning and Applying
 
 ### Single Component
 
 ```bash
-# AWS
-task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
-task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
-
-# GCP
-task plan CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
-task apply CLOUD=gcp ACCOUNT=workload-dev REGION=us-central1 ENVIRONMENT=dev COMPONENT=network
+task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
 ```
 
 ### All Components in an Environment
 
 ```bash
-task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
-task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 ```
 
 Terragrunt resolves the dependency graph and runs components in the correct order.
 
-### Organization Components (AWS)
+### Organization Components
 
 ```bash
-task plan CLOUD=aws ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
-task apply CLOUD=aws ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
+task plan ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
+task apply ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
 ```
 
 ## Deployment Order
 
-For a from-scratch deployment, components must be applied in dependency order. The core dependency chain (`network -> cluster -> workloads + standalone`) applies to all three clouds.
+For a from-scratch deployment, components must be applied in dependency order: `network -> cluster -> workloads + standalone`.
 
-### AWS Organization (run first, once)
+### Organization (run first, once)
 
 ```
 1. org-scp
@@ -47,9 +42,9 @@ For a from-scratch deployment, components must be applied in dependency order. T
 6. org-networking
 ```
 
-Order within the org layer is flexible -- these components have no inter-dependencies. GCP has equivalent org-level components (`org-policy`, `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`).
+Order within the org layer is flexible -- these components have no inter-dependencies.
 
-### AWS Per Environment (dev -> staging -> production)
+### Per Environment (dev -> staging -> production)
 
 ```
 1. network
@@ -74,25 +69,7 @@ Order within the org layer is flexible -- these components have no inter-depende
 
 Steps 3-13 can run in parallel within their dependency tier. Steps 14-18 can run at any time.
 
-### GCP Per Environment
-
-```
-1. network
-2. cluster
-3. cluster-bootstrap          (depends on cluster)
-4. cluster-addons             (depends on cluster)
-5. secrets                    (depends on cluster)
-6. observability              (depends on cluster)
-7. cost                       (standalone)
-8. dns                       (standalone)
-9. backup                    (standalone)
-10. break-glass               (standalone)
-11. service-quotas            (standalone)
-```
-
-GCP has 11 workload components (no multi-tenant components). Steps 3-6 can run in parallel. Steps 7-11 can run at any time.
-
-Using `task apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run --all -- apply`, which handles ordering automatically.
+Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run --all -- apply`, which handles ordering automatically.
 
 ## CI/CD Workflows
 
@@ -103,18 +80,17 @@ Using `task apply CLOUD=<cloud> ACCOUNT=<account> REGION=<region> ENVIRONMENT=<e
 | Job | Details |
 |-----|---------|
 | **fmt** | Runs `tofu fmt -check -recursive` on `components/` and `modules/`. Fails if any file is unformatted. |
-| **validate** | Matrix of all components per cloud (24 AWS, 17 GCP). Runs `tofu init -backend=false` then `tofu validate`. Catches syntax errors and missing variable definitions. |
-| **tflint** | Runs TFLint recursively per cloud with the appropriate plugin (`.tflint-aws.hcl`, `.tflint-gcp.hcl`). Enforces naming conventions, documented variables/outputs, and cloud-specific rules. |
-| **checkov** | Security scan on `components/`. Skips `CKV_AWS_144` (cross-region replication) and `CKV_AWS_145` (KMS encryption). |
-| **plan** | PRs only. Matrix across clouds and environments. Runs `terragrunt plan` to show what would change. |
+| **validate** | Matrix auto-discovered from the tree -- one entry per component. Runs `tofu init -backend=false` then `tofu validate`. Catches syntax errors and missing variable definitions. |
+| **tflint** | Runs TFLint recursively with the AWS plugin (`.tflint-aws.hcl`). Enforces naming conventions, documented variables/outputs, and AWS-specific rules. |
+| **checkov** | Security scan on `components/aws/`. Hard gate -- any finding not covered by the documented skip list in `.checkov.yaml` fails the build. |
+| **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan` to show what would change. |
 
 ### deploy.yml -- Manual Deploy
 
 **Trigger:** Workflow dispatch (manual).
 
 **Inputs:**
-- `cloud` -- aws or gcp
-- `account` -- target account/project alias
+- `account` -- target account alias
 - `region` -- target region
 - `environment` -- dev, staging, or production
 - `component` -- specific component name or "all"
@@ -127,7 +103,6 @@ Uses GitHub environment protection rules -- production requires approval. When `
 **Trigger:** Workflow dispatch (manual).
 
 **Inputs:**
-- `cloud` -- aws or gcp
 - `environment` -- dev or staging only (production excluded)
 - `component` -- specific component name or "all"
 - `confirm` -- must exactly match the environment name
@@ -138,7 +113,7 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 **Trigger:** Cron schedule, 6 AM UTC Monday-Friday. Also supports manual dispatch.
 
-**Scope:** AWS and GCP production, 8 components each: `network`, `cluster`, `cluster-addons`, `cluster-bootstrap`, `dns`, `cost`, `observability`, `secrets`.
+**Scope:** production, 8 components: `network`, `cluster`, `cluster-addons`, `cluster-bootstrap`, `dns`, `cost`, `observability`, `secrets`.
 
 **Behavior:** Runs `terragrunt plan -detailed-exitcode` for each component. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output.
 
@@ -146,7 +121,7 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 ## Tenant Management
 
-Multi-tenant components are currently AWS-only (`druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`).
+Seven components are multi-tenant (`druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`).
 
 ### Adding a Tenant
 
@@ -161,8 +136,8 @@ Multi-tenant components are currently AWS-only (`druid`, `pipeline`, `gateway`, 
      }
    }
    ```
-4. Plan to verify: `task plan CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
-5. Apply: `task apply CLOUD=aws ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
+4. Plan to verify: `task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
+5. Apply: `task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
 
 ### Removing a Tenant
 
@@ -189,60 +164,35 @@ Each multi-tenant component has different tenant fields. Check the `variables.tf
 
 ### Cluster and Infrastructure Monitoring
 
-| Cloud | Service | Component |
-|-------|---------|-----------|
-| AWS | CloudWatch alarms (CPU, memory, node count, API errors), SNS topics (critical/warning/info) | `observability` |
-| GCP | Cloud Monitoring alert policies, notification channels | `observability` |
-
-The `observability` component on each cloud creates alarms/alerts for configurable thresholds. Subscribe team emails via `alert_email_endpoints` or a Slack webhook via `slack_webhook_url`.
+The `observability` component creates CloudWatch alarms (CPU, memory, node count, API errors) with configurable thresholds and SNS topics (critical/warning/info). Subscribe team emails via `alert_email_endpoints` or a Slack webhook via `slack_webhook_url`.
 
 ### Budget Alerts
 
-| Cloud | Service | Component |
-|-------|---------|-----------|
-| AWS | AWS Budgets + Cost Anomaly Detection | `cost` |
-| GCP | Cloud Billing budgets + programmatic alerts | `cost` |
-
-The `cost` component creates budget alerts at configurable thresholds (e.g., 50%, 80%, 100% of `monthly_budget_limit`). Notifications go to `budget_alert_emails`.
+The `cost` component creates AWS Budgets alerts at configurable thresholds (e.g., 50%, 80%, 100% of `monthly_budget_limit`) plus Cost Anomaly Detection. Notifications go to `budget_alert_emails`.
 
 ### Quota Alerts (service-quotas)
 
-The `service-quotas` component monitors cloud service limits and creates alarms when usage exceeds `quota_threshold_percent` (default 80%).
-
-| Cloud | Monitored Quotas |
-|-------|-----------------|
-| AWS | VPCs per region, EIPs, NAT gateways, EKS clusters, Lambda concurrent executions |
-| GCP | VPC networks, external IPs, GKE clusters, CPU/GPU quotas per region |
+The `service-quotas` component monitors service limits -- VPCs per region, EIPs, NAT gateways, EKS clusters, Lambda concurrent executions -- and creates alarms when usage exceeds `quota_threshold_percent` (default 80%).
 
 ### Drift Detection (drift.yml)
 
-Production infrastructure is checked for drift every weekday morning across AWS and GCP. Drift issues appear in GitHub with the `drift` label. See the CI/CD section above for details.
+Production infrastructure is checked for drift every weekday morning. Drift issues appear in GitHub with the `drift` label. See the CI/CD section above for details.
 
 ## Secrets Management
 
-The `secrets` component manages encryption and secrets infrastructure per cloud:
+The `secrets` component manages encryption and secrets infrastructure: customer-managed KMS keys with auto-rotation, Secrets Manager as the secrets store, and an IRSA role for External Secrets Operator.
 
-| Cloud | Encryption | Secrets Store | Pod Access |
-|-------|-----------|---------------|------------|
-| AWS | KMS (customer-managed, auto-rotation) | Secrets Manager | IRSA for External Secrets Operator |
-| GCP | Cloud KMS (automatic rotation) | Secret Manager | Workload Identity for External Secrets Operator |
-
-The flow: secrets are stored in the cloud secrets store, External Secrets Operator (running in the Kubernetes cluster, authenticated via workload identity) syncs them, and Kubernetes Secrets are created for pod consumption.
+The flow: secrets are stored in Secrets Manager, External Secrets Operator (running in the cluster, authenticated via IRSA) syncs them, and Kubernetes Secrets are created for pod consumption.
 
 ## Backup and Recovery
 
-The `backup` component manages backup infrastructure per cloud:
-
-| Cloud | Service | Key Features |
-|-------|---------|-------------|
-| AWS | AWS Backup | Configurable plans, vault lock for production, KMS encryption, cross-region copy |
-| GCP | Cloud Storage versioning + scheduled snapshots | Lifecycle policies, retention configuration |
+The `backup` component manages AWS Backup: configurable plans, vault lock for production, KMS encryption, and cross-region copy.
 
 Backup plans are configurable via the `backup_plans` map (schedule, retention, cold storage transition). Email notifications go to `notification_emails`.
 
 ### Restore Procedure
 
-1. Open the backup console for the relevant cloud (AWS Backup / GCP Console)
+1. Open the AWS Backup console
 2. Navigate to the vault and find the recovery point
 3. Select "Restore" and configure the target resource settings
 4. Monitor the restore job in the console
