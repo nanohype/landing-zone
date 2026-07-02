@@ -52,6 +52,15 @@ resource "aws_iam_policy" "tenant_boundary" {
     Version = "2012-10-17"
     Statement = [
       {
+        # The tenant role serves every workload class in a Platform's
+        # namespace: the app's chart pods (bound by the <app>-platform
+        # component's Pod Identity association, granted through the
+        # app-access policy in spec.identity.extraPolicyArns) and AgentFleet
+        # pods (tenant-runtime SA). The ceiling therefore covers the union of
+        # substrate services those workloads touch — DynamoDB stores, SQS
+        # queues, SES sends, EventBridge Scheduler CRUD, KMS envelope
+        # encryption — on top of the Bedrock + telemetry core. Actual grants
+        # are resource-scoped in the attached policies; this is only the cap.
         Sid    = "TenantWorkloadCeiling"
         Effect = "Allow"
         Action = [
@@ -61,16 +70,33 @@ resource "aws_iam_policy" "tenant_boundary" {
           "bedrock:ConverseStream",
           "bedrock:ApplyGuardrail",
           "bedrock:GetGuardrail",
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem",
           "s3:GetObject",
           "s3:PutObject",
           "s3:DeleteObject",
           "s3:ListBucket",
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret",
+          "ses:SendEmail",
+          "ses:SendRawEmail",
+          "ses:GetSendQuota",
+          "scheduler:CreateSchedule",
+          "scheduler:GetSchedule",
+          "scheduler:UpdateSchedule",
+          "scheduler:DeleteSchedule",
           "sqs:SendMessage",
           "sqs:ReceiveMessage",
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ChangeMessageVisibility",
+          "kms:Encrypt",
           "kms:Decrypt",
           "kms:GenerateDataKey",
           "kms:DescribeKey",
@@ -87,17 +113,41 @@ resource "aws_iam_policy" "tenant_boundary" {
         Resource = "*"
       },
       {
-        # Hard ceiling: no tenant role may ever touch IAM, org/account
-        # settings, or assume another role — the privilege-escalation vectors.
+        # EventBridge Scheduler targets fire through a scheduler-invoke role
+        # the target's component provisions; CreateSchedule requires
+        # iam:PassRole on it. Cap that pass to scheduler-invoke roles handed
+        # to the Scheduler service — nothing else, nowhere else.
+        Sid      = "SchedulerInvokeRolePass"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = "arn:${local.partition}:iam::${local.account_id}:role/*-scheduler-invoke"
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "scheduler.amazonaws.com"
+          }
+        }
+      },
+      {
+        # Hard ceiling: no tenant role may ever touch org/account settings
+        # or assume another role — the privilege-escalation vectors.
         Sid    = "DenyEscalation"
         Effect = "Deny"
         Action = [
-          "iam:*",
           "organizations:*",
           "account:*",
           "sts:AssumeRole",
         ]
         Resource = "*"
+      },
+      {
+        # IAM is denied wholesale except on scheduler-invoke roles, where the
+        # Allow above (PassRole, scheduler.amazonaws.com only) sets the
+        # ceiling. NotResource keeps the deny airtight for every other IAM
+        # surface — a tenant role can never mint, modify, or read identities.
+        Sid         = "DenyIamOutsideSchedulerInvokePass"
+        Effect      = "Deny"
+        Action      = ["iam:*"]
+        NotResource = "arn:${local.partition}:iam::${local.account_id}:role/*-scheduler-invoke"
       },
     ]
   })

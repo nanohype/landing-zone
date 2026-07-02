@@ -1,6 +1,11 @@
-output "irsa_role_arn" {
-  description = "IAM role ARN for the incident-response ServiceAccount. The eks-agent-platform operator reconciles this onto the chart's ServiceAccount's eks.amazonaws.com/role-arn annotation."
-  value       = module.incident_response_irsa.iam_role_arn
+output "app_access_policy_arn" {
+  description = "Managed policy carrying incident-response's substrate grants. Reference it from Platform.spec.identity.extraPolicyArns; the eks-agent-platform operator attaches it to the tenant role."
+  value       = aws_iam_policy.app_access.arn
+}
+
+output "tenant_role_arn" {
+  description = "Operator-reconciled tenant role the chart's ServiceAccount is bound to via the EKS Pod Identity association."
+  value       = data.aws_iam_role.tenant.arn
 }
 
 output "incidents_table_name" {

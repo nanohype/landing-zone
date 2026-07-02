@@ -23,7 +23,7 @@ Every component:
 - Tags every resource with `Environment`, `ManagedBy`, `Project`, `CostCenter`, `BusinessUnit`, `DataClassification`, `Compliance`, `Repository` (default tags emitted by `live/root.hcl`).
 - Uses IRSA via the shared `modules/aws/workload-identity` module. Trust policies target the EKS cluster's OIDC provider and constrain to a specific SA in a specific namespace.
 
-The per-app `<app>-platform` pattern: when an app's resource shape doesn't generalize into existing multi-tenant components, ship a single-tenant component named `<app>-platform`. Examples: `incident-response-platform`, `slack-knowledge-bot-platform`, `digest-pipeline-platform`. Each provisions the app's bespoke DDB tables, SQS queues, S3 buckets, RDS clusters, KMS keys, and the IRSA role with the consolidated inline policy. Emits `irsa_role_arn` as the output the app's chart consumes via `aws.platformRoleArn`.
+The per-app `<app>-platform` pattern: when an app's resource shape doesn't generalize into existing multi-tenant components, ship a single-tenant component named `<app>-platform`. Examples: `incident-response-platform`, `slack-knowledge-bot-platform`, `digest-pipeline-platform`. Each provisions the app's bespoke DDB tables, SQS queues, S3 buckets, RDS clusters, KMS keys, plus a consolidated `<app>-app-access` managed policy and the EKS Pod Identity association binding the app's ServiceAccount to the operator-reconciled `<env>-<app>-tenant` role. Bedrock model access is NOT granted here — it comes from the agent-iam tenant baseline, clamped by the operator to `Platform.spec.identity.allowedModels`; the app-access policy reaches the role through `Platform.spec.identity.extraPolicyArns`. Emits `app_access_policy_arn` for that spec entry.
 
 ## Add a new component
 
@@ -39,9 +39,10 @@ When the app's resource shape is bespoke (custom DDB schema, queues, multiple S3
 
 1. Create `components/aws/<app>-platform/` following the incident-response/slack-knowledge-bot/digest-pipeline shape.
 2. Provision the app's resources directly (not as `var.tenants` entries on multi-tenant components).
-3. Consolidate all the app's IAM permissions into a single inline policy on a single IRSA role via `modules/aws/workload-identity`.
-4. Output `irsa_role_arn` (the app's chart consumes this) plus every resource name/URL the chart needs (`<table>_name`, `<queue>_url`, etc.).
-5. Add `live/_envcommon/aws/<app>-platform.hcl` and per-env `live/aws/workload-<env>/.../terragrunt.hcl`.
+3. Consolidate the app's substrate permissions (everything except Bedrock invoke — that is operator territory, declared in `Platform.spec.identity.allowedModels`) into one `aws_iam_policy` named `<app>-<env>-app-access`, and bind the app's ServiceAccount to the operator-reconciled `<env>-<app>-tenant` role with an `aws_eks_pod_identity_association`. The Platform CR must be `Ready` before the association applies — see `docs/runbooks/model-access-cutover.md`.
+4. Output `app_access_policy_arn` (referenced from `Platform.spec.identity.extraPolicyArns`) plus every resource name/URL the chart needs (`<table>_name`, `<queue>_url`, etc.).
+5. If the app touches a substrate service the tenant permissions boundary doesn't cover yet, extend `agent-iam`'s `TenantWorkloadCeiling` — the boundary caps every tenant role, so a grant outside it is silently clipped.
+6. Add `live/_envcommon/aws/<app>-platform.hcl` and per-env `live/aws/workload-<env>/.../terragrunt.hcl`.
 
 ## Conventions
 
