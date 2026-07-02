@@ -236,6 +236,39 @@ aws secretsmanager create-secret \
   --secret-string "{\"token\":\"$TOKEN\"}"
 ```
 
+## App platform tenants
+
+App workloads (the Platform tenants deployed through eks-gitops) run on the
+operator-reconciled `<env>-<app>-tenant` role. Bedrock model access is declared
+in each app's `Platform.spec.identity` (`allowedModelFamilies` /
+`allowedModels`); the app's substrate grants (DynamoDB, SQS, S3, KMS, Secrets
+Manager, …) are the `<app>-platform` component's `<app>-<env>-app-access`
+managed policy, wired through `spec.identity.extraPolicyArns`. The Pod Identity
+association resolves the tenant role by name, so bring a tenant up in this
+order:
+
+1. `agent-iam` (tenant boundary, baseline, operator role) — part of the core
+   Deploy sequence above.
+2. Apply the app's `Platform` CR with `extraPolicyArns: []`; wait for `Ready`.
+3. `task apply … COMPONENT=<app>-platform` — substrate resources, the
+   app-access policy, and the Pod Identity association onto the tenant role.
+4. Set `extraPolicyArns` to the component's `app_access_policy_arn` output and
+   re-apply the CR; wait for the `ModelAccessScoped` condition.
+5. Register the app's ApplicationSet entry in eks-gitops; ArgoCD syncs the
+   chart.
+
+Design facts at this seam:
+
+- **The kill-switch reaches app pods.** A BudgetPolicy breach detaches the
+  baseline from the tenant role — model access zeroes instantly while
+  substrate access persists, so the app degrades to its no-LLM behavior
+  instead of falling over.
+- **One privilege domain per Platform.** App pods and AgentFleet pods share
+  the tenant role; workloads that must not share substrate access belong in
+  separate Platforms.
+- **Model changes are spec changes.** Pointing an app at a new model is a
+  `platform.yaml` edit converged by the operator — no tofu plan, no IAM edit.
+
 ## Cost Reality
 
 Approximate $/day at default sizes:
