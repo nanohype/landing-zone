@@ -39,7 +39,7 @@ When the app's resource shape is bespoke (custom DDB schema, queues, multiple S3
 
 1. Create `components/aws/<app>-platform/` following the incident-response/slack-knowledge-bot/digest-pipeline shape.
 2. Provision the app's resources directly (not as `var.tenants` entries on multi-tenant components).
-3. Consolidate the app's substrate permissions (everything except Bedrock invoke — that is operator territory, declared in `Platform.spec.identity.allowedModels`) into one `aws_iam_policy` named `<app>-<env>-app-access`, and bind the app's ServiceAccount to the operator-reconciled `<env>-<app>-tenant` role with an `aws_eks_pod_identity_association`. The Platform CR must be `Ready` before the association applies — see `docs/runbooks/model-access-cutover.md`.
+3. Consolidate the app's substrate permissions (everything except Bedrock invoke — that is operator territory, declared in `Platform.spec.identity.allowedModels`) into one `aws_iam_policy` named `<app>-<env>-app-access`, and bind the app's ServiceAccount to the operator-reconciled `<env>-<app>-tenant` role with an `aws_eks_pod_identity_association`. The Platform CR must be `Ready` before the association applies — bring-up order in `docs/first-deploy-aws.md` ("App platform tenants").
 4. Output `app_access_policy_arn` (referenced from `Platform.spec.identity.extraPolicyArns`) plus every resource name/URL the chart needs (`<table>_name`, `<queue>_url`, etc.).
 5. If the app touches a substrate service the tenant permissions boundary doesn't cover yet, extend `agent-iam`'s `TenantWorkloadCeiling` — the boundary caps every tenant role, so a grant outside it is silently clipped.
 6. Add `live/_envcommon/aws/<app>-platform.hcl` and per-env `live/aws/workload-<env>/.../terragrunt.hcl`.
