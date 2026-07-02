@@ -14,7 +14,6 @@ inputs = {
       msk_enabled                   = true
       batch_max_vcpus               = 32
       batch_type                    = "FARGATE"
-      sfn_logging_level             = "ALL"
       raw_lifecycle_ia_days         = 60
       raw_lifecycle_expiry_days     = 180
       staging_lifecycle_expiry_days = 60

@@ -108,18 +108,6 @@ module "orchestrator_irsa" {
   service_account = "pipeline-orchestrator"
 
   policy_statements = concat(
-    var.tenant_config.step_functions_enabled ? [
-      {
-        Effect = "Allow"
-        Action = [
-          "states:StartExecution",
-          "states:StopExecution",
-          "states:DescribeExecution",
-          "states:ListExecutions",
-        ]
-        Resource = [aws_sfn_state_machine.this[0].arn]
-      },
-    ] : [],
     var.tenant_config.batch_enabled ? [
       {
         Effect = "Allow"

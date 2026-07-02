@@ -58,18 +58,6 @@ for TENANT in $TENANTS; do
     fi
   fi
 
-  # --- Step Functions ---
-  SFN_ARN=$(jq -r ".tenant_outputs.value[\"${TENANT}\"].sfn_arn // \"null\"" outputs.json)
-  if [[ "$SFN_ARN" != "null" ]]; then
-    echo "Checking Step Functions state machine..."
-    SFN_STATUS=$(aws stepfunctions describe-state-machine --state-machine-arn "$SFN_ARN" --query 'status' --output text 2>/dev/null || echo "NOT_FOUND")
-    if [[ "$SFN_STATUS" != "ACTIVE" ]]; then
-      echo "FAIL: Step Functions state machine status is '${SFN_STATUS}'"
-      exit 1
-    fi
-    echo "  State machine ACTIVE"
-  fi
-
   # --- Glue ---
   GLUE_DB=$(jq -r ".tenant_outputs.value[\"${TENANT}\"].glue_database // \"null\"" outputs.json)
   if [[ "$GLUE_DB" != "null" ]]; then

@@ -7,7 +7,6 @@ output "tenant_outputs" {
       curated_bucket  = tenant.curated_bucket
       msk_arn         = tenant.msk_arn
       batch_queue_arn = tenant.batch_queue_arn
-      sfn_arn         = tenant.sfn_arn
       glue_database   = tenant.glue_database
     }
   }

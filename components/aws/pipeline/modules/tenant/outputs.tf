@@ -23,11 +23,6 @@ output "batch_queue_arn" {
   value       = var.tenant_config.batch_enabled ? aws_batch_job_queue.this[0].arn : null
 }
 
-output "sfn_arn" {
-  description = "Step Functions state machine ARN (null if disabled)"
-  value       = var.tenant_config.step_functions_enabled ? aws_sfn_state_machine.this[0].arn : null
-}
-
 output "glue_database" {
   description = "Glue catalog database name"
   value       = aws_glue_catalog_database.this.name
