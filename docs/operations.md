@@ -153,7 +153,7 @@ Each multi-tenant component has different tenant fields. Check the `variables.tf
 | Component | Key Tenant Fields |
 |-----------|------------------|
 | **druid** | `rds_min_acu`, `rds_max_acu`, `rds_backup_days`, `msk_enabled`, `deletion_protection` |
-| **pipeline** | `batch_enabled`, `step_functions_enabled`, `msk_enabled`, `batch_max_vcpus`, `deletion_protection` |
+| **pipeline** | `batch_enabled`, `msk_enabled`, `batch_max_vcpus`, `deletion_protection` |
 | **gateway** | `waf_enabled`, `cognito_enabled`, `waf_rate_limit`, `throttle_rate/burst/quota` |
 | **llm** | `efs_performance_mode`, `sqs_visibility_timeout`, `dynamodb_pitr`, `deletion_protection` |
 | **mlops** | `ecr_enabled`, `point_in_time_recovery`, `run_ttl_days`, `deletion_protection` |

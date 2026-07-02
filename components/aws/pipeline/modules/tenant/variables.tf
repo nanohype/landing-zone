@@ -24,11 +24,9 @@ variable "tenant_config" {
     deletion_protection           = bool
     msk_enabled                   = bool
     batch_enabled                 = bool
-    step_functions_enabled        = bool
     schema_registry_enabled       = bool
     batch_max_vcpus               = number
     batch_type                    = string
-    sfn_logging_level             = string
     raw_lifecycle_ia_days         = number
     raw_lifecycle_expiry_days     = number
     staging_lifecycle_expiry_days = number

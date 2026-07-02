@@ -66,14 +66,6 @@ resource "aws_ssm_parameter" "batch_job_queue_arn" {
   tags  = local.tenant_tags
 }
 
-# Step Functions
-resource "aws_ssm_parameter" "sfn_state_machine_arn" {
-  name  = "${local.ssm_prefix}/sfn-state-machine-arn"
-  type  = "String"
-  value = var.tenant_config.step_functions_enabled ? aws_sfn_state_machine.this[0].arn : "disabled"
-  tags  = local.tenant_tags
-}
-
 # Glue
 resource "aws_ssm_parameter" "glue_database_name" {
   name  = "${local.ssm_prefix}/glue-database-name"
