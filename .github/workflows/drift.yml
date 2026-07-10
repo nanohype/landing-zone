@@ -14,6 +14,23 @@ jobs:
   detect-drift:
     name: Drift Check (${{ matrix.env }}/${{ matrix.component }})
     runs-on: ubuntu-latest
+    # Credential guard, mirroring ci.yml's plan job: skip the whole job (green,
+    # not red) until the OIDC role is wired up as the AWS_ROLE_ARN repo variable.
+    # Without a role, configure-aws-credentials fails with "Could not load
+    # credentials from any providers" — a config gap, not drift. Runs for real
+    # once AWS_ROLE_ARN is set in repo settings.
+    if: ${{ vars.AWS_ROLE_ARN != '' }}
+    # Grant the OIDC token permission at the JOB level, mirroring ci.yml's plan
+    # job. aws-actions/configure-aws-credentials needs id-token:write to mint the
+    # web-identity token; without it the step fails with "Could not load
+    # credentials from any providers". A job-level permissions block replaces the
+    # workflow-level one for this job, so all three scopes are restated here —
+    # id-token:write for OIDC, contents:read for checkout, issues:write for the
+    # Report-drift step that opens/updates the drift issue.
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
     strategy:
       fail-fast: false
       matrix:

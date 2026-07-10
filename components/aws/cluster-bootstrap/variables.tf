@@ -31,7 +31,7 @@ variable "vpc_id" {
 variable "cilium_version" {
   description = "Cilium Helm chart version"
   type        = string
-  default     = "1.19.1"
+  default     = "1.19.5"
 }
 
 variable "cilium_operator_replicas" {
