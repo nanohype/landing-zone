@@ -43,7 +43,7 @@ variable "cilium_operator_replicas" {
 variable "argocd_chart_version" {
   description = "ArgoCD Helm chart version"
   type        = string
-  default     = "9.4.5"
+  default     = "10.1.3"
 }
 
 variable "argocd_server_replicas" {
