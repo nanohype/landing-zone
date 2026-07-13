@@ -133,41 +133,24 @@ resource "aws_secretsmanager_secret_version" "this" {
 }
 
 ################################################################################
-# IRSA — External Secrets Operator (Platform)
+# External Secrets Operator identity is NOT created here.
+#
+# cluster-addons owns it (module.external_secrets_irsa in cluster-addons/irsa.tf),
+# alongside every other addon's identity. This component used to ALSO create one —
+# a second role, `<env>-eks-external-secrets-platform`, bound to the same
+# ServiceAccount (external-secrets/external-secrets).
+#
+# A ServiceAccount can hold exactly ONE EKS Pod Identity association. secrets applies
+# before cluster-addons, so it won the association and cluster-addons then failed:
+#
+#   Error: creating EKS Pod Identity Association
+#     ResourceInUseException: The service account is already associated with a
+#     different IAM role: arn:aws:iam::<acct>:role/dev-eks-external-secrets-platform
+#
+# Deterministic on every fresh install. Nothing consumed the role ARN this component
+# exported, so the duplicate is removed rather than the addon's.
 ################################################################################
 
-module "external_secrets_platform_irsa" {
-  source = "../../../modules/aws/workload-identity"
-
-  role_name       = "${var.environment}-eks-external-secrets-platform"
-  cluster_name    = var.cluster_name
-  namespace       = "external-secrets"
-  service_account = "external-secrets"
-
-  policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "secretsmanager:GetSecretValue",
-        "secretsmanager:DescribeSecret",
-        "secretsmanager:ListSecretVersionIds",
-      ]
-      Resource = [
-        "arn:aws:secretsmanager:${var.region}:${local.account_id}:secret:${var.environment}${var.secret_path_prefix}/*"
-      ]
-    },
-    {
-      Effect = "Allow"
-      Action = [
-        "kms:Decrypt",
-        "kms:DescribeKey",
-      ]
-      Resource = [aws_kms_key.secrets.arn]
-    },
-  ]
-
-  tags = local.tags
-}
 
 ################################################################################
 # SSM Parameters — Bridge to GitOps
@@ -184,13 +167,6 @@ resource "aws_ssm_parameter" "kms_key_alias" {
   name  = "/platform/${var.environment}/secrets/kms-key-alias"
   type  = "String"
   value = aws_kms_alias.secrets.name
-  tags  = local.tags
-}
-
-resource "aws_ssm_parameter" "irsa_role_arn" {
-  name  = "/platform/${var.environment}/secrets/irsa-role-arn"
-  type  = "String"
-  value = module.external_secrets_platform_irsa.iam_role_arn
   tags  = local.tags
 }
 
