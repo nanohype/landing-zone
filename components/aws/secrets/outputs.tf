@@ -23,7 +23,3 @@ output "secret_names" {
   value       = { for k, v in aws_secretsmanager_secret.this : k => v.name }
 }
 
-output "irsa_role_arn" {
-  description = "IAM role ARN for external-secrets operator (platform scope)"
-  value       = module.external_secrets_platform_irsa.iam_role_arn
-}
