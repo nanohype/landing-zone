@@ -117,6 +117,24 @@ module "vpc_endpoints" {
       security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
       tags                = { Name = "${var.environment}-eks-auth-endpoint" }
     }
+    # Amazon Managed Prometheus data plane — aps-workspaces.<region>.amazonaws.com,
+    # used for BOTH alloy's remote_write and opencost's sigv4-proxied queries.
+    #
+    # Without it, aps-workspaces has no private DNS inside the VPC while every other
+    # AWS service the platform touches does, so those two callers fall off the
+    # endpoint path and depend on public resolution + NAT egress. Observed on a live
+    # cluster as `dial tcp: lookup aps-workspaces.us-west-2.amazonaws.com: i/o
+    # timeout` — opencost crashlooping and alloy unable to ship metrics at all.
+    #
+    # A private endpoint also removes the NAT data-processing charge on a metrics
+    # stream that runs 24/7, so it is cheaper than the alternative, not just correct.
+    aps_workspaces = {
+      service             = "aps-workspaces"
+      private_dns_enabled = true
+      subnet_ids          = module.vpc.private_subnets
+      security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
+      tags                = { Name = "${var.environment}-aps-workspaces-endpoint" }
+    }
     # The EKS API interface endpoint is conditional: its private DNS shadows the
     # OIDC issuer subdomain (oidc.eks.<region>.amazonaws.com), which a provisioning
     # hub must resolve from inside the VPC. See var.enable_eks_interface_endpoint.
