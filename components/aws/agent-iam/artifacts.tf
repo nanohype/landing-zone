@@ -25,19 +25,38 @@
 ################################################################################
 
 locals {
-  model_artifacts_bucket = "${var.environment}-eks-${local.account_id}-model-artifacts"
-  eval_reports_bucket    = "${var.environment}-eks-${local.account_id}-eval-reports"
+  # Region-qualified as well as account-qualified: S3's namespace is GLOBAL, so an
+  # account deploying the same environment into two regions collides with itself
+  # without it. See the note on bucket_prefix in cluster-addons/main.tf.
+  #
+  # Worst case 58 chars, inside S3's 63-char limit; asserted at plan time below.
+  model_artifacts_bucket = "${var.environment}-eks-${local.account_id}-${var.region}-model-artifacts"
+  eval_reports_bucket    = "${var.environment}-eks-${local.account_id}-${var.region}-eval-reports"
   artifacts_ssm_prefix   = "/eks-agent-platform/${var.environment}/model-artifacts"
 }
 
 resource "aws_s3_bucket" "model_artifacts" {
   bucket = local.model_artifacts_bucket
   tags   = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length(local.model_artifacts_bucket) <= 63
+      error_message = "bucket ${local.model_artifacts_bucket} exceeds S3's 63-character limit; shorten var.environment."
+    }
+  }
 }
 
 resource "aws_s3_bucket" "eval_reports" {
   bucket = local.eval_reports_bucket
   tags   = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length(local.eval_reports_bucket) <= 63
+      error_message = "bucket ${local.eval_reports_bucket} exceeds S3's 63-character limit; shorten var.environment."
+    }
+  }
 }
 
 # Versioning: model artifacts and eval reports are both evidence. An agent that
