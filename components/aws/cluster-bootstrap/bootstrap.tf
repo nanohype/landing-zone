@@ -286,6 +286,14 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
     # committed to the public gitops repos. Annotations (not labels) because ARNs
     # contain characters that label values disallow.
     annotations = merge({
+      # The addon catalog this cluster syncs from. Published here so the
+      # ApplicationSets can template their own source repoURL off the cluster
+      # generator ({{ index .metadata.annotations "gitops/repo-url" }}) instead of
+      # hardcoding an org into the manifests. Without this every appset in a forked
+      # catalog still pulls from the upstream org's repo, which makes the fork inert.
+      "gitops/repo-url"    = var.gitops_repo_url
+      "gitops/repo-branch" = var.gitops_repo_branch
+
       "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.environment}-eks-agent-platform-operator"
       }, var.enable_eval_runtime ? {
       # eval-runner reports bucket, read from the eval-runtime SSM param. The

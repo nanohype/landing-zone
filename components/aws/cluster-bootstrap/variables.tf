@@ -64,10 +64,20 @@ variable "argocd_appset_replicas" {
   default     = 2
 }
 
+# NO DEFAULT, deliberately. This must be the operator's OWN fork of the addon
+# catalog. It previously defaulted to https://github.com/nanohype/eks-gitops.git,
+# and because nothing in live/ passed a value, every install silently synced its
+# app-of-apps from nanohype's main branch — an upstream commit landed straight on
+# a downstream cluster, unpinned, and the org's own fork sat unused. A missing
+# value must fail the plan, loudly, rather than fall back to someone else's repo.
 variable "gitops_repo_url" {
-  description = "GitOps repository URL"
+  description = "GitOps (addon catalog) repository the app-of-apps points at. MUST be this org's own fork — no default; omitting it is an error."
   type        = string
-  default     = "https://github.com/nanohype/eks-gitops.git"
+
+  validation {
+    condition     = can(regex("^(https://|git@)", var.gitops_repo_url))
+    error_message = "gitops_repo_url must be a git URL (https:// or git@)."
+  }
 }
 
 variable "gitops_repo_branch" {

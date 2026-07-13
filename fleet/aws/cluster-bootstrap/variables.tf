@@ -92,10 +92,15 @@ variable "tenants_repo_url" {
   default     = ""
 }
 
+# NO DEFAULT — see the note on the same variable in components/aws/cluster-bootstrap.
 variable "gitops_repo_url" {
-  description = "GitOps (addon catalog) repository the app-of-apps points at"
+  description = "GitOps (addon catalog) repository the app-of-apps points at. MUST be this org's own fork — no default; omitting it is an error."
   type        = string
-  default     = "https://github.com/nanohype/eks-gitops.git"
+
+  validation {
+    condition     = can(regex("^(https://|git@)", var.gitops_repo_url))
+    error_message = "gitops_repo_url must be a git URL (https:// or git@)."
+  }
 }
 
 variable "gitops_repo_branch" {
