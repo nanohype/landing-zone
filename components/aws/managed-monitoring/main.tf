@@ -217,3 +217,25 @@ resource "aws_ssm_parameter" "grafana_url" {
 
   tags = local.tags
 }
+
+# AMP (Amazon Managed Prometheus) query endpoint — consumed by opencost via a
+# sigv4 proxy (cluster-bootstrap stamps it onto the cluster Secret annotation
+# monitoring/amp-endpoint, the opencost ApplicationSet reads it). Same
+# publish-to-SSM pattern as grafana_url so the value never lands in gitops.
+resource "aws_ssm_parameter" "amp_endpoint" {
+  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/amp_endpoint"
+  type  = "String"
+  value = aws_prometheus_workspace.this.prometheus_endpoint
+
+  tags = local.tags
+}
+
+# AMP workspace id — the opencost chart's native AMP integration keys on the
+# workspace id (opencost.prometheus.amp.workspaceId), not the full URL.
+resource "aws_ssm_parameter" "amp_workspace_id" {
+  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/amp_workspace_id"
+  type  = "String"
+  value = aws_prometheus_workspace.this.id
+
+  tags = local.tags
+}

@@ -315,6 +315,17 @@ module "opencost_irsa" {
       ]
       Resource = ["*"]
     },
+    {
+      # Query Managed Prometheus for usage metrics (via the sigv4 proxy sidecar).
+      Effect = "Allow"
+      Action = [
+        "aps:QueryMetrics",
+        "aps:GetLabels",
+        "aps:GetSeries",
+        "aps:GetMetricMetadata",
+      ]
+      Resource = ["arn:${local.partition}:aps:${var.region}:${local.account_id}:workspace/*"]
+    },
   ]
 
   tags = local.tags

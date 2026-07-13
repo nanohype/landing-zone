@@ -272,6 +272,10 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # Opts this cluster into the eks-agent-platform operator ApplicationSet.
       # Disable to install the operator out of band (see enable_agent_platform).
       "eks-agent-platform/enabled" = "true"
+      } : {}, var.enable_accelerators ? {
+      # Opts this cluster into the GPU/accelerator ApplicationSet (gpu-operator,
+      # nvidia-dra-driver). Off by default so non-GPU shapes skip GPU addons.
+      "eks-agent-platform/accelerators" = "true"
     } : {})
     # Per-cluster wiring for the agent-platform operator: the EKS cluster name
     # (the operator creates the tenant Pod Identity associations on it) + the
@@ -291,6 +295,10 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # Amazon Managed Grafana workspace URL, read from the managed-monitoring SSM
       # param. The dashboards ApplicationSet injects it into the Grafana CR.
       "monitoring/grafana-url" = data.aws_ssm_parameter.grafana_url[0].value
+      # AMP query endpoint + workspace id. The opencost ApplicationSet reads the
+      # workspace id to point opencost at Managed Prometheus through a sigv4 proxy.
+      "monitoring/amp-endpoint"     = data.aws_ssm_parameter.amp_endpoint[0].value
+      "monitoring/amp-workspace-id" = data.aws_ssm_parameter.amp_workspace_id[0].value
     } : {})
   }
 

@@ -23,6 +23,16 @@ data "aws_ssm_parameter" "grafana_url" {
   name  = "/eks-agent-platform/${var.environment}/managed-monitoring/grafana_url"
 }
 
+data "aws_ssm_parameter" "amp_endpoint" {
+  count = var.enable_managed_monitoring ? 1 : 0
+  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/amp_endpoint"
+}
+
+data "aws_ssm_parameter" "amp_workspace_id" {
+  count = var.enable_managed_monitoring ? 1 : 0
+  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/amp_workspace_id"
+}
+
 locals {
   account_id = data.aws_caller_identity.current.account_id
 }
