@@ -28,6 +28,13 @@ locals {
   # GetRole resolves to NoSuchEntity instead of AccessDenied.
   tenant_role_name_arn = "arn:${local.partition}:iam::${local.account_id}:role/${var.environment}-*-tenant"
 
+  # Per-Platform session role, created by the operator's Platform controller from
+  # spec.attribution (operators + sessionRoleMaxDurationSeconds). Named
+  # <env>-<platform>-session at the ROOT path — not under the tenant path — so the
+  # tenant statements above do not cover it and the operator could not manage the
+  # role its own controller creates. Same name-scoped shape as tenant_role_name_arn.
+  platform_session_role_arn = "arn:${local.partition}:iam::${local.account_id}:role/${var.environment}-*-session"
+
   ssm_prefix = "/eks-agent-platform/${var.environment}/agent-iam"
 
   tags = merge(var.tags, {
@@ -336,6 +343,48 @@ resource "aws_iam_role_policy" "operator" {
         # Object-level access is deliberately NOT granted here — the operator brokers
         # the buckets, it does not read or write their contents; the tenant roles it
         # writes the policy for do that.
+        # Read + lifecycle the per-Platform session role. iam:UpdateRole is required
+        # for MaxSessionDuration, which is what spec.attribution.sessionRoleMaxDurationSeconds
+        # sets — the operator was failing here with AccessDenied on iam:GetRole
+        # dev-ops-session and every Platform hung in phase=Provisioning.
+        Sid    = "PlatformSessionRoleRead"
+        Effect = "Allow"
+        Action = [
+          "iam:GetRole",
+          "iam:DeleteRole",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:UpdateRole",
+          "iam:UpdateAssumeRolePolicy",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListRolePolicies",
+          "iam:GetRolePolicy",
+        ]
+        Resource = local.platform_session_role_arn
+      },
+      {
+        # Creating the session role is gated on the permissions boundary, exactly as
+        # tenant role creation is. The operator may mint a role a human then assumes;
+        # it must never be able to mint one that outranks the boundary. An unbounded
+        # iam:CreateRole here would be a privilege-escalation path straight through
+        # the operator.
+        Sid    = "PlatformSessionRoleWriteWithBoundary"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateRole",
+          "iam:AttachRolePolicy",
+          "iam:DetachRolePolicy",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+        ]
+        Resource = local.platform_session_role_arn
+        Condition = {
+          StringEquals = {
+            "iam:PermissionsBoundary" = aws_iam_policy.tenant_boundary.arn
+          }
+        }
+      },
+      {
         Sid    = "ArtifactBucketPolicy"
         Effect = "Allow"
         Action = [
