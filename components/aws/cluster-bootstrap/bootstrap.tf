@@ -240,7 +240,29 @@ resource "helm_release" "argocd" {
     }
   })]
 
-  depends_on = [helm_release.cilium]
+  # ArgoCD must come up on the SETTLED cilium datapath, not race it.
+  #
+  # depends_on = [helm_release.cilium] is not enough: a helm_release completes when the
+  # RELEASE is deployed, not when the cilium DaemonSet is Ready on every node. ArgoCD
+  # and the reconciler Job below both depended only on the release, so they ran in
+  # parallel — and ArgoCD's pods could be scheduled while VPC CNI was still the active
+  # datapath. They then kept stale ENI-backed routes and could not reach the cluster
+  # service VIPs at all:
+  #
+  #   app-of-apps  ComparisonError: failed to generate manifest:
+  #     rpc error: code = Unavailable desc = connection error:
+  #     dial tcp 172.20.62.128:8081 (argocd-repo-server): i/o timeout
+  #   application-controller: dial tcp 172.20.55.0:6379 (redis): i/o timeout
+  #
+  # Every pod Running, every endpoint present, and ArgoCD unable to talk to itself. The
+  # app-of-apps generated nothing, so a fresh install produced an empty cluster that
+  # looked healthy. Restarting ArgoCD fixed it instantly, which is what proved the race.
+  #
+  # The Job already does the waiting we need — it blocks on `kubectl rollout status
+  # daemonset/cilium` and then restarts the workloads that pre-date cilium. Ordering
+  # ArgoCD after it means ArgoCD starts on a converged datapath and never needs the
+  # remediation. Fix the ordering, don't add ArgoCD to the restart list.
+  depends_on = [kubernetes_job_v1.restart_pre_cilium_addons]
 }
 
 ################################################################################
