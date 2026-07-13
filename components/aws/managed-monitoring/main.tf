@@ -37,18 +37,23 @@ resource "aws_prometheus_alert_manager_definition" "this" {
 }
 
 ################################################################################
-# IRSA — grafana-agent remote-write into AMP
+# Pod Identity — alloy remote-write into AMP
 #
-# Allows the in-cluster grafana-agent to push metrics to AMP via SigV4.
+# Allows the in-cluster alloy collector (DaemonSet, service account `alloy` in
+# the `monitoring` namespace) to push metrics to AMP via SigV4. The workload is
+# alloy — Grafana's successor to the grafana-agent — so the identity is bound to
+# the `alloy` service account. Binding it to the old `grafana-agent` name would
+# leave the real workload falling back to the node instance role, which has no
+# aps:RemoteWrite and gets a 403 on every remote_write batch.
 ################################################################################
 
-module "grafana_agent_amp_irsa" {
+module "alloy_amp_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-grafana-agent-amp"
+  role_name       = "${local.irsa_role_prefix}-alloy-amp"
   cluster_name    = var.cluster_name
   namespace       = "monitoring"
-  service_account = "grafana-agent"
+  service_account = "alloy"
 
   policy_statements = [
     {
@@ -184,7 +189,7 @@ resource "aws_grafana_role_association" "viewer" {
 #   - AMP query + remote-write URLs go to Secrets Manager. External Secrets
 #     Operator syncs them into the cluster (the aws-secrets-manager
 #     ClusterSecretStore), where the Grafana data source templates its url from
-#     the synced Secret and grafana-agent reads its remote-write url from an env
+#     the synced Secret and alloy reads its remote-write url from an env
 #     var. The endpoints aren't sensitive; Secrets Manager is simply the store
 #     ESO is wired to, alongside the Grafana service-account token.
 #   - The AMG workspace URL goes to SSM. The Grafana CR's url field can't be
