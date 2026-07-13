@@ -1,6 +1,6 @@
 ################################################################################
 # Outputs to wire into eks-gitops:
-#   - grafana-agent values-{env}.yaml: amp_remote_write_url, region, IRSA role ARN
+#   - alloy values-{env}.yaml: amp_remote_write_url, region, Pod Identity role ARN
 #   - dashboards/base: grafana_endpoint
 ################################################################################
 
@@ -15,7 +15,7 @@ output "amp_workspace_arn" {
 }
 
 output "amp_remote_write_url" {
-  description = "AMP remote-write endpoint (paste into eks-gitops grafana-agent values)"
+  description = "AMP remote-write endpoint (paste into eks-gitops alloy values)"
   value       = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
 }
 
@@ -24,9 +24,9 @@ output "amp_query_endpoint" {
   value       = aws_prometheus_workspace.this.prometheus_endpoint
 }
 
-output "grafana_agent_irsa_role_arn" {
-  description = "IRSA role ARN for grafana-agent (annotate the SA with eks.amazonaws.com/role-arn)"
-  value       = module.grafana_agent_amp_irsa.iam_role_arn
+output "alloy_amp_role_arn" {
+  description = "Pod Identity role ARN bound to the alloy service account (monitoring/alloy) for AMP remote_write"
+  value       = module.alloy_amp_irsa.iam_role_arn
 }
 
 output "grafana_endpoint" {
