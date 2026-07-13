@@ -325,6 +325,29 @@ resource "aws_iam_role_policy" "operator" {
         Resource = "arn:${local.partition}:kms:${var.region}:${local.account_id}:key/*"
       },
       {
+        # The Platform controller calls ensureBucketPolicy() on the model-artifacts
+        # bucket on every reconcile: it reads the current bucket policy and writes
+        # back one granting each Platform's tenant roles access to their own prefix.
+        # The operator's policy carried no S3 statement at all, so every reconcile
+        # failed with AccessDenied on s3:GetBucketPolicy and the Platform never left
+        # phase=Provisioning.
+        #
+        # Bucket-policy verbs only, and only on the two buckets this component owns.
+        # Object-level access is deliberately NOT granted here — the operator brokers
+        # the buckets, it does not read or write their contents; the tenant roles it
+        # writes the policy for do that.
+        Sid    = "ArtifactBucketPolicy"
+        Effect = "Allow"
+        Action = [
+          "s3:GetBucketPolicy",
+          "s3:PutBucketPolicy",
+        ]
+        Resource = [
+          aws_s3_bucket.model_artifacts.arn,
+          aws_s3_bucket.eval_reports.arn,
+        ]
+      },
+      {
         Sid    = "SSMRead"
         Effect = "Allow"
         Action = [
