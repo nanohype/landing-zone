@@ -143,3 +143,40 @@ module "argo_workflows_bucket" {
 
   tags = local.tags
 }
+
+################################################################################
+# Bucket-name guard
+#
+# S3 rejects any name over 63 characters, and it rejects it at APPLY — halfway
+# through creating the addons, with some buckets made and some not. Catch it at PLAN.
+#
+# The four buckets above are terraform-aws-modules/s3-bucket module blocks, and a
+# module block cannot carry a lifecycle precondition. A `check` block only emits a
+# warning, which is not a gate. So the assertion lives on a terraform_data resource,
+# which creates nothing and fails the plan.
+#
+# Worst case today is 58 chars (production-eks-<12-digit-account>-ap-southeast-4-
+# argo-workflows). The headroom is five characters — a longer environment name is the
+# thing that will break this, and this is what will tell you so.
+################################################################################
+
+resource "terraform_data" "bucket_name_guard" {
+  lifecycle {
+    precondition {
+      condition = alltrue([
+        for name in ["velero", "loki", "tempo", "argo-workflows"] :
+        length("${local.bucket_prefix}-${name}") <= 63
+      ])
+      error_message = format(
+        "S3 bucket names are limited to 63 characters and the prefix %q (%d chars) leaves too little room: %s. Shorten var.environment.",
+        local.bucket_prefix,
+        length(local.bucket_prefix),
+        join(", ", [
+          for name in ["velero", "loki", "tempo", "argo-workflows"] :
+          format("%s-%s (%d)", local.bucket_prefix, name, length("${local.bucket_prefix}-${name}"))
+          if length("${local.bucket_prefix}-${name}") > 63
+        ])
+      )
+    }
+  }
+}
