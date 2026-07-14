@@ -34,6 +34,39 @@ data "aws_ssm_parameter" "amp_workspace_id" {
 }
 
 locals {
+  # Shared by every platform.nanohype.dev CRD health check registered on the ArgoCD
+  # release. See the comment on that resource for why phase — and not
+  # observedGeneration or condition polarity — is the signal.
+  platform_cr_health = <<-EOT
+    local hs = {}
+    if obj.status == nil then
+      hs.status = "Progressing"
+      hs.message = "awaiting controller"
+      return hs
+    end
+    local phase = obj.status.phase
+    if phase == nil then
+      -- No phase published (BudgetPolicy). A status was written at all, which means the
+      -- controller has seen and reconciled it.
+      hs.status = "Healthy"
+      hs.message = "reconciled"
+      return hs
+    end
+    if phase == "Ready" or phase == "Active" then
+      hs.status = "Healthy"
+      hs.message = phase
+      return hs
+    end
+    if phase == "Failed" or phase == "Error" or phase == "Degraded" then
+      hs.status = "Degraded"
+      hs.message = phase
+      return hs
+    end
+    hs.status = "Progressing"
+    hs.message = phase
+    return hs
+  EOT
+
   account_id = data.aws_caller_identity.current.account_id
 }
 
