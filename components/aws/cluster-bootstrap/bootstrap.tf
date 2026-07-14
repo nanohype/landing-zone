@@ -238,6 +238,47 @@ resource "helm_release" "argocd" {
     applicationSet = {
       replicas = var.argocd_appset_replicas
     }
+
+    # Teach ArgoCD how to read the health of OUR CRDs.
+    #
+    # Without this the agent-platform Application can NEVER report Healthy — so the
+    # convergence gate (`kubectl wait --for=condition=Healthy applications --all`) can
+    # never pass. It times out on every install, against a platform that is in fact
+    # fully reconciled:
+    #
+    #   Platform/ops       phase=Ready   ModelAccessScoped=True  NamespaceReady=True
+    #   ModelGateway/ops   phase=Ready   RoutesReconciled=True   (2 routes live)
+    #   Tenant/protohypd   phase=Active  Aggregated=True
+    #   BudgetPolicy/ops                 BudgetReconciled=True
+    #
+    #   argocd:  agent-platform  Progressing/Synced   <- forever
+    #
+    # ArgoCD ships health checks for the CRDs it knows and cannot guess at ours. This is
+    # precisely what resource.customizations.health.* exists for; registering them is the
+    # idiomatic answer, not a workaround.
+    #
+    # Keyed on status.phase, deliberately:
+    #
+    #   - observedGeneration is NOT usable here. Tenant and BudgetPolicy never publish
+    #     it, and Platform's lags its own generation — so the usual "has the controller
+    #     caught up" test reports a healthy platform as stalled.
+    #
+    #   - The conditions have MIXED POLARITY. `Suspended=False` and
+    #     `TenantBudgetExceeded=False` are the GOOD states. The obvious check — "any
+    #     condition is False, therefore unhealthy" — would mark every healthy Platform
+    #     and every solvent Tenant as broken.
+    #
+    # A CR with no phase but a written status (BudgetPolicy) has been reconciled by its
+    # controller, so it is Healthy. One with no status at all has not been seen yet, so
+    # it is Progressing.
+    configs = {
+      cm = {
+        "resource.customizations.health.platform.nanohype.dev_Platform"     = local.platform_cr_health
+        "resource.customizations.health.platform.nanohype.dev_Tenant"       = local.platform_cr_health
+        "resource.customizations.health.platform.nanohype.dev_ModelGateway" = local.platform_cr_health
+        "resource.customizations.health.platform.nanohype.dev_BudgetPolicy" = local.platform_cr_health
+      }
+    }
   })]
 
   # ArgoCD must come up on the SETTLED cilium datapath, not race it.
