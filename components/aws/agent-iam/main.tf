@@ -390,6 +390,22 @@ resource "aws_iam_role_policy" "operator" {
         Action = [
           "s3:GetBucketPolicy",
           "s3:PutBucketPolicy",
+          # DeleteBucketPolicy, not merely Put.
+          #
+          # When the LAST Platform is finalized, its statements are the only ones on the
+          # artifacts bucket — a single-tenant install has exactly one Platform — so
+          # removing them leaves no policy at all. S3 will not let that be expressed as
+          # an empty statement list:
+          #
+          #   MalformedPolicy: Could not parse the policy: Statement is empty!
+          #
+          # The operator must therefore DELETE the policy (see
+          # nanohype/eks-agent-platform, platform_kms_s3.go). Without this permission the
+          # finalizer 403s instead of 400s, which is the same outcome: it retries
+          # forever, the Platform hangs in Terminating, the agent-platform Application
+          # never leaves Progressing, and `rackctl destroy` stalls on
+          # `platforms.platform.nanohype.dev did not finalize`.
+          "s3:DeleteBucketPolicy",
         ]
         Resource = [
           aws_s3_bucket.model_artifacts.arn,

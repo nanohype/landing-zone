@@ -284,11 +284,22 @@ resource "helm_release" "argocd" {
       # warn that a health check matches nothing, so the Application simply stays
       # Progressing and the key looks correct in the ConfigMap.
       cm = {
-        "resource.customizations.health.platform.nanohype.dev_Platform"          = local.platform_cr_health
-        "resource.customizations.health.platform.nanohype.dev_Tenant"            = local.platform_cr_health
-        "resource.customizations.health.agents.nanohype.dev_ModelGateway"        = local.platform_cr_health
-        "resource.customizations.health.governance.nanohype.dev_BudgetPolicy"    = local.platform_cr_health
-        "resource.customizations.health.agentgateway.dev_AgentgatewayParameters" = local.platform_cr_health
+        "resource.customizations.health.platform.nanohype.dev_Platform"       = local.platform_cr_health
+        "resource.customizations.health.platform.nanohype.dev_Tenant"         = local.platform_cr_health
+        "resource.customizations.health.agents.nanohype.dev_ModelGateway"     = local.platform_cr_health
+        "resource.customizations.health.governance.nanohype.dev_BudgetPolicy" = local.platform_cr_health
+        # AgentgatewayParameters is deliberately ABSENT.
+        #
+        # It is a config-only CR: nothing reconciles it, so nothing ever writes a status
+        # to it. Registering the health check above rated it Progressing ("awaiting
+        # controller") forever — and one Progressing node is enough to hold the whole
+        # agent-platform Application at Progressing, which is the exact failure the health
+        # checks were added to fix.
+        #
+        # With no customization, ArgoCD returns nil health for it and treats it as
+        # Healthy, which is correct: a config object with no controller has nothing to be
+        # unhealthy about. The right check for a CR is "does a controller own this", not
+        # "is it one of ours".
       }
     }
   })]
