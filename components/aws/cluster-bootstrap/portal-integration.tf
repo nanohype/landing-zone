@@ -54,8 +54,22 @@ resource "kubernetes_cluster_role_binding_v1" "portal_reader" {
     name      = kubernetes_cluster_role_v1.portal_reader[0].metadata[0].name
   }
   subject {
-    kind      = "ServiceAccount"
-    name      = kubernetes_service_account_v1.portal_reader[0].metadata[0].name
+    kind = "ServiceAccount"
+    name = kubernetes_service_account_v1.portal_reader[0].metadata[0].name
+    # A ServiceAccount subject MUST carry an empty apiGroup — it lives in the core API
+    # group, and the API server rejects anything else:
+    #
+    #   subjects[0].apiGroup: Unsupported value: "rbac.authorization.k8s.io":
+    #                         supported values: ""
+    #
+    # The kubernetes provider does not leave api_group unset when it is omitted; it sends
+    # the RBAC group, which is right for a User or Group subject and wrong for this one.
+    # So it has to be set explicitly, even though "" reads like a no-op.
+    #
+    # This only surfaces on an UPDATE to an existing binding, which is why it survived
+    # every create-path test: a fresh apply writes the subject once and never validates it
+    # against a prior one.
+    api_group = ""
     namespace = "kube-system"
   }
 }
