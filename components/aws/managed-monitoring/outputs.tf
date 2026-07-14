@@ -53,3 +53,13 @@ output "grafana_url_ssm_parameter" {
   description = "SSM parameter holding the AMG workspace URL (read by cluster-bootstrap to annotate the ArgoCD cluster Secret)"
   value       = aws_ssm_parameter.grafana_url.name
 }
+
+output "grafana_token_secret_name" {
+  description = "Secrets Manager secret holding the AMG service-account token (+ the workspace/service-account ids the rotator needs). Consumed by the catalog's grafana-external-credentials ExternalSecret."
+  value       = aws_secretsmanager_secret.grafana_token.name
+}
+
+output "grafana_token_rotator_role_arn" {
+  description = "Pod Identity role for the grafana-token-rotator CronJob."
+  value       = module.grafana_token_rotator_irsa.iam_role_arn
+}

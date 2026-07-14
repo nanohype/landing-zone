@@ -244,3 +244,112 @@ resource "aws_ssm_parameter" "amp_workspace_id" {
 
   tags = local.tags
 }
+
+################################################################################
+# The Grafana service account, its token, and the rotation that keeps it alive
+#
+# grafana-operator pushes every dashboard, data source and alert rule into the
+# AMG workspace using a bearer token it reads from a Secret. The catalog's
+# ExternalSecret has always sourced that token from a Secrets Manager secret
+# named `eks-grafana-token` — but nothing ever created it. It was populated by
+# hand, which meant `rackctl init` could not produce a green cluster without a
+# human in the loop, and the dashboards app shipped broken on every fresh
+# install.
+#
+# There is no long-lived credential to reach for. AMG caps a service-account
+# token at 30 days (CreateWorkspaceServiceAccountToken rejects secondsToLive >
+# 2592000), and grafana-operator's `external` Grafana CR speaks only a bearer
+# apiKey — it has no SigV4/IAM path. So the token MUST be rotated by something,
+# and a hand-made one is a 30-day fuse under every cluster we vend.
+#
+# Two halves, and both are needed:
+#
+#   - Terraform seeds the first token here, so day 0 is green with no manual
+#     step. It also re-seeds on any apply, which is what recovers a cluster that
+#     sat dead longer than the token's life.
+#   - The grafana-token-rotator CronJob in the gitops catalog replaces it weekly
+#     thereafter, using the Pod Identity granted below.
+#
+# The secret carries its own config (workspaceId, serviceAccountId, region)
+# alongside the token. That is what lets the rotator run with no ApplicationSet
+# templating and no new cluster-Secret annotations — it reads everything it
+# needs from the one secret it is already required to read.
+################################################################################
+
+# ADMIN, not EDITOR: grafana-operator reconciles GrafanaDatasource and
+# GrafanaAlertRuleGroup CRs, and Grafana gates data-source and alerting
+# provisioning behind admin. The scope is the workspace, nothing else.
+resource "aws_grafana_workspace_service_account" "dashboards" {
+  name         = "grafana-operator"
+  grafana_role = "ADMIN"
+  workspace_id = aws_grafana_workspace.this.id
+}
+
+resource "aws_grafana_workspace_service_account_token" "bootstrap" {
+  name               = "terraform-bootstrap"
+  service_account_id = aws_grafana_workspace_service_account.dashboards.service_account_id
+  seconds_to_live    = 2592000 # 30 days — the AMG maximum
+  workspace_id       = aws_grafana_workspace.this.id
+}
+
+resource "aws_secretsmanager_secret" "grafana_token" {
+  name = "eks-grafana-token"
+  # The rotator replaces this value in place. Drop the recovery window so a
+  # teardown/recreate cycle doesn't collide with a soft-deleted secret of the
+  # same name — same reasoning as monitoring_endpoints above.
+  recovery_window_in_days = 0
+
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "grafana_token" {
+  secret_id = aws_secretsmanager_secret.grafana_token.id
+  secret_string = jsonencode({
+    token            = aws_grafana_workspace_service_account_token.bootstrap.key
+    workspaceId      = aws_grafana_workspace.this.id
+    serviceAccountId = aws_grafana_workspace_service_account.dashboards.service_account_id
+    region           = var.region
+  })
+
+  # The CronJob owns this value once it has run. Without ignore_changes, every
+  # subsequent apply would stomp the live token back to the bootstrap one in
+  # Terraform's state — which, more than 30 days after the install, has expired.
+  # The apply would report success and the dashboards would go dark.
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# The rotator needs exactly three things: mint a token, list and delete the old
+# ones (AMG caps tokens per service account, so they must not accumulate), and
+# write the result back to the single secret it owns.
+module "grafana_token_rotator_irsa" {
+  source = "../../../modules/aws/workload-identity"
+
+  role_name       = "${local.irsa_role_prefix}-grafana-token-rotator"
+  cluster_name    = var.cluster_name
+  namespace       = "grafana-operator"
+  service_account = "grafana-token-rotator"
+
+  policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "grafana:CreateWorkspaceServiceAccountToken",
+        "grafana:ListWorkspaceServiceAccountTokens",
+        "grafana:DeleteWorkspaceServiceAccountToken",
+      ]
+      Resource = [aws_grafana_workspace.this.arn]
+    },
+    {
+      Effect = "Allow"
+      Action = [
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:DescribeSecret",
+      ]
+      Resource = [aws_secretsmanager_secret.grafana_token.arn]
+    },
+  ]
+
+  tags = local.tags
+}
