@@ -174,7 +174,7 @@ module "eks" {
   # is exactly the bug this comment exists because of.
   node_security_group_additional_rules = {
     cilium_wireguard = {
-      description = "Cilium WireGuard — encrypted pod-to-pod transport between nodes"
+      description = "Cilium WireGuard: encrypted pod-to-pod transport between nodes"
       protocol    = "udp"
       from_port   = 51871
       to_port     = 51871
@@ -182,7 +182,7 @@ module "eks" {
       self        = true
     }
     cilium_health = {
-      description = "Cilium health endpoint — how agents compute cluster reachability"
+      description = "Cilium health endpoint: how agents compute cluster reachability"
       protocol    = "tcp"
       from_port   = 4240
       to_port     = 4240
@@ -190,7 +190,7 @@ module "eks" {
       self        = true
     }
     cilium_health_icmp = {
-      description = "Cilium health — ICMP reachability probe"
+      description = "Cilium health: ICMP reachability probe"
       protocol    = "icmp"
       from_port   = -1
       to_port     = -1
