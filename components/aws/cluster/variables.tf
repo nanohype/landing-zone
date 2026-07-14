@@ -88,9 +88,24 @@ variable "system_node_desired_size" {
 }
 
 variable "system_node_disk_size" {
-  description = "Disk size in GB for system nodes"
+  description = <<-EOT
+    Size in GB of the Bottlerocket DATA volume (/dev/xvdb) on system nodes — where
+    container images and ephemeral storage live. NOT the OS volume (/dev/xvda), which
+    is read-only and stays at the AMI's 2 GiB.
+
+    The default must comfortably hold the whole addon catalog's image set. The AMI's
+    own default is 20 GiB, which does not: a fresh install pulled itself into
+    DiskPressure and the kubelet evicted 30 pods mid-convergence.
+  EOT
   type        = number
   default     = 100
+
+  validation {
+    # 20 GiB is the AMI default that caused the eviction storm; anything at or below it
+    # reproduces the bug this variable exists to prevent.
+    condition     = var.system_node_disk_size >= 50
+    error_message = "system_node_disk_size must be at least 50 GB — the platform's addon image set does not fit in less, and the nodes hit DiskPressure while still converging."
+  }
 }
 
 variable "team" {

@@ -82,8 +82,39 @@ module "eks" {
       min_size       = var.system_node_min_size
       max_size       = var.system_node_max_size
       desired_size   = var.system_node_desired_size
-      disk_size      = var.system_node_disk_size
       capacity_type  = "ON_DEMAND"
+
+      # `disk_size` USED TO BE SET HERE, AND DID NOTHING.
+      #
+      # terraform-aws-eks v21 always builds a custom launch template for a managed node
+      # group, and `disk_size` is silently ignored whenever one is used. It is accepted,
+      # it validates, it plans clean, and AWS never sees it — the node group reported
+      # `diskSize: null` and the launch template's BlockDeviceMappings was null, so the
+      # instances fell back to the AMI's own defaults.
+      #
+      # For BOTTLEROCKET that default is a 2 GiB OS volume (/dev/xvda) plus a **20 GiB
+      # data volume** (/dev/xvdb) — and /dev/xvdb is where container images and
+      # ephemeral storage live. 20 GiB does not fit this platform's image set. On a
+      # fresh install the system nodes hit DiskPressure while the addons were still
+      # pulling, the kubelet evicted 30 pods (the ArgoCD ApplicationSet controller
+      # among them), and convergence went backwards — 40/44 Applications healthy, then
+      # 38, then 37. Karpenter's nodes were fine throughout, because its EC2NodeClass
+      # sizes its volumes explicitly. Only the managed group was left on the defaults.
+      #
+      # The knob that actually reaches AWS is block_device_mappings. Size /dev/xvdb;
+      # /dev/xvda is deliberately left alone, since the Bottlerocket OS image is
+      # read-only and 2 GiB is what it is designed for.
+      block_device_mappings = {
+        xvdb = {
+          device_name = "/dev/xvdb"
+          ebs = {
+            volume_size           = var.system_node_disk_size
+            volume_type           = "gp3"
+            encrypted             = true
+            delete_on_termination = true
+          }
+        }
+      }
 
       # node-group role under the fleet-vend path (v21 sets these per-group, not
       # via an eks_managed_node_group_defaults var)
