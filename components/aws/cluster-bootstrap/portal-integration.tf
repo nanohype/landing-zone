@@ -24,10 +24,14 @@ resource "kubernetes_service_account_v1" "portal_reader" {
   depends_on = [helm_release.cilium]
 }
 
+# NOT named "portal-reader". The gitops catalog ships a ClusterRole AND a
+# ClusterRoleBinding of that exact name (addons/bootstrap/portal-reader), and ArgoCD
+# owns them — the live objects carry its tracking-id annotation. Two writers of one
+# object is the bug; see the ClusterRoleBinding below for what it actually did.
 resource "kubernetes_cluster_role_v1" "portal_reader" {
   count = var.enable_portal_reader ? 1 : 0
   metadata {
-    name = "portal-reader"
+    name = "portal-reader-sa"
   }
   # The watcher lists Platform/Tenant CRs; nodes + namespaces back the
   # portal connection-test summary. Strictly read-only.
@@ -43,10 +47,29 @@ resource "kubernetes_cluster_role_v1" "portal_reader" {
   }
 }
 
+# The catalog's `portal-reader` binding grants the OIDC GROUP `portal-reader` to humans.
+# This one grants the portal's SERVICE ACCOUNT the same read-only access, so the portal
+# app can call the API with the durable token below. Both are legitimate and they are NOT
+# the same binding — a ClusterRoleBinding's subjects are a single list, so sharing one
+# name means two writers fighting over that list.
+#
+# They used to share the name `portal-reader`. ArgoCD applied its Group subject, then
+# terraform tried to update the same object to a ServiceAccount subject, and the API
+# server rejected the result:
+#
+#	Error: Failed to update ClusterRoleBinding: ClusterRoleBinding.rbac.authorization.k8s.io
+#	"portal-reader" is invalid: subjects[0].apiGroup: Unsupported value:
+#	"rbac.authorization.k8s.io": supported values: ""
+#
+# That halted cluster-bootstrap partway on EVERY re-apply — after the ArgoCD cluster
+# Secret had been updated, before the component finished — while a FIRST apply passed
+# clean, because ArgoCD had not synced its copy yet. An earlier attempt to fix this by
+# setting `api_group = ""` on the subject treated the symptom: the conflict is the two
+# owners, not the field.
 resource "kubernetes_cluster_role_binding_v1" "portal_reader" {
   count = var.enable_portal_reader ? 1 : 0
   metadata {
-    name = "portal-reader"
+    name = "portal-reader-sa"
   }
   role_ref {
     api_group = "rbac.authorization.k8s.io"
