@@ -272,11 +272,23 @@ resource "helm_release" "argocd" {
     # controller, so it is Healthy. One with no status at all has not been seen yet, so
     # it is Progressing.
     configs = {
+      # The API GROUP of each CRD, verified against the live cluster — they are NOT all
+      # platform.nanohype.dev, which is the obvious and wrong assumption:
+      #
+      #   Platform, Tenant           platform.nanohype.dev
+      #   ModelGateway               agents.nanohype.dev
+      #   BudgetPolicy               governance.nanohype.dev
+      #   AgentgatewayParameters     agentgateway.dev
+      #
+      # A customization keyed on the wrong group is silently ignored — ArgoCD does not
+      # warn that a health check matches nothing, so the Application simply stays
+      # Progressing and the key looks correct in the ConfigMap.
       cm = {
-        "resource.customizations.health.platform.nanohype.dev_Platform"     = local.platform_cr_health
-        "resource.customizations.health.platform.nanohype.dev_Tenant"       = local.platform_cr_health
-        "resource.customizations.health.platform.nanohype.dev_ModelGateway" = local.platform_cr_health
-        "resource.customizations.health.platform.nanohype.dev_BudgetPolicy" = local.platform_cr_health
+        "resource.customizations.health.platform.nanohype.dev_Platform"          = local.platform_cr_health
+        "resource.customizations.health.platform.nanohype.dev_Tenant"            = local.platform_cr_health
+        "resource.customizations.health.agents.nanohype.dev_ModelGateway"        = local.platform_cr_health
+        "resource.customizations.health.governance.nanohype.dev_BudgetPolicy"    = local.platform_cr_health
+        "resource.customizations.health.agentgateway.dev_AgentgatewayParameters" = local.platform_cr_health
       }
     }
   })]
