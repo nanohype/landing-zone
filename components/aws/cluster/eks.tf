@@ -140,5 +140,64 @@ module "eks" {
     "karpenter.sh/discovery" = local.cluster_name
   }
 
+  # Cilium's own ports. The default node security group does not open them, and nothing
+  # in the module knows Cilium is the CNI — so without these the datapath is silently
+  # half-broken and the cluster still reports itself healthy.
+  #
+  # What that looked like: every pod on a Karpenter node had NO DNS. CoreDNS runs on the
+  # managed node group, and:
+  #
+  #     cilium-dbg status  →  Cluster health: 4/6 reachable
+  #                           Encryption: Wireguard [Peers: 5]
+  #
+  # The WireGuard peers were all established — the tunnels simply could not carry
+  # traffic, because UDP 51871 was not permitted between nodes. A pod resolving anything
+  # got `i/o timeout`, falco's init container could not fetch its rules, and the
+  # Applications stayed Healthy the whole time, because a readiness probe is local and
+  # never leaves the node.
+  #
+  # The default rules open TCP 1025-65535 and UDP 53 from self, which is enough for a
+  # VXLAN-less, unencrypted CNI. Cilium needs three more things, and each is silent when
+  # missing rather than loud:
+  #
+  #   51871/udp  WireGuard transport. Without it, encrypted pod-to-pod traffic between
+  #              nodes is dropped — the tunnel exists, the packets vanish.
+  #   4240/tcp   The cilium-health endpoint every agent probes to build `Cluster health`.
+  #              Without it the agents cannot tell a partitioned node from a busy one.
+  #   icmp       cilium-health's latency/reachability probe.
+  #
+  # These are `self = true`: all nodes must live in THIS security group for the rules to
+  # cover them, which is what the karpenter.sh/discovery tag above is for. The Karpenter
+  # EC2NodeClass must select this SG by that tag (eks-gitops,
+  # addons/operations/karpenter-resources) — selecting the EKS *cluster* SG instead puts
+  # Karpenter nodes in a different group with no path to the node group at all, and that
+  # is exactly the bug this comment exists because of.
+  node_security_group_additional_rules = {
+    cilium_wireguard = {
+      description = "Cilium WireGuard — encrypted pod-to-pod transport between nodes"
+      protocol    = "udp"
+      from_port   = 51871
+      to_port     = 51871
+      type        = "ingress"
+      self        = true
+    }
+    cilium_health = {
+      description = "Cilium health endpoint — how agents compute cluster reachability"
+      protocol    = "tcp"
+      from_port   = 4240
+      to_port     = 4240
+      type        = "ingress"
+      self        = true
+    }
+    cilium_health_icmp = {
+      description = "Cilium health — ICMP reachability probe"
+      protocol    = "icmp"
+      from_port   = -1
+      to_port     = -1
+      type        = "ingress"
+      self        = true
+    }
+  }
+
   tags = local.tags
 }
