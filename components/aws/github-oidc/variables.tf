@@ -29,7 +29,7 @@ variable "github_org" {
 }
 
 variable "github_repos" {
-  description = "Repos whose Actions workflows may assume the deploy role (trust is scoped to repo:<org>/<repo>:*)"
+  description = "Repos whose Actions workflows may assume the deploy role (trust is scoped to repo:<org>/<repo>:<claim> for each allowed_subject_claims entry)."
   type        = list(string)
   default     = ["landing-zone"]
 
@@ -39,6 +39,27 @@ variable "github_repos" {
     # the role. Require at least one repo.
     condition     = length(var.github_repos) > 0
     error_message = "github_repos must contain at least one repo; an empty list would make the deploy role assumable by any GitHub Actions workflow."
+  }
+}
+
+variable "allowed_subject_claims" {
+  description = <<-EOT
+    GitHub OIDC `sub` claim suffixes the deploy role trusts, applied to every repo in
+    github_repos (final subject = repo:<org>/<repo>:<claim>). Default is
+    environment-gated deploys + tag pushes — "environment:*" (any GitHub Environment,
+    the recommended deploy-gating context) and "ref:refs/tags/*" (release tags). This
+    deliberately EXCLUDES a bare ":*", which would also trust pull_request and every
+    branch context — a fork's PR or an untrusted branch must never assume a deploy
+    role. Narrow further (e.g. "environment:production") or add contexts (e.g.
+    "ref:refs/heads/main") as the CI model requires. Setting an entry to "*" restores
+    the broad ":*" — an explicit, auditable opt-out.
+  EOT
+  type        = list(string)
+  default     = ["environment:*", "ref:refs/tags/*"]
+
+  validation {
+    condition     = length(var.allowed_subject_claims) > 0
+    error_message = "allowed_subject_claims must contain at least one claim; an empty list would render an empty sub condition, which AWS drops — making the deploy role assumable by any GitHub Actions workflow."
   }
 }
 
