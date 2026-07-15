@@ -134,6 +134,13 @@ jobs:
   tflint:
     name: TFLint
     runs-on: ubuntu-latest
+    # tflint --init fetches the aws ruleset from the GitHub releases API. Without a
+    # token that call is UNauthenticated (60/hr per runner IP), so on a shared-IP
+    # runner it intermittently 403s ("API rate limit exceeded") and reds the build
+    # before any linting runs. github.token authenticates it (5000/hr) — read-only,
+    # no extra scope.
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: terraform-linters/setup-tflint@v6
