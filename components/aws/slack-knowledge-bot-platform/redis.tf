@@ -12,7 +12,7 @@ resource "aws_elasticache_subnet_group" "redis" {
   name       = "${local.prefix}-redis"
   subnet_ids = var.private_subnet_ids
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_security_group" "redis" {
@@ -28,7 +28,7 @@ resource "aws_security_group" "redis" {
     description     = "Redis from EKS"
   }
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.tags, {
     Name = "${local.prefix}-redis"
   })
 
@@ -61,5 +61,5 @@ resource "aws_elasticache_replication_group" "rate_limit" {
 
   apply_immediately = var.environment != "production"
 
-  tags = local.common_tags
+  tags = local.tags
 }

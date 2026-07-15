@@ -22,8 +22,8 @@
  */
 
 locals {
-  prefix      = "digest-pipeline-${var.environment}"
-  common_tags = merge({ Component = "digest-pipeline-platform", Tenant = "digest-pipeline" }, var.tags)
+  prefix = "digest-pipeline-${var.environment}"
+  tags   = merge({ Component = "digest-pipeline-platform", Tenant = "digest-pipeline" }, var.tags)
 }
 
 data "aws_caller_identity" "current" {}

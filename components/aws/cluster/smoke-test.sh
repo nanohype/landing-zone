@@ -18,7 +18,7 @@ echo "  Cluster is ACTIVE"
 
 # --- API Endpoint Reachability ---
 echo "Checking API endpoint reachability..."
-HTTP_CODE=$(curl -sk -o /dev/null -w '%{http_code}' "${CLUSTER_ENDPOINT}/healthz" || true)
+HTTP_CODE=$(curl -sk -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "${CLUSTER_ENDPOINT}/healthz" || true)
 if [[ "$HTTP_CODE" == "000" ]]; then
   echo "FAIL: API endpoint ${CLUSTER_ENDPOINT} is not reachable"
   exit 1

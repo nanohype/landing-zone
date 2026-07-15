@@ -44,9 +44,17 @@ variable "cluster_endpoint_public_access" {
 }
 
 variable "cluster_endpoint_public_access_cidrs" {
-  description = "CIDR blocks allowed to reach the public EKS API endpoint. Empty list = unrestricted (the AWS default). Set to your operator IP(s) to lock it down."
+  description = "CIDR blocks allowed to reach the public EKS API endpoint. Required (non-empty) whenever cluster_endpoint_public_access is true — there is no 0.0.0.0/0 fallback. Set to your operator IP(s)."
   type        = list(string)
   default     = []
+
+  # Secure-by-default: a public API endpoint with no allow-list is world-reachable. Reject
+  # that combination at plan time rather than silently opening it to 0.0.0.0/0. (Empty is fine
+  # when public access is off — the CIDRs are then unused.)
+  validation {
+    condition     = !var.cluster_endpoint_public_access || length(var.cluster_endpoint_public_access_cidrs) > 0
+    error_message = "cluster_endpoint_public_access_cidrs must be a non-empty allow-list when cluster_endpoint_public_access is true (no 0.0.0.0/0 default)."
+  }
 }
 
 variable "access_entries" {

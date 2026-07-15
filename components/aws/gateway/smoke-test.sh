@@ -28,7 +28,7 @@ for TENANT in $TENANTS; do
   echo "  REST API exists: ${API_NAME}"
 
   # Verify endpoint is reachable
-  HTTP_CODE=$(curl -sk -o /dev/null -w '%{http_code}' "${REST_API_ENDPOINT}" 2>/dev/null || echo "000")
+  HTTP_CODE=$(curl -sk -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "${REST_API_ENDPOINT}" 2>/dev/null || echo "000")
   if [[ "$HTTP_CODE" == "000" ]]; then
     echo "  API endpoint not reachable (may require VPN/VPC access)"
   else

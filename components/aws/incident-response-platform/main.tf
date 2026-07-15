@@ -19,6 +19,6 @@
  */
 
 locals {
-  prefix      = "incident-response-${var.environment}"
-  common_tags = merge({ Component = "incident-response-platform", Tenant = "incident-response" }, var.tags)
+  prefix = "incident-response-${var.environment}"
+  tags   = merge({ Component = "incident-response-platform", Tenant = "incident-response" }, var.tags)
 }

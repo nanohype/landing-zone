@@ -19,7 +19,7 @@ resource "aws_db_subnet_group" "aurora" {
   name       = "${local.prefix}-aurora"
   subnet_ids = var.private_subnet_ids
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.tags, {
     Name = "${local.prefix}-aurora"
   })
 }
@@ -37,7 +37,7 @@ resource "aws_security_group" "aurora" {
     description     = "PostgreSQL from EKS"
   }
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.tags, {
     Name = "${local.prefix}-aurora"
   })
 
@@ -88,5 +88,5 @@ module "aurora" {
   backup_retention_period = var.rds_backup_retention_days
   deletion_protection     = var.deletion_protection
 
-  tags = local.common_tags
+  tags = local.tags
 }

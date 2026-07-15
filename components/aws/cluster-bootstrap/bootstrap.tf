@@ -74,8 +74,12 @@ resource "kubectl_manifest" "disable_aws_node" {
             "io.cilium/aws-node-enabled" = "true"
           }
           containers = [{
-            name  = "aws-node"
-            image = "public.ecr.aws/eks/aws-node:latest"
+            name = "aws-node"
+            # This DaemonSet is PARKED: the nodeSelector above matches no node, so this
+            # container never schedules — the image is a required-but-inert field. Pin it to
+            # an immutable no-op (never `:latest`), which also means that if a node ever did
+            # carry the label, it would run pause, not a second CNI competing with Cilium.
+            image = "registry.k8s.io/pause:3.10"
           }]
         }
       }

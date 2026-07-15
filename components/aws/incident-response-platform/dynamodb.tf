@@ -44,7 +44,7 @@ resource "aws_dynamodb_table" "incidents" {
 
   deletion_protection_enabled = var.deletion_protection
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_dynamodb_table" "audit" {
@@ -84,7 +84,7 @@ resource "aws_dynamodb_table" "audit" {
 
   deletion_protection_enabled = var.deletion_protection
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_dynamodb_table" "identity_cache" {
@@ -108,5 +108,5 @@ resource "aws_dynamodb_table" "identity_cache" {
 
   deletion_protection_enabled = var.deletion_protection
 
-  tags = local.common_tags
+  tags = local.tags
 }

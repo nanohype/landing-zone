@@ -15,7 +15,7 @@ resource "aws_sqs_queue" "audit_dlq" {
   message_retention_seconds   = 1209600 # 14 days
   sqs_managed_sse_enabled     = true
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_sqs_queue" "audit" {
@@ -31,5 +31,5 @@ resource "aws_sqs_queue" "audit" {
     maxReceiveCount     = 3
   })
 
-  tags = local.common_tags
+  tags = local.tags
 }

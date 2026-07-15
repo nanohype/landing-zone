@@ -11,7 +11,7 @@ inputs = {
   tenants = {
     default = {
       deletion_protection = true
-      efs_throughput_mode  = "provisioned"
+      efs_throughput_mode = "provisioned"
       dynamodb_pitr       = true
     }
   }

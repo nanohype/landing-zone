@@ -19,7 +19,7 @@
 resource "aws_sesv2_email_identity" "digest_pipeline" {
   email_identity = var.ses_sending_domain
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_sesv2_configuration_set" "digest_pipeline" {
@@ -37,5 +37,5 @@ resource "aws_sesv2_configuration_set" "digest_pipeline" {
     reputation_metrics_enabled = true
   }
 
-  tags = local.common_tags
+  tags = local.tags
 }
