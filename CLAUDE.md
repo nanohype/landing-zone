@@ -26,7 +26,7 @@ task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
 
 ## Conventions
 
-- OpenTofu >= 1.10.0, not Terraform — use `tofu` CLI, never `terraform`
+- OpenTofu >= 1.11.0, not Terraform — use `tofu` CLI, never `terraform`
 - All HCL files: `tofu fmt` style (2-space indent, aligned `=`)
 - Component variables must have descriptions (enforced by tflint `terraform_documented_variables`)
 - Component outputs must have descriptions (enforced by tflint `terraform_documented_outputs`)
@@ -57,7 +57,7 @@ components/
       versions.tf
       modules/tenant/      # sub-module for multi-tenant components
 modules/
-  aws/workload-identity/   # AWS IRSA role factory
+  aws/workload-identity/   # EKS Pod Identity role factory
 live/
   root.hcl                 # root config (AWS provider + S3 state backend)
   _envcommon/
