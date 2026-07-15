@@ -56,12 +56,14 @@ variables {
   create_oidc_provider = false
 }
 
-# INVARIANT 1: the trust is scoped to the configured repos via a StringLike on the
-# `sub` claim — exactly repo:<org>/<repo>:* for each configured repo, and NOTHING
-# else. This is THE control. A widened sub (bare "*" or "repo:*/*") lets any
-# workflow in any GitHub repo assume the role. Asserted structurally: find the
-# AssumeRoleWithWebIdentity statement and compare the whole sub set.
-run "trust_sub_scoped_to_configured_repos" {
+# INVARIANT 1: the trust is scoped to the configured repos AND to the allowed
+# subject claims via a StringLike on the `sub` claim — exactly
+# repo:<org>/<repo>:<claim> for the cartesian product, and NOTHING else. This is THE
+# control. The default claim set is environment-gated deploys + tag pushes; a
+# widened sub (bare ":*", "*", or "repo:*/*") lets pull_request / any-branch / any
+# repo assume the role. Asserted structurally: find the AssumeRoleWithWebIdentity
+# statement and compare the whole sub set.
+run "trust_sub_scoped_to_configured_repos_and_claims" {
   command = plan
 
   assert {
@@ -70,22 +72,51 @@ run "trust_sub_scoped_to_configured_repos" {
       s if toset(flatten([
         try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
         ])) == toset([
-        "repo:nanohype/landing-zone:*",
-        "repo:nanohype/rackctl:*",
+        "repo:nanohype/landing-zone:environment:*",
+        "repo:nanohype/landing-zone:ref:refs/tags/*",
+        "repo:nanohype/rackctl:environment:*",
+        "repo:nanohype/rackctl:ref:refs/tags/*",
       ])
     ]) == 1
-    error_message = "trust sub condition must StringLike-pin exactly repo:nanohype/{landing-zone,rackctl}:*; any other set (dropped/added/widened repo) is a CI-auth boundary change"
+    error_message = "trust sub must StringLike-pin exactly repo:nanohype/{landing-zone,rackctl}:{environment:*,ref:refs/tags/*}; any other set (dropped/added/widened repo or claim) is a CI-auth boundary change"
   }
 
   # Belt-and-suspenders on the escalation itself: no statement's sub may contain a
-  # bare "*" or the cross-org/repo wildcard "repo:*/*".
+  # bare "*", the cross-org/repo wildcard "repo:*/*", the broad per-repo ":*", or a
+  # pull_request context (an untrusted PR must never assume a deploy role).
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
-      !contains(flatten([try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])]), "*")
-      && !contains(flatten([try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])]), "repo:*/*")
+      length([
+        for sub in flatten([try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])]) :
+        sub if sub == "*" || sub == "repo:*/*"
+        || can(regex("^repo:[^:]+/[^:]+:\\*$", sub)) # bare per-repo :* (claim is a lone wildcard)
+        || endswith(sub, ":pull_request")
+      ]) == 0
     ])
-    error_message = "trust sub condition must never contain a bare \"*\" or \"repo:*/*\" — that makes the deploy role assumable from any GitHub Actions workflow"
+    error_message = "trust sub must never contain \"*\", \"repo:*/*\", a bare per-repo \":*\", or a \":pull_request\" context — each re-opens the deploy role to untrusted workflows"
+  }
+}
+
+# INVARIANT 1b: the claim set is variable-driven, not hardcoded. Narrowing to a
+# single environment must produce exactly that sub set — proving allowed_subject_claims
+# actually drives the trust rather than a coincidentally-correct default.
+run "trust_sub_honors_allowed_subject_claims" {
+  command = plan
+
+  variables {
+    github_repos           = ["landing-zone"]
+    allowed_subject_claims = ["environment:production"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
+      s if toset(flatten([
+        try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
+      ])) == toset(["repo:nanohype/landing-zone:environment:production"])
+    ]) == 1
+    error_message = "narrowing allowed_subject_claims to [environment:production] must scope the trust sub to exactly that subject"
   }
 }
 
@@ -129,5 +160,21 @@ run "empty_github_repos_rejected" {
 
   expect_failures = [
     var.github_repos,
+  ]
+}
+
+# INVARIANT 3b (guardrail): allowed_subject_claims is validated non-empty for the
+# same reason — an empty claim set renders an empty sub condition, which AWS drops,
+# leaving only the aud check and making the role assumable by any GitHub Actions
+# workflow. The variable validation is the enforcement point; this proves it rejects [].
+run "empty_allowed_subject_claims_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = []
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
   ]
 }

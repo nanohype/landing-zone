@@ -3,9 +3,16 @@ data "aws_caller_identity" "current" {}
 locals {
   account_id = data.aws_caller_identity.current.account_id
 
-  # repo:<org>/<repo>:* subject claims — only Actions workflows in these repos
-  # may assume the role.
-  subjects = [for r in var.github_repos : "repo:${var.github_org}/${r}:*"]
+  # Subject claims the deploy role trusts: the cartesian product of the configured
+  # repos and the allowed claim suffixes (repo:<org>/<repo>:<claim>). The default
+  # claim set is environment-gated deploys + tag pushes — NOT a bare :*, which would
+  # also trust pull_request and every branch context. Only Actions workflows in
+  # these repos, in one of these contexts, may assume the role.
+  subjects = flatten([
+    for r in var.github_repos : [
+      for c in var.allowed_subject_claims : "repo:${var.github_org}/${r}:${c}"
+    ]
+  ])
 
   tags = merge(var.tags, {
     Component = "github-oidc"
