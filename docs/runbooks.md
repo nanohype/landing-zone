@@ -57,7 +57,7 @@ OpenTofu uses native S3 conditional writes for locking (`use_lockfile = true`). 
 Only force-unlock if you are certain no other operation is in progress.
 
 ```bash
-cd live/<env>/<component>
+cd live/aws/<account>/<region>/<env>/<component>
 terragrunt force-unlock <lock-id>
 ```
 
@@ -195,15 +195,16 @@ If the state file itself is corrupted:
 
 5. **Create the state bucket** in the new account:
    ```bash
-   ./scripts/init-backend.sh <new_account_id> <region>
+   ./scripts/init-backend-aws.sh <new_account_id> <region>
    ```
 
-6. **Create the environment directory:**
+6. **Create the environment directory** by copying an existing one under
+   `live/aws/<account>/<region>/<env>/`:
    ```bash
-   cp -r live/dev/ live/<new-env>/
+   cp -r live/aws/workload-dev/us-west-2/dev/ live/aws/<new-account>/<region>/<new-env>/
    ```
 
-7. **Update `live/<new-env>/env.hcl`** with the new account ID, region, and environment name
+7. **Update `live/aws/<new-account>/<region>/<new-env>/env.hcl`** with the new account ID, region, and environment name
 
 8. **Deploy in dependency order:**
    ```bash
@@ -226,7 +227,7 @@ Always roll through environments: **dev → staging → production**.
 
 For each environment:
 
-1. **Update the cluster version** in `live/<env>/cluster/terragrunt.hcl`:
+1. **Update the cluster version** in `live/aws/<account>/<region>/<env>/cluster/terragrunt.hcl`:
    ```hcl
    inputs = {
      cluster_version = "1.36"  # new version
