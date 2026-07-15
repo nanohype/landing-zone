@@ -190,9 +190,9 @@ After `cluster-bootstrap` deploys Cilium and ArgoCD, ArgoCD watches the GitOps r
 
 GitHub Actions assumes `AWS_ROLE_ARN` via OIDC federation -- no long-lived credentials. Each environment has its own role with a trust policy scoped to the repository.
 
-### Pod Authentication (IRSA)
+### Pod Authentication (Pod Identity + IRSA)
 
-The `modules/aws/workload-identity/` module creates IAM roles for service accounts. Each role's trust policy targets the EKS cluster's OIDC provider and is scoped to a specific Kubernetes namespace and service account. Multi-tenant components create one IRSA role per tenant.
+The `modules/aws/workload-identity/` module creates IAM roles for service accounts using **EKS Pod Identity**: each role's trust policy targets `pods.eks.amazonaws.com` (not an OIDC provider) and is bound to an exact (cluster, namespace, service-account) through an EKS Pod Identity association. A `tofu test` gate asserts the trust stays Pod-Identity-only. Some components (e.g. druid) still use **IRSA** — an OIDC-provider trust scoped to a namespace/service-account. Either way, multi-tenant components mint one role per tenant. See the [Threat Model](threat-model.md) for the reasoning.
 
 ### Guardrails
 
