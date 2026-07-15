@@ -63,7 +63,7 @@ landing-zone/
 │       ├── workload-staging/
 │       └── workload-prod/
 ├── modules/
-│   └── aws/workload-identity/    # AWS IRSA role factory
+│   └── aws/workload-identity/    # EKS Pod Identity role factory
 ├── scripts/
 │   └── init-backend-aws.sh
 ├── Taskfile.yaml
@@ -73,7 +73,7 @@ landing-zone/
 
 ## Prerequisites
 
-- [OpenTofu](https://opentofu.org/) >= 1.10.0
+- [OpenTofu](https://opentofu.org/) >= 1.11.0
 - [Terragrunt](https://terragrunt.gruntwork.io/) (latest)
 - [AWS CLI v2](https://aws.amazon.com/cli/)
 - [TFLint](https://github.com/terraform-linters/tflint) with the AWS plugin

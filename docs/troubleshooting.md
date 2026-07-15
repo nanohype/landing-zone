@@ -27,7 +27,7 @@ task plan ENVIRONMENT=<env> COMPONENT=<component>
 
 ```bash
 brew install opentofu
-tofu version   # should show >= 1.10.0
+tofu version   # should show >= 1.11.0
 ```
 
 ## "Error acquiring the state lock"

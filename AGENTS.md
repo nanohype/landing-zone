@@ -10,18 +10,18 @@ OpenTofu + Terragrunt monorepo for the AWS substrate every nanohype-stack app la
 
 Plus:
 
-- **`modules/`** — reusable building blocks each component composes (`workload-identity` for IRSA, `eks-cluster-baseline`, etc.).
+- **`modules/`** — reusable building blocks each component composes (`workload-identity` for EKS Pod Identity, `eks-cluster-baseline`, etc.).
 - **`live/`** — per-environment terragrunt configurations. Path is `live/aws/<account>/<region>/<env>/<component>/terragrunt.hcl`.
 
 ## Contract surface
 
 Every component:
 
-- Has its own `versions.tf` declaring `terraform >= 1.10.0` + AWS provider `~> 6.0`.
+- Has its own `versions.tf` declaring `terraform >= 1.11.0` + AWS provider `~> 6.0`.
 - Has its own `variables.tf` + `outputs.tf` + per-resource files.
 - Reads from upstream component outputs via terragrunt `dependency` blocks declared in `live/_envcommon/aws/<component>.hcl`.
 - Tags every resource with `Environment`, `ManagedBy`, `Project`, `CostCenter`, `BusinessUnit`, `DataClassification`, `Compliance`, `Repository` (default tags emitted by `live/root.hcl`).
-- Uses IRSA via the shared `modules/aws/workload-identity` module. Trust policies target the EKS cluster's OIDC provider and constrain to a specific SA in a specific namespace.
+- Uses EKS Pod Identity via the shared `modules/aws/workload-identity` module. Trust policies target `pods.eks.amazonaws.com` (not an OIDC provider), and each role is bound to a specific ServiceAccount in a specific namespace through an EKS Pod Identity association.
 
 The per-app `<app>-platform` pattern: when an app's resource shape doesn't generalize into existing multi-tenant components, ship a single-tenant component named `<app>-platform`. Examples: `incident-response-platform`, `slack-knowledge-bot-platform`, `digest-pipeline-platform`. Each provisions the app's bespoke DDB tables, SQS queues, S3 buckets, RDS clusters, KMS keys, plus a consolidated `<app>-app-access` managed policy and the EKS Pod Identity association binding the app's ServiceAccount to the operator-reconciled `<env>-<app>-tenant` role. Bedrock model access is NOT granted here — it comes from the agent-iam tenant baseline, clamped by the operator to `Platform.spec.identity.allowedModels`; the app-access policy reaches the role through `Platform.spec.identity.extraPolicyArns`. Emits `app_access_policy_arn` for that spec entry.
 
@@ -58,4 +58,4 @@ When the app's resource shape is bespoke (custom DDB schema, queues, multiple S3
 - [`docs/`](docs/) — architecture, OIDC setup, drift management
 - [`CLAUDE.md`](CLAUDE.md) — Claude Code session instructions
 - [Platform Reference](https://github.com/nanohype/nanohype/blob/main/docs/platform-reference.md) — the stack-wide view
-- [`eks-agent-platform/AGENTS.md`](https://github.com/nanohype/eks-agent-platform/blob/main/AGENTS.md) — the operator that consumes IRSA outputs from `<app>-platform` components
+- [`eks-agent-platform/AGENTS.md`](https://github.com/nanohype/eks-agent-platform/blob/main/AGENTS.md) — the operator that consumes Pod Identity role outputs from `<app>-platform` components

@@ -12,7 +12,7 @@ This repo provisions and manages the platform's AWS infrastructure: networking, 
 
 | Tool | Version | Install |
 |------|---------|---------|
-| [OpenTofu](https://opentofu.org/docs/intro/install/) | >= 1.10.0 | `brew install opentofu` |
+| [OpenTofu](https://opentofu.org/docs/intro/install/) | >= 1.11.0 | `brew install opentofu` |
 | [Terragrunt](https://terragrunt.gruntwork.io/docs/getting-started/install/) | latest | `brew install terragrunt` |
 | [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) | v2 | `brew install awscli` |
 | [TFLint](https://github.com/terraform-linters/tflint) | latest | `brew install tflint` |
@@ -79,7 +79,7 @@ Terragrunt configuration that wires components to environments.
 
 Shared sub-modules used across components:
 
-- **`aws/workload-identity/`** -- IAM Roles for Service Accounts (IRSA) factory. Creates an IAM role with OIDC trust policy scoped to a specific Kubernetes namespace and service account.
+- **`aws/workload-identity/`** -- EKS Pod Identity role factory. Creates an IAM role trusted by `pods.eks.amazonaws.com` (no OIDC provider) and binds it to a specific Kubernetes namespace and service account through an EKS Pod Identity association.
 
 ### Key Files
 
@@ -89,9 +89,9 @@ Shared sub-modules used across components:
 
 ## Key Concepts
 
-### Workload Identity (IRSA)
+### Workload Identity (EKS Pod Identity)
 
-Pods assume IAM roles via OIDC federation. The `modules/aws/workload-identity/` module scopes each role to a specific namespace and service account.
+Pods assume IAM roles via EKS Pod Identity — the EKS control plane injects credentials for the pod's service account, with no OIDC provider or role-arn annotation involved. The `modules/aws/workload-identity/` module scopes each role to a specific namespace and service account.
 
 ### Multi-Tenant Pattern
 
