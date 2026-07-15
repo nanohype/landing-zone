@@ -102,6 +102,34 @@ jobs:
           tofu init -backend=false -input=false
           tofu validate
 
+  # `tofu test` unit tests for reusable modules. They run at command = plan with
+  # dummy credentials baked into each test's provider block, so no AWS access is
+  # needed — this is a hard gate on module contracts (e.g. the workload-identity
+  # trust policy staying Pod-Identity-only). Auto-discovers every module that has
+  # a tests/ dir so new tests run without a workflow edit.
+  test:
+    name: Module Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.11.5"
+      - name: tofu test
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r module; do
+            found=1
+            echo "::group::tofu test — $module"
+            ( cd "$module" && tofu init -backend=false -input=false && tofu test )
+            echo "::endgroup::"
+          done < <(git ls-files 'modules/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no module tests discovered under modules/**/tests/"
+            exit 1
+          fi
+
   tflint:
     name: TFLint
     runs-on: ubuntu-latest
