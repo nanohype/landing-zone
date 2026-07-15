@@ -1,6 +1,11 @@
 # OpenTofu
 .terraform/
+# .terraform.lock.hcl: track the canonical per-root locks (reproducible, hash-pinned
+# provider resolution) under components/ and fleet/; ignore the derived copies that
+# terragrunt leaves in live/ working dirs and module test dirs.
 .terraform.lock.hcl
+!/components/aws/*/.terraform.lock.hcl
+!/fleet/aws/*/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan
