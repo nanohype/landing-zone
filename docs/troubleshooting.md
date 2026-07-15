@@ -9,7 +9,7 @@ Common errors and their resolutions.
 **Fix:** Always run from the Terragrunt directory:
 
 ```bash
-cd live/<env>/<component>
+cd live/aws/<account>/<region>/<env>/<component>
 terragrunt plan
 ```
 
@@ -101,7 +101,7 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
 **Fix:**
 
 1. Open the component's `variables.tf` and check the `tenants` variable type definition
-2. Compare with your tenant entry in `live/<env>/<component>/terragrunt.hcl`
+2. Compare with your tenant entry in `live/aws/<account>/<region>/<env>/<component>/terragrunt.hcl`
 3. Common issues:
    - Missing a required field that has no default
    - Wrong type (string instead of number, etc.)
@@ -159,7 +159,7 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
 **Fix:**
 
 ```bash
-cd live/<env>/<component>
+cd live/aws/<account>/<region>/<env>/<component>
 terragrunt init -reconfigure
 ```
 

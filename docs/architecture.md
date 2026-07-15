@@ -48,11 +48,20 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
   * = also depends on network (vpc_id, private_subnet_ids)
 
   Standalone (no dependencies):
-  backup, break-glass, service-quotas, cost, dns
+  backup, break-glass, service-quotas, cost, dns, github-oidc
 
   Organization layer (management account only):
   org-identity, org-security, org-compliance
   org-cost, org-networking, org-scp
+
+  Agent-platform subsystem (depends on cluster):
+  agent-iam -> the four *-platform tenant substrates
+  (competitive-intelligence, digest-pipeline,
+   incident-response, slack-knowledge-bot)
+
+  Fleet / portal subsystem (cross-account, hub-side):
+  fleet-hub -> fleet-vend; portal-hub -> portal-spoke,
+  fleet-unwedge; managed-monitoring (AMP/AMG on the hub)
 ```
 
 ### Dependency Details
@@ -72,6 +81,18 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
 | **governance** | cluster | cluster_sg_id, oidc_provider_arn, oidc_issuer |
 | **observability** | cluster | cluster_name |
 | **secrets** | cluster | oidc_provider_arn, oidc_issuer |
+| **agent-iam** | cluster | oidc_provider_arn, oidc_issuer, operator_permissions_boundary_arn (optional) |
+| **competitive-intelligence-platform** | network, cluster, agent-iam | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name (+ resolves the operator-minted tenant role) |
+| **digest-pipeline-platform** | network, cluster, agent-iam | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name, ses_sending_domain |
+| **incident-response-platform** | cluster, agent-iam | cluster_name (no VPC — no in-VPC data plane) |
+| **slack-knowledge-bot-platform** | network, cluster, agent-iam | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name |
+| **fleet-hub** | cluster | oidc_provider_arn, oidc_issuer |
+| **fleet-vend** | fleet-hub | hub_role_arn, external_id |
+| **fleet-unwedge** | portal-hub | portal_role_arn, external_id |
+| **portal-hub** | cluster | oidc_provider_arn, oidc_issuer, state_bucket_name |
+| **portal-spoke** | portal-hub | portal_hub_role_arn, external_id |
+| **managed-monitoring** | cluster | cluster_name |
+| **github-oidc** | -- | -- |
 | **backup** | -- | -- |
 | **break-glass** | -- | -- |
 | **service-quotas** | -- | -- |
@@ -142,6 +163,45 @@ Seven multi-tenant components, each accepting a `var.tenants` map:
 | **service-quotas** | CloudWatch alarms for service quota utilization | platform |
 | **cost** | AWS Budgets alerts, Cost Anomaly Detection | finops |
 | **dns** | Route53 zones, subdomain delegation, ACM certificates | platform |
+| **github-oidc** | GitHub Actions OIDC provider + repo-scoped (`repo:<org>/<repo>:*`) deploy role — no long-lived keys | platform |
+| **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed on the hub. | *(required input)* |
+
+### Agent-Platform Layer
+
+The IAM + storage substrate the `eks-agent-platform` operator runs on, plus the
+per-app tenant substrates it binds. `agent-iam` mints the operator role and the
+tenant permissions boundary; each `*-platform` component provisions one tenant's
+AWS resources and attaches an app-access policy to the operator-minted tenant
+role via **EKS Pod Identity** (not raw IRSA).
+
+| Component | What it provisions | Team |
+|-----------|--------------------|------|
+| **agent-iam** | Operator IRSA role (mints tenant roles under `/eks-agent-platform/tenants/`, boundary-gated), tenant permissions boundary + baseline policy, model-artifacts + eval-reports S3 buckets, operator SSM parameters | platform |
+| **competitive-intelligence-platform** | Aurora Serverless v2 (Postgres + pgvector), app-secrets, app-access policy bound via Pod Identity | protohype |
+| **digest-pipeline-platform** | Aurora Serverless v2, voice-baseline + raw-aggregations S3 buckets, SESv2 sending identity + config set, app-access policy | protohype |
+| **incident-response-platform** | DynamoDB (incidents/audit/identity-cache), SQS FIFO queues + DLQs, S3 audit archive, EventBridge Scheduler group + role, app-access policy | protohype |
+| **slack-knowledge-bot-platform** | KMS (token envelope), DynamoDB (tokens/audit/identity-cache), ElastiCache Redis, Aurora Serverless v2 (pgvector), SQS FIFO + DLQ, S3 audit archive, app-access policy | protohype |
+
+### Fleet & Portal Layer
+
+Cross-account, hub-side subsystems for vending and reaching fleet clusters. Roles
+are path-scoped to `/eks-fleet/` and capped by permissions boundaries; the vend
+role's `CreateRole` is gated on the boundary condition (see the [Threat Model](threat-model.md), §5).
+
+| Component | What it provisions | Team |
+|-----------|--------------------|------|
+| **fleet-hub** | Hub-side `eks-fleet-crossplane` IRSA role + the S3 bucket holding vended clusters' OpenTofu state; publishes `hub_permissions_boundary_arn` to SSM | platform |
+| **fleet-vend** | Cross-account role the hub assumes to provision a spoke cluster; permissions boundary + path-scoped, `iam:PermissionsBoundary`-conditioned role creation | platform |
+| **fleet-unwedge** | Cross-account, delete-only break-glass role (tag-conditioned to `ProvisionedBy=eks-fleet`) that portal assumes to tear down a wedged vend | platform |
+| **portal-hub** | Portal worker IRSA role (assumes portal-spoke roles cross-account) + portal OpenTofu state bucket + boundary | platform |
+| **portal-spoke** | Per-account read-only role (`eks:Describe*/List*`) the portal worker assumes from the hub, ExternalId-gated | platform |
+
+> **Status:** `fleet-hub` and `managed-monitoring` are wired into the
+> `live/aws/fleet/.../hub/` tree. `fleet-vend` is the spoke-side role provisioned
+> per-account by the fleet factory, so it is intentionally not in the static
+> `live/` tree. `portal-hub`, `portal-spoke`, and `fleet-unwedge` (the "portal
+> triangle") are authored and CI-validated but not yet wired into any `live/`
+> environment — they have no live inputs supplied yet.
 
 ## Environment Differentiation
 
@@ -218,9 +278,11 @@ Based on `team` tags set in `_envcommon/aws/` files:
 
 | Team | Components |
 |------|-----------|
-| **platform** | network, cluster, cluster-addons, cluster-bootstrap, gateway, dns, service-quotas, all org-* |
+| **platform** | network, cluster, cluster-addons, cluster-bootstrap, gateway, dns, service-quotas, github-oidc, agent-iam, fleet-hub, fleet-vend, fleet-unwedge, portal-hub, portal-spoke, all org-* |
 | **sre** | observability, backup |
 | **security** | governance, secrets, break-glass |
 | **data-platform** | druid, pipeline |
 | **ml-platform** | llm, mlops, rag |
+| **protohype** | competitive-intelligence-platform, digest-pipeline-platform, incident-response-platform, slack-knowledge-bot-platform |
 | **finops** | cost |
+| *(required input)* | managed-monitoring — no `team` default; the caller must supply one |
