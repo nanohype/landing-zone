@@ -1,3 +1,20 @@
+data "aws_partition" "current" {}
+
+locals {
+  # Expand the tenant's model allowlist into the ARNs a Bedrock invoke grant
+  # needs — the foundation-model ARN (AWS-owned, any region) plus the account's
+  # cross-region inference profiles that route to it (their IDs carry a
+  # us./eu./apac. region-set prefix, hence the leading wildcard). Invoking via an
+  # inference profile authorizes against both the profile and the underlying
+  # model, so a usable allowlist grants both. Empty allowlist => ["*"].
+  bedrock_invoke_resources = length(var.tenant_config.bedrock_allowed_model_ids) == 0 ? ["*"] : flatten([
+    for id in var.tenant_config.bedrock_allowed_model_ids : [
+      "arn:${data.aws_partition.current.partition}:bedrock:*::foundation-model/${id}",
+      "arn:${data.aws_partition.current.partition}:bedrock:*:${var.account_id}:inference-profile/*${id}",
+    ]
+  ])
+}
+
 module "bedrock_api_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
@@ -13,7 +30,7 @@ module "bedrock_api_irsa" {
         "bedrock:InvokeModel",
         "bedrock:InvokeModelWithResponseStream",
       ]
-      Resource = ["*"]
+      Resource = local.bedrock_invoke_resources
     },
     {
       Effect = "Allow"

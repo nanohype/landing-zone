@@ -7,6 +7,7 @@ output "tenants" {
       document_bucket           = tenant.document_bucket
       conversations_table       = tenant.conversations_table
       irsa_arn                  = tenant.irsa_arn
+      bedrock_api_policy_json   = tenant.bedrock_api_policy_json
     }
   }
 }
