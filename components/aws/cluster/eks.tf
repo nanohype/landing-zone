@@ -45,9 +45,18 @@ module "eks" {
 
   # EKS managed add-ons (AWS-managed lifecycle)
   # vpc-cni must be installed before node groups via before_compute
+  #
+  # Versions are PINNED via var.eks_addon_versions (defaulted to the EKS-default
+  # versions for the default cluster_version) rather than most_recent = true.
+  # most_recent silently rolls each addon to the newest build on every apply, so
+  # two applies weeks apart produce different clusters and an unvetted addon
+  # release lands with no review. Pinning makes the addon set reproducible and
+  # turns upgrades into deliberate, reviewable version bumps. An addon left out
+  # of the map falls back to most_recent, so adding one never hard-fails.
   addons = {
     vpc-cni = {
-      most_recent                 = true
+      addon_version               = lookup(var.eks_addon_versions, "vpc-cni", null)
+      most_recent                 = lookup(var.eks_addon_versions, "vpc-cni", null) == null
       before_compute              = true
       resolve_conflicts_on_create = "OVERWRITE"
       configuration_values = jsonencode({
@@ -55,15 +64,18 @@ module "eks" {
       })
     }
     coredns = {
-      most_recent                 = true
+      addon_version               = lookup(var.eks_addon_versions, "coredns", null)
+      most_recent                 = lookup(var.eks_addon_versions, "coredns", null) == null
       resolve_conflicts_on_create = "OVERWRITE"
     }
     kube-proxy = {
-      most_recent                 = true
+      addon_version               = lookup(var.eks_addon_versions, "kube-proxy", null)
+      most_recent                 = lookup(var.eks_addon_versions, "kube-proxy", null) == null
       resolve_conflicts_on_create = "OVERWRITE"
     }
     aws-ebs-csi-driver = {
-      most_recent                 = true
+      addon_version               = lookup(var.eks_addon_versions, "aws-ebs-csi-driver", null)
+      most_recent                 = lookup(var.eks_addon_versions, "aws-ebs-csi-driver", null) == null
       resolve_conflicts_on_create = "OVERWRITE"
       # Credentials come from the ebs_csi_irsa Pod Identity association
       # (pods.eks.amazonaws.com trust) + the eks-pod-identity-agent addon, so the
@@ -72,7 +84,8 @@ module "eks" {
       # controller crashloops on.
     }
     eks-pod-identity-agent = {
-      most_recent                 = true
+      addon_version               = lookup(var.eks_addon_versions, "eks-pod-identity-agent", null)
+      most_recent                 = lookup(var.eks_addon_versions, "eks-pod-identity-agent", null) == null
       resolve_conflicts_on_create = "OVERWRITE"
     }
   }

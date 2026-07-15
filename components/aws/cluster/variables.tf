@@ -1,6 +1,15 @@
 variable "environment" {
   description = "Environment name (dev, staging, production)"
   type        = string
+
+  # Format contract, not a closed enum: the platform legitimately uses dev, staging,
+  # production, prod, hub, org, management, and per-workload derivations, so pinning a
+  # fixed set would reject valid environments. This still catches empty/uppercase/typo'd
+  # values before they flow into resource names, tags, and SSM paths.
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]*$", var.environment))
+    error_message = "environment must be lowercase, start with a letter, and contain only letters, digits, and hyphens."
+  }
 }
 
 variable "region" {
@@ -18,6 +27,35 @@ variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
   default     = "1.36"
+
+  # EKS takes the control-plane version as major.minor only ("1.36", not "1.36.2"
+  # or "v1.36"). Reject the common malformed shapes at plan time rather than
+  # letting the module surface a late, opaque API error.
+  validation {
+    condition     = can(regex("^[0-9]+\\.[0-9]+$", var.cluster_version))
+    error_message = "cluster_version must be Kubernetes major.minor, e.g. \"1.36\" (no patch component, no leading \"v\")."
+  }
+}
+
+variable "eks_addon_versions" {
+  description = <<-EOT
+    Pinned EKS managed add-on versions, keyed by addon name (vpc-cni, coredns,
+    kube-proxy, aws-ebs-csi-driver, eks-pod-identity-agent). Pinning makes the
+    addon set reproducible instead of rolling to most_recent on every apply. The
+    defaults are the EKS-default versions for the default cluster_version (1.36);
+    RE-PIN THEM WHEN cluster_version CHANGES. Source current values with:
+      aws eks describe-addon-versions --kubernetes-version <ver> \
+        --query 'addons[].{n:addonName,v:addonVersions[?compatibilities[?defaultVersion==`true`]].addonVersion|[0]}'
+    An addon omitted from this map falls back to most_recent for that addon only.
+  EOT
+  type        = map(string)
+  default = {
+    vpc-cni                = "v1.21.2-eksbuild.2"
+    coredns                = "v1.14.2-eksbuild.4"
+    kube-proxy             = "v1.36.0-eksbuild.7"
+    aws-ebs-csi-driver     = "v1.62.0-eksbuild.1"
+    eks-pod-identity-agent = "v1.3.10-eksbuild.3"
+  }
 }
 
 # Network inputs (from network component)
