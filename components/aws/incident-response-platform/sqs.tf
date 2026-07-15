@@ -25,7 +25,7 @@ resource "aws_sqs_queue" "incident_events_dlq" {
   message_retention_seconds   = var.sqs_message_retention_seconds
   sqs_managed_sse_enabled     = true
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_sqs_queue" "incident_events" {
@@ -41,7 +41,7 @@ resource "aws_sqs_queue" "incident_events" {
     maxReceiveCount     = var.sqs_max_receive_count
   })
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_sqs_queue" "nudge_events_dlq" {
@@ -51,7 +51,7 @@ resource "aws_sqs_queue" "nudge_events_dlq" {
   message_retention_seconds   = var.sqs_message_retention_seconds
   sqs_managed_sse_enabled     = true
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_sqs_queue" "nudge_events" {
@@ -67,7 +67,7 @@ resource "aws_sqs_queue" "nudge_events" {
     maxReceiveCount     = var.sqs_max_receive_count
   })
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_sqs_queue" "sla_check_dlq" {
@@ -77,7 +77,7 @@ resource "aws_sqs_queue" "sla_check_dlq" {
   message_retention_seconds   = var.sqs_message_retention_seconds
   sqs_managed_sse_enabled     = true
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_sqs_queue" "sla_check" {
@@ -93,5 +93,5 @@ resource "aws_sqs_queue" "sla_check" {
     maxReceiveCount     = var.sqs_max_receive_count
   })
 
-  tags = local.common_tags
+  tags = local.tags
 }

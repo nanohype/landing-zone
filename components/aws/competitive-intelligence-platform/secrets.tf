@@ -16,7 +16,7 @@ resource "aws_secretsmanager_secret" "app_secrets" {
   name        = "competitive-intelligence/${var.environment}/app-secrets"
   description = "Application secrets for competitive-intelligence ${var.environment} (Slack + optional LLM API credentials)."
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_secretsmanager_secret_version" "app_secrets" {

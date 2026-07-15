@@ -53,7 +53,7 @@ resource "aws_iam_policy" "app_access" {
     ]
   })
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 # The operator-reconciled tenant role, minted from the Platform CR. Resolved
@@ -72,5 +72,5 @@ resource "aws_eks_pod_identity_association" "app" {
   service_account = var.service_account
   role_arn        = data.aws_iam_role.tenant.arn
 
-  tags = local.common_tags
+  tags = local.tags
 }

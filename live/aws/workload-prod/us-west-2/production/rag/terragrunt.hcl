@@ -10,9 +10,9 @@ include "envcommon" {
 inputs = {
   tenants = {
     default = {
-      deletion_protection        = true
+      deletion_protection         = true
       opensearch_standby_replicas = true
-      conversation_pitr          = true
+      conversation_pitr           = true
     }
   }
 }

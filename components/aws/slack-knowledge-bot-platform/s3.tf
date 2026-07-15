@@ -10,7 +10,7 @@
 resource "aws_s3_bucket" "audit" {
   bucket = "${local.prefix}-audit"
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_s3_bucket_versioning" "audit" {

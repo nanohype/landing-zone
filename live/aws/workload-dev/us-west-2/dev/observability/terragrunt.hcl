@@ -8,8 +8,8 @@ include "envcommon" {
 }
 
 inputs = {
-  enable_cluster_alarms  = false
-  enable_dashboard       = true
-  alert_email_endpoints  = []
-  log_retention_days     = 7
+  enable_cluster_alarms = false
+  enable_dashboard      = true
+  alert_email_endpoints = []
+  log_retention_days    = 7
 }

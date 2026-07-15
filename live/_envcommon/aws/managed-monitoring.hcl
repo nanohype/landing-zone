@@ -13,13 +13,13 @@ locals {
 dependency "cluster" {
   config_path = "../cluster"
   mock_outputs = {
-    cluster_name      = "mock-eks"
+    cluster_name = "mock-eks"
   }
 }
 
 inputs = {
-  environment       = local.environment
-  region            = local.region
-  cluster_name      = dependency.cluster.outputs.cluster_name
-  team              = "platform"
+  environment  = local.environment
+  region       = local.region
+  cluster_name = dependency.cluster.outputs.cluster_name
+  team         = "platform"
 }

@@ -13,7 +13,7 @@
 resource "aws_scheduler_schedule_group" "nudges" {
   name = "${local.prefix}-nudges"
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_iam_role" "schedule_role" {
@@ -38,7 +38,7 @@ resource "aws_iam_role" "schedule_role" {
     }]
   })
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_iam_role_policy" "schedule_role_sqs_send" {

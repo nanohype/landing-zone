@@ -12,7 +12,7 @@ resource "aws_kms_key" "token_store" {
   deletion_window_in_days = 30
   enable_key_rotation     = true
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_kms_alias" "token_store" {

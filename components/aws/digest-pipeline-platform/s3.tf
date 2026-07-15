@@ -16,7 +16,7 @@
 resource "aws_s3_bucket" "voice_baseline" {
   bucket = "${local.prefix}-voice-baseline"
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_s3_bucket_versioning" "voice_baseline" {
@@ -64,7 +64,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "voice_baseline" {
 resource "aws_s3_bucket" "raw_aggregations" {
   bucket = "${local.prefix}-raw-aggregations"
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 resource "aws_s3_bucket_versioning" "raw_aggregations" {

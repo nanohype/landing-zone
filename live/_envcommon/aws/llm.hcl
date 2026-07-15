@@ -14,7 +14,7 @@ dependency "cluster" {
   config_path = "../cluster"
   mock_outputs = {
     cluster_security_group_id = "sg-mock"
-    cluster_name = "mock-eks"
+    cluster_name              = "mock-eks"
   }
 }
 
@@ -22,6 +22,6 @@ inputs = {
   vpc_id             = dependency.network.outputs.vpc_id
   private_subnet_ids = dependency.network.outputs.private_subnet_ids
   cluster_sg_id      = dependency.cluster.outputs.cluster_security_group_id
-  cluster_name = dependency.cluster.outputs.cluster_name
+  cluster_name       = dependency.cluster.outputs.cluster_name
   team               = "ml-platform"
 }
