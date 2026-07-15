@@ -37,6 +37,20 @@ locals {
 
   ssm_prefix = "/eks-agent-platform/${var.environment}/agent-iam"
 
+  # Expand the model allowlist into the resource ARNs a Bedrock invoke grant
+  # needs: the foundation-model ARN (AWS-owned, so an empty account segment; any
+  # region) plus the account's cross-region inference profiles that route to it
+  # (their IDs carry a us./eu./apac. region-set prefix, hence the leading
+  # wildcard). Invoking through an inference profile authorizes against BOTH the
+  # profile and the underlying model, so a usable allowlist must grant both forms.
+  # Empty allowlist => ["*"], the explicit any-model escape hatch.
+  bedrock_baseline_invoke_resources = length(var.bedrock_allowed_model_ids) == 0 ? ["*"] : flatten([
+    for id in var.bedrock_allowed_model_ids : [
+      "arn:${local.partition}:bedrock:*::foundation-model/${id}",
+      "arn:${local.partition}:bedrock:*:${local.account_id}:inference-profile/*${id}",
+    ]
+  ])
+
   tags = merge(var.tags, {
     Component = "agent-iam"
     Team      = var.team
@@ -186,9 +200,18 @@ resource "aws_iam_policy" "tenant_baseline" {
           "bedrock:InvokeModelWithResponseStream",
           "bedrock:Converse",
           "bedrock:ConverseStream",
-          "bedrock:ApplyGuardrail",
         ]
-        Resource = "*"
+        Resource = local.bedrock_baseline_invoke_resources
+      },
+      {
+        # ApplyGuardrail acts on a guardrail resource, not a model ARN, so it
+        # cannot ride on the model-scoped Resource above. Guardrails are minted
+        # out-of-band (operator / separate component); scope to this account's
+        # guardrails rather than "*".
+        Sid      = "BedrockGuardrail"
+        Effect   = "Allow"
+        Action   = ["bedrock:ApplyGuardrail"]
+        Resource = "arn:${local.partition}:bedrock:*:${local.account_id}:guardrail/*"
       },
       {
         Sid    = "Telemetry"

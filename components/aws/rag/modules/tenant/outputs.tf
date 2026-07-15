@@ -22,3 +22,8 @@ output "irsa_arn" {
   description = "IAM role ARN for the bedrock-api IRSA"
   value       = module.bedrock_api_irsa.iam_role_arn
 }
+
+output "bedrock_api_policy_json" {
+  description = "Rendered inline policy JSON for the bedrock-api role — surfaces the tenant's effective Bedrock model scope."
+  value       = module.bedrock_api_irsa.role_policy_json
+}

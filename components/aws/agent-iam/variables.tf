@@ -33,6 +33,31 @@ variable "operator_permissions_boundary_arn" {
   default     = ""
 }
 
+variable "bedrock_allowed_model_ids" {
+  description = <<-EOT
+    Foundation-model IDs (IAM resource globs) the tenant BASELINE grant may invoke.
+    Each entry expands to the model's foundation-model ARN (AWS-owned, any region)
+    plus the account's cross-region inference profiles that route to it, so
+    bedrock:Invoke*/Converse* is scoped to exactly these models instead of
+    Resource="*". Entries are model families, not version-pinned IDs (e.g.
+    "anthropic.*"), so a new revision inside an allowed family stays covered without
+    a policy change. Empty list = grant every model (Resource="*") — the explicit,
+    auditable escape hatch. This scopes the ATTACHED GRANT only; the tenant
+    permissions boundary stays a broad ceiling by design (the privilege that matters
+    is the grant, not the cap).
+
+    Scope notes: this is the fleet-wide baseline, so the default deliberately covers
+    only Anthropic + Nova generation — a tenant needing another provider (Cohere
+    Command, Llama, Mistral, AI21) gets it through its per-tenant app-access policy,
+    not by widening this shared default. The expansion covers direct foundation
+    models and system-defined cross-region inference profiles; application inference
+    profiles, provisioned throughput, and custom/imported models are NOT matched —
+    add their ARNs explicitly (or use the empty-list escape hatch) if a fork uses them.
+  EOT
+  type        = list(string)
+  default     = ["anthropic.*", "amazon.nova-*"]
+}
+
 variable "team" {
   description = "Owning team tag"
   type        = string

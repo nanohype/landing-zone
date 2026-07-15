@@ -44,6 +44,18 @@ variable "tenants" {
     document_archive_expiry_days = optional(number, 365)
     conversation_ttl_enabled     = optional(bool, true)
     conversation_pitr            = optional(bool, true)
+
+    # Foundation-model families (IAM resource globs) this tenant's bedrock-api
+    # role may invoke. Each expands to the model's foundation-model ARN plus the
+    # account's cross-region inference profiles, scoping bedrock:InvokeModel to
+    # these models instead of Resource="*". Default covers Claude generation +
+    # the Bedrock embedding providers (Titan, Cohere) a RAG tenant retrieves
+    # with. Empty list = allow every model ("*"). Covers direct foundation models +
+    # system-defined cross-region inference profiles; application inference profiles,
+    # provisioned throughput, and custom/imported models are not matched (add their
+    # ARNs or use the escape hatch). See the agent-iam bedrock_allowed_model_ids
+    # variable for the shared rationale.
+    bedrock_allowed_model_ids = optional(list(string), ["anthropic.*", "amazon.titan-embed-*", "cohere.embed-*"])
   }))
 }
 

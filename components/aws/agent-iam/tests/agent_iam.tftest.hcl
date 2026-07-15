@@ -197,3 +197,78 @@ run "artifact_buckets_are_locked_down" {
     error_message = "artifact + eval-report buckets must have versioning Enabled (evidence must survive overwrite)"
   }
 }
+
+# The tenant baseline is the real Bedrock GRANT attached to every tenant role (the
+# permissions boundary above is only the ceiling). It must scope model invocation
+# to the allowlisted foundation-model ARNs + their inference profiles — never
+# Resource="*" — and it must NOT smuggle the guardrail action onto that
+# model-scoped resource (guardrails are a different resource type).
+run "tenant_baseline_bedrock_is_model_scoped" {
+  command = plan
+
+  # BedrockInvoke: Resource is the expanded allowlist (a list carrying the
+  # anthropic.* foundation-model ARN), and the "*" wildcard is absent. can(tolist)
+  # also fails the assertion if Resource regresses to the bare "*" string.
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      s if try(s.Sid, "") == "BedrockInvoke"
+      && can(tolist(s.Resource))
+      && contains(tolist(s.Resource), "arn:aws:bedrock:*::foundation-model/anthropic.*")
+      && contains(tolist(s.Resource), "arn:aws:bedrock:*:123456789012:inference-profile/*anthropic.*")
+      && !contains(tolist(s.Resource), "*")
+    ]) == 1
+    error_message = "BedrockInvoke must scope Resource to the allowlisted foundation-model + inference-profile ARNs (incl. anthropic.*), never \"*\""
+  }
+
+  # The invoke/converse actions stay on the scoped statement...
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      contains(s.Action, "bedrock:InvokeModel") && contains(s.Action, "bedrock:Converse")
+      if try(s.Sid, "") == "BedrockInvoke"
+    ])
+    error_message = "BedrockInvoke must still carry the invoke + converse actions"
+  }
+
+  # ...but ApplyGuardrail must NOT ride on the model-scoped invoke statement.
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      !contains(s.Action, "bedrock:ApplyGuardrail")
+      if try(s.Sid, "") == "BedrockInvoke"
+    ])
+    error_message = "ApplyGuardrail must not ride on the model-scoped BedrockInvoke statement"
+  }
+
+  # Guardrail is its own statement, scoped to in-account guardrail ARNs, not "*".
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      s if try(s.Sid, "") == "BedrockGuardrail"
+      && contains(s.Action, "bedrock:ApplyGuardrail")
+      && try(s.Resource, "") == "arn:aws:bedrock:*:123456789012:guardrail/*"
+    ]) == 1
+    error_message = "ApplyGuardrail must be its own statement scoped to guardrail/* in-account"
+  }
+}
+
+# The scoping is variable-driven, not hardcoded: an empty allowlist is the
+# documented escape hatch back to Resource=["*"]. Proving both directions rules out
+# a coincidentally-correct default.
+run "tenant_baseline_bedrock_empty_allowlist_is_wildcard" {
+  command = plan
+
+  variables {
+    bedrock_allowed_model_ids = []
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      s if try(s.Sid, "") == "BedrockInvoke"
+      && length(tolist(s.Resource)) == 1 && contains(tolist(s.Resource), "*")
+    ]) == 1
+    error_message = "an empty allowlist must fall back to exactly one BedrockInvoke statement with Resource=[\"*\"] (the explicit escape hatch)"
+  }
+}
