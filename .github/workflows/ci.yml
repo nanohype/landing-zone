@@ -102,13 +102,14 @@ jobs:
           tofu init -backend=false -input=false
           tofu validate
 
-  # `tofu test` unit tests for reusable modules. They run at command = plan with
-  # dummy credentials baked into each test's provider block, so no AWS access is
-  # needed — this is a hard gate on module contracts (e.g. the workload-identity
-  # trust policy staying Pod-Identity-only). Auto-discovers every module that has
-  # a tests/ dir so new tests run without a workflow edit.
+  # `tofu test` unit tests. They run at command = plan against dummy/mocked
+  # providers (no AWS access), so this is a hard gate on security contracts —
+  # the workload-identity trust policy staying Pod-Identity-only, and the
+  # agent-iam operator's tenant-role writes staying boundary-gated. Auto-discovers
+  # every module AND component that has a tests/ dir so new tests run without a
+  # workflow edit.
   test:
-    name: Module Tests
+    name: Unit Tests (tofu test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -119,14 +120,14 @@ jobs:
         run: |
           set -euo pipefail
           found=0
-          while IFS= read -r module; do
+          while IFS= read -r dir; do
             found=1
-            echo "::group::tofu test — $module"
-            ( cd "$module" && tofu init -backend=false -input=false && tofu test )
+            echo "::group::tofu test — $dir"
+            ( cd "$dir" && tofu init -backend=false -input=false && tofu test )
             echo "::endgroup::"
-          done < <(git ls-files 'modules/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
+          done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
           if [ "$found" -eq 0 ]; then
-            echo "::error::no module tests discovered under modules/**/tests/"
+            echo "::error::no unit tests discovered under modules/**/tests/ or components/**/tests/"
             exit 1
           fi
 
