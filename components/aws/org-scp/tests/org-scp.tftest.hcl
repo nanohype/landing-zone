@@ -76,7 +76,7 @@ variables {
           {
             Sid       = "DenyOutsideAllowedRegions"
             Effect    = "Deny"
-            NotAction  = ["iam:*", "organizations:*", "cloudtrail:*", "sts:*"]
+            NotAction = ["iam:*", "organizations:*", "cloudtrail:*", "sts:*"]
             Resource  = "*"
             Condition = {
               StringNotEquals = {

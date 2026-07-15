@@ -24,8 +24,8 @@ provider "aws" {
   secret_key                  = "test"
   skip_credentials_validation = true
   skip_requesting_account_id  = true
-  skip_metadata_api_check      = true
-  skip_region_validation       = true
+  skip_metadata_api_check     = true
+  skip_region_validation      = true
 }
 
 # API-backed reads, replaced so no STS/IAM call happens at plan. These are inputs
@@ -69,7 +69,7 @@ run "trust_sub_scoped_to_configured_repos" {
       for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
       s if toset(flatten([
         try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
-      ])) == toset([
+        ])) == toset([
         "repo:nanohype/landing-zone:*",
         "repo:nanohype/rackctl:*",
       ])
