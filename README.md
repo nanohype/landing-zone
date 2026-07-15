@@ -126,6 +126,8 @@ Four GitHub Actions workflows, all authenticating via AWS OIDC (`AWS_ROLE_ARN` r
 | [Onboarding Guide](docs/onboarding.md) | New engineer setup, tool installation, codebase walkthrough |
 | [First-time AWS Deploy](docs/first-deploy-aws.md) | Brand-new account → running EKS cluster (Identity Center, quotas, deploy order) |
 | [Architecture](docs/architecture.md) | Design rationale, dependency graph, layer breakdown, security model |
+| [Threat Model](docs/threat-model.md) | STRIDE analysis per trust boundary, mitigations, residual risk |
+| [Inputs Catalog](docs/inputs.md) | Every value an operator supplies (account/region/env locals, CI vars) + new-env checklist |
 | [Operations](docs/operations.md) | Day-to-day procedures, CI/CD details, tenant management |
 | [Runbooks](docs/runbooks.md) | Step-by-step procedures for common operational scenarios |
 | [Troubleshooting](docs/troubleshooting.md) | Common errors and their resolutions |
