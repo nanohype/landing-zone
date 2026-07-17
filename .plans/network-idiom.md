@@ -16,7 +16,7 @@ comments, or docs (greenfield doctrine).
 | 1 | network + cluster mode-aware; create IPAM/TGW levers; shared endpoint module; adopt preflight | ✅ |
 | 2 | IP + auth hygiene on cluster addon config | ✅ |
 | 1-fix | adopt preflight precision + validation gaps + IPAM day-2 replan bug (Fable review) | ✅ |
-| 3 | `shared-network` owner component + RAM share + contract | ⬜ |
+| 3 | `shared-network` owner component + RAM share + contract | ✅ |
 | 3b | `egress-network` owner component (central-egress VPC + TGW static default route) | ⬜ |
 | 4 | cluster-bootstrap publishes network_mode + adopt subnet IDs (public + private) | ⬜ |
 
@@ -329,6 +329,63 @@ cluster or node-group replacement).
 ---
 
 ## Target 3 — `shared-network` owner component + RAM share + contract (L)
+
+**Shipped.** New `components/aws/shared-network` (main/endpoints/tgw/subnet_tags/ram/ssm/
+checks/variables/outputs/versions + smoke-test + README + tofu test suite), envcommon
+`live/_envcommon/aws/shared-network.hcl`, and a new `network`-role account live tree
+(`live/aws/network/{account.hcl, us-west-2/region.hcl,
+us-west-2/{development,staging,production}/{env.hcl, shared-network/terragrunt.hcl}}`).
+Resolution decisions worth recording:
+- **IPAM CIDR sourcing = discover by tag, with an explicit override.** The org env sub-pool
+  is not cross-account readable via SSM/state, so `shared-network` discovers it via
+  `data.aws_vpc_ipam_pools` filtered on `tag:Name = org-ipam-<environment>` (the tag
+  `org-networking` stamps) and `one()` (fails clearly on 0 or >1 match). `var.ipam_pool_id`
+  (default `""`) is the explicit override / escape hatch. No terragrunt `dependency` block —
+  a cross-account state read would be architecturally wrong and would trip the mock-outputs
+  cross-check; discovery keeps the live leaf self-contained.
+- **IPAM pin copied exactly from `network`** — `terraform_data.ipam_cidr_pin` (no `count`;
+  IPAM is always on here), `input = data.aws_vpc_ipam_preview_next_cidr.this.cidr` under
+  `lifecycle { ignore_changes = [input] }`; subnets + the endpoint-SG 443 CIDR carve off
+  `.output`. Same known-after-apply-on-first-plan trade-off. Regression-covered by
+  `ipam_pin_apply` + `ipam_pin_holds_day2`.
+- **Role tags via the VPC module, not `aws_ec2_tag`.** `subnet_tags.tf` defines the role-tag
+  locals (public `kubernetes.io/role/elb`, private `kubernetes.io/role/internal-elb`) + the
+  "deliberately NO `kubernetes.io/cluster/*`" rationale; main.tf passes them as the module's
+  `public/private_subnet_tags`. An `aws_ec2_tag` `for_each` over module-created subnet IDs
+  can't resolve its keys at plan (IDs known-after-apply), so the module-tag path is the only
+  plan-safe one for owner-built subnets — unlike the `cluster` component, which `aws_ec2_tag`s
+  subnets it receives as *inputs* (plan-known).
+- **RAM subnet associations use `count`, not `for_each`.** Subnet ARNs are known-after-apply,
+  so `for_each` over them fails at plan; `count = length(shared_subnet_arns)` (list length is
+  plan-known — one subnet per AZ per tier) with a `count.index` into the ARN list plans
+  cleanly. Principal associations `for_each` over `consumer_account_ids` (plan-known var).
+  Whole share gated on `length(consumer_account_ids) > 0`, mirroring org-networking.
+- **Contract = tofu `check` blocks, gated hard by the test suite.** `checks.tf`:
+  `endpoint_set_complete` (every required service key present in the endpoint module output),
+  `consumers_declared` (non-empty `consumer_account_ids`), `role_tags_no_cluster_binding`.
+  `check` blocks only *warn* at real plan/apply (non-blocking by design), but a failing check
+  **fails a `tofu test` run** unless listed in `expect_failures` — so the two violation
+  fixtures (`enable_vpc_endpoints=false`, empty consumers) gate the contract in CI.
+- **mock_provider gotcha for RAM tests:** the RAM association resources validate
+  `resource_arn` / `resource_share_arn` as ARNs at plan, so the test needs
+  `mock_resource "aws_ram_resource_share"` and `mock_resource "aws_subnet"` with ARN-shaped
+  `arn` defaults; the `aws_vpc_ipam_pools` discovery mock needs the FULL pool object shape
+  (every attribute), not a partial `{ id = ... }`. Recorded for Target 3b's mock tests.
+- **Committed placeholder account IDs:** `network` account.hcl uses `444444444444`; each
+  env's `consumer_account_ids` points at the matching workload account's existing placeholder
+  (dev `111111111111`, staging `222222222222`, production `333333333333`). All repeated-digit,
+  clearly-fake; the README uses `111111111111`/`222222222222` as canonical placeholders.
+
+> **Note from Target 3 (for Target 3b):** the `network`-role account scaffolding now exists —
+> `live/aws/network/account.hcl`, `us-west-2/region.hcl`, and per-env `env.hcl` under
+> `us-west-2/{development,staging,production}/`. Target 3b's `egress-network` live leaves drop
+> straight into `live/aws/network/us-west-2/{env}/egress-network/terragrunt.hcl` (same account
+> role — the central network team runs both the shared VPCs and the egress hub); no new
+> account.hcl/region.hcl/env.hcl needed. Also: `shared-network` already ships the spoke-side
+> of centralized egress (a `0.0.0.0/0` → TGW route on its private route tables under
+> `centralized_egress=true`, in `tgw.tf`); Target 3b builds the *receiving* end (the central
+> egress VPC + the static `0.0.0.0/0` TGW route in the TGW default route table) — the two
+> compose but neither creates the other's resources, exactly as the plan scoped.
 
 **Depends on:** Target 1 (consumes the extracted shared endpoint module).
 
