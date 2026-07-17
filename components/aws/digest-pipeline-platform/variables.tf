@@ -40,7 +40,7 @@ variable "cluster_name" {
 variable "namespace" {
   description = "Kubernetes namespace where the digest-pipeline Platform tenant runs."
   type        = string
-  default     = "tenants-protohype"
+  default     = "tenants-digest-pipeline"
 }
 
 variable "service_account" {
@@ -91,7 +91,7 @@ variable "raw_aggregations_lifecycle_days" {
 }
 
 variable "team" {
-  description = "Owning team for this component (drives the Team tag + ArgoCD AppProject scope)."
+  description = "Owning team for this component (drives the Team tag)."
   type        = string
   default     = "growth"
 }

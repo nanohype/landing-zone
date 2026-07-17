@@ -40,7 +40,7 @@ variable "cluster_name" {
 variable "namespace" {
   description = "Kubernetes namespace where the competitive-intelligence Platform tenant runs. Matches the Platform CR's metadata.namespace."
   type        = string
-  default     = "tenants-protohype"
+  default     = "tenants-competitive-intelligence"
 }
 
 variable "service_account" {
@@ -74,7 +74,7 @@ variable "rds_backup_retention_days" {
 }
 
 variable "team" {
-  description = "Owning team for this component (drives the Team tag + ArgoCD AppProject scope)."
+  description = "Owning team for this component (drives the Team tag)."
   type        = string
   default     = "strategy"
 }

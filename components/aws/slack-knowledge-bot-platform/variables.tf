@@ -40,7 +40,7 @@ variable "cluster_name" {
 variable "namespace" {
   description = "Kubernetes namespace where the slack-knowledge-bot Platform tenant runs. Matches the Platform CR's metadata.namespace."
   type        = string
-  default     = "tenants-protohype"
+  default     = "tenants-slack-knowledge-bot"
 }
 
 variable "service_account" {
@@ -110,7 +110,7 @@ variable "audit_s3_intelligent_tiering_days" {
 }
 
 variable "team" {
-  description = "Owning team for this component (drives the Team tag + ArgoCD AppProject scope)."
+  description = "Owning team for this component (drives the Team tag)."
   type        = string
   default     = "workplace"
 }

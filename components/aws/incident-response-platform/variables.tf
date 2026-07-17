@@ -23,9 +23,9 @@ variable "cluster_name" {
 }
 
 variable "namespace" {
-  description = "Kubernetes namespace where the incident-response Platform tenant runs. Matches the Platform CR's metadata.namespace (typically tenants-protohype)."
+  description = "Kubernetes namespace where the incident-response Platform tenant runs. Matches the Platform CR's metadata.namespace (typically tenants-incident-response)."
   type        = string
-  default     = "tenants-protohype"
+  default     = "tenants-incident-response"
 }
 
 variable "service_account" {
@@ -65,7 +65,7 @@ variable "sqs_max_receive_count" {
 }
 
 variable "team" {
-  description = "Owning team for this component (drives the Team tag + ArgoCD AppProject scope)."
+  description = "Owning team for this component (drives the Team tag)."
   type        = string
   default     = "reliability"
 }
