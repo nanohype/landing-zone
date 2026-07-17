@@ -37,11 +37,18 @@ resource "aws_kms_key" "secrets" {
         Resource  = "*"
       },
       {
+        # Scoped by SourceAccount so only Secrets Manager acting on behalf of this
+        # account can use the key — parity with the AllowBedrock statement below.
         Sid       = "AllowSecretsManagerService"
         Effect    = "Allow"
         Principal = { Service = "secretsmanager.amazonaws.com" }
         Action    = ["kms:Decrypt", "kms:GenerateDataKey"]
         Resource  = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
       },
       {
         # CloudWatch Logs needs to use this key when any log group in the

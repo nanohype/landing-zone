@@ -66,6 +66,13 @@ resource "aws_iam_policy" "boundary" {
         Resource = "*"
       },
       {
+        # The ceiling on the emergency admin. Beyond the identity-mint verbs, this
+        # Deny closes the session-persistence and privilege-escalation paths a
+        # broken-glass session could otherwise use to outlive the incident:
+        # minting an access key, attaching/inlining a user policy, publishing a new
+        # default policy version, rewriting a role's trust to make it self-
+        # assumable, stripping/replacing a role's permissions boundary, or chaining
+        # into another role via sts:AssumeRole. None survive the glass being reset.
         Sid    = "DenyIAMModifications"
         Effect = "Deny"
         Action = [
@@ -79,6 +86,13 @@ resource "aws_iam_policy" "boundary" {
           "iam:DeleteRolePolicy",
           "iam:CreatePolicy",
           "iam:DeletePolicy",
+          "iam:CreateAccessKey",
+          "iam:AttachUserPolicy",
+          "iam:PutUserPolicy",
+          "iam:CreatePolicyVersion",
+          "iam:UpdateAssumeRolePolicy",
+          "iam:PutRolePermissionsBoundary",
+          "sts:AssumeRole",
           "organizations:*",
         ]
         Resource = "*"
@@ -100,8 +114,55 @@ resource "aws_cloudwatch_log_group" "break_glass" {
   tags = local.tags
 }
 
+resource "aws_kms_key" "break_glass" {
+  description             = "${var.environment} break-glass alert topic encryption key"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  # CloudWatch Alarms and EventBridge publish the assumption alert; SSE-SNS makes
+  # SNS call kms:GenerateDataKey*/Decrypt as those service principals, so the key
+  # policy must admit them (scoped to this account) or the alert never fires.
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:${local.partition}:iam::${local.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid    = "AllowAlarmAndEventPublish"
+        Effect = "Allow"
+        Principal = {
+          Service = ["cloudwatch.amazonaws.com", "events.amazonaws.com"]
+        }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_kms_alias" "break_glass" {
+  name          = "alias/${var.environment}-break-glass-alert"
+  target_key_id = aws_kms_key.break_glass.key_id
+}
+
 resource "aws_sns_topic" "break_glass" {
-  name = "${var.environment}-break-glass-alert"
+  name              = "${var.environment}-break-glass-alert"
+  kms_master_key_id = aws_kms_key.break_glass.arn
 
   tags = local.tags
 }

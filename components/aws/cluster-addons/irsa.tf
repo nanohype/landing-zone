@@ -90,15 +90,32 @@ module "alb_controller_irsa" {
   namespace       = "kube-system"
   service_account = "aws-load-balancer-controller"
 
+  # Mirrors the upstream AWS Load Balancer Controller reference IAM policy
+  # (kubernetes-sigs/aws-load-balancer-controller docs/install/iam_policy.json).
+  # The mutating EC2/ELB verbs are gated on the controller's own resource tag
+  # (elbv2.k8s.aws/cluster) so this role can only tag, retag, modify, or delete
+  # security groups, load balancers, target groups, and listeners the controller
+  # itself created — never arbitrary EC2/ELB resources in the account.
   policy_statements = [
     {
+      # Service-linked role creation is scoped to the ELB service (upstream
+      # condition) so it can never mint an SLR for any other service.
       Effect = "Allow"
       Action = [
         "iam:CreateServiceLinkedRole",
       ]
       Resource = ["*"]
+      Condition = {
+        StringEquals = {
+          "iam:AWSServiceName" = "elasticloadbalancing.amazonaws.com"
+        }
+      }
     },
     {
+      # Read-only discovery + the AWS-integration lookups the controller resolves
+      # annotations against (cognito, acm, iam server certs, waf, shield). All
+      # unconditioned reads on "*" — none of these describe/associate verbs
+      # support resource-level scoping.
       Effect = "Allow"
       Action = [
         "ec2:DescribeAccountAttributes",
@@ -114,12 +131,21 @@ module "alb_controller_irsa" {
         "ec2:DescribeTags",
         "ec2:DescribeCoipPools",
         "ec2:GetCoipPoolUsage",
-        "ec2:DescribeTargetGroups",
-        "ec2:DescribeTargetHealth",
-        "ec2:DescribeListeners",
-        "ec2:DescribeRules",
+        "ec2:DescribeRouteTables",
         "ec2:GetSecurityGroupsForVpc",
-        "elasticloadbalancing:*",
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeLoadBalancerAttributes",
+        "elasticloadbalancing:DescribeListeners",
+        "elasticloadbalancing:DescribeListenerCertificates",
+        "elasticloadbalancing:DescribeSSLPolicies",
+        "elasticloadbalancing:DescribeRules",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:DescribeTargetGroupAttributes",
+        "elasticloadbalancing:DescribeTargetHealth",
+        "elasticloadbalancing:DescribeTags",
+        "elasticloadbalancing:DescribeTrustStores",
+        "elasticloadbalancing:DescribeListenerAttributes",
+        "elasticloadbalancing:DescribeCapacityReservation",
         "cognito-idp:DescribeUserPoolClient",
         "acm:ListCertificates",
         "acm:DescribeCertificate",
@@ -141,14 +167,175 @@ module "alb_controller_irsa" {
       Resource = ["*"]
     },
     {
+      # Creating a security group takes no resource condition (the SG does not
+      # exist yet); the tag it gets stamped with is gated below.
+      Effect = "Allow"
+      Action = [
+        "ec2:CreateSecurityGroup",
+      ]
+      Resource = ["*"]
+    },
+    {
+      # Tag a security group ONLY at creation time and ONLY when the controller's
+      # cluster tag is being applied.
+      Effect   = "Allow"
+      Action   = ["ec2:CreateTags"]
+      Resource = ["arn:${local.partition}:ec2:*:*:security-group/*"]
+      Condition = {
+        StringEquals = {
+          "ec2:CreateAction" = "CreateSecurityGroup"
+        }
+        Null = {
+          "aws:RequestTag/elbv2.k8s.aws/cluster" = "false"
+        }
+      }
+    },
+    {
+      # Retag / untag only security groups already carrying the controller's
+      # cluster tag — never a security group it does not own.
+      Effect   = "Allow"
+      Action   = ["ec2:CreateTags", "ec2:DeleteTags"]
+      Resource = ["arn:${local.partition}:ec2:*:*:security-group/*"]
+      Condition = {
+        Null = {
+          "aws:RequestTag/elbv2.k8s.aws/cluster"  = "true"
+          "aws:ResourceTag/elbv2.k8s.aws/cluster" = "false"
+        }
+      }
+    },
+    {
+      # Adding/removing ingress rules is unconditioned upstream — the controller
+      # edits inbound rules on backend/node security groups that are tagged by
+      # the cluster, not by elbv2.k8s.aws/cluster.
       Effect = "Allow"
       Action = [
         "ec2:AuthorizeSecurityGroupIngress",
         "ec2:RevokeSecurityGroupIngress",
-        "ec2:CreateSecurityGroup",
+      ]
+      Resource = ["*"]
+    },
+    {
+      # Ingress edits + deleting a security group are additionally allowed on
+      # controller-owned (cluster-tagged) security groups; DeleteSecurityGroup is
+      # never permitted on an untagged group.
+      Effect = "Allow"
+      Action = [
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
         "ec2:DeleteSecurityGroup",
-        "ec2:CreateTags",
-        "ec2:DeleteTags",
+      ]
+      Resource = ["*"]
+      Condition = {
+        Null = {
+          "aws:ResourceTag/elbv2.k8s.aws/cluster" = "false"
+        }
+      }
+    },
+    {
+      # Create a load balancer / target group only while stamping the cluster tag.
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:CreateTargetGroup",
+      ]
+      Resource = ["*"]
+      Condition = {
+        Null = {
+          "aws:RequestTag/elbv2.k8s.aws/cluster" = "false"
+        }
+      }
+    },
+    {
+      # Listener/rule create+delete are unconditioned upstream (children of a
+      # cluster-tagged load balancer).
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:DeleteListener",
+        "elasticloadbalancing:CreateRule",
+        "elasticloadbalancing:DeleteRule",
+      ]
+      Resource = ["*"]
+    },
+    {
+      # Retag / untag load balancers and target groups only when the cluster tag
+      # is present — never resources the controller does not own.
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:AddTags",
+        "elasticloadbalancing:RemoveTags",
+      ]
+      Resource = [
+        "arn:${local.partition}:elasticloadbalancing:*:*:targetgroup/*/*",
+        "arn:${local.partition}:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+        "arn:${local.partition}:elasticloadbalancing:*:*:loadbalancer/app/*/*",
+      ]
+      Condition = {
+        Null = {
+          "aws:RequestTag/elbv2.k8s.aws/cluster"  = "true"
+          "aws:ResourceTag/elbv2.k8s.aws/cluster" = "false"
+        }
+      }
+    },
+    {
+      # Tag listeners and listener-rules (children of tagged load balancers) —
+      # unconditioned upstream.
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:AddTags",
+        "elasticloadbalancing:RemoveTags",
+      ]
+      Resource = [
+        "arn:${local.partition}:elasticloadbalancing:*:*:listener/net/*/*/*",
+        "arn:${local.partition}:elasticloadbalancing:*:*:listener/app/*/*/*",
+        "arn:${local.partition}:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
+        "arn:${local.partition}:elasticloadbalancing:*:*:listener-rule/app/*/*/*",
+      ]
+    },
+    {
+      # Modify / delete load balancers, target groups, and listeners only on
+      # controller-owned (cluster-tagged) resources.
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:ModifyLoadBalancerAttributes",
+        "elasticloadbalancing:SetIpAddressType",
+        "elasticloadbalancing:SetSecurityGroups",
+        "elasticloadbalancing:SetSubnets",
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:ModifyTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroupAttributes",
+        "elasticloadbalancing:DeleteTargetGroup",
+        "elasticloadbalancing:ModifyListenerAttributes",
+        "elasticloadbalancing:ModifyCapacityReservation",
+        "elasticloadbalancing:ModifyIpPools",
+      ]
+      Resource = ["*"]
+      Condition = {
+        Null = {
+          "aws:ResourceTag/elbv2.k8s.aws/cluster" = "false"
+        }
+      }
+    },
+    {
+      # Register/deregister targets against target groups.
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:RegisterTargets",
+        "elasticloadbalancing:DeregisterTargets",
+      ]
+      Resource = ["arn:${local.partition}:elasticloadbalancing:*:*:targetgroup/*/*"]
+    },
+    {
+      # Listener/rule mutation + WAF association — unconditioned upstream
+      # (operate on children of cluster-tagged load balancers).
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:SetWebAcl",
+        "elasticloadbalancing:ModifyListener",
+        "elasticloadbalancing:AddListenerCertificates",
+        "elasticloadbalancing:RemoveListenerCertificates",
+        "elasticloadbalancing:ModifyRule",
+        "elasticloadbalancing:SetRulePriorities",
       ]
       Resource = ["*"]
     },
@@ -373,10 +560,40 @@ module "argo_events_irsa" {
 
   policy_statements = [
     {
+      # SQS event sources: receive + delete messages and read queue metadata.
+      # Scoped to THIS account/region — argo-events sensors consume queues in the
+      # cluster's own account, never cross-account, and never the SQS admin verbs
+      # (DeleteQueue / AddPermission / SetQueueAttributes) the old sqs:* granted.
       Effect = "Allow"
       Action = [
-        "sqs:*",
-        "sns:*",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+      ]
+      Resource = ["arn:${local.partition}:sqs:${var.region}:${local.account_id}:*"]
+    },
+    {
+      # SNS event sources: subscribe/confirm the sensor's endpoint and read topic
+      # metadata. Scoped to this account/region; no sns:* admin verbs (AddPermission,
+      # SetTopicAttributes, DeleteTopic) on arbitrary topics.
+      Effect = "Allow"
+      Action = [
+        "sns:Subscribe",
+        "sns:Unsubscribe",
+        "sns:ConfirmSubscription",
+        "sns:GetTopicAttributes",
+        "sns:ListSubscriptionsByTopic",
+      ]
+      Resource = ["arn:${local.partition}:sns:${var.region}:${local.account_id}:*"]
+    },
+    {
+      # Wiring bucket → SQS/SNS notifications is configured on tenant buckets whose
+      # names are owned by per-tenant components and not known at addon-provision
+      # time, so this stays bucket-wildcard — it is notification *configuration*,
+      # not object-data access.
+      Effect = "Allow"
+      Action = [
         "s3:GetBucketNotification",
         "s3:PutBucketNotification",
       ]

@@ -18,17 +18,20 @@ skip-check:
   - CKV_AWS_184 # generic resource CMK — same provider-managed-key posture
   - CKV_AWS_191 # ElastiCache CMK — provider-managed key accepted for the in-VPC rate-limit cache
   - CKV_AWS_136 # ECR CMK — AES-256 default encryption accepted
-  - CKV_AWS_26 # SNS topic SSE — alert/fan-out topics carry no payload secrets; provider default accepted
   - CKV2_AWS_64 # explicit KMS key policy — keys without one use the account-root default policy deliberately
   - CKV2_AWS_34 # SSM SecureString — params published are discovery metadata (ARNs/names/paths), never secret values
 
   # ── AWS: IAM wildcards checkov cannot model ──
-  # The fleet/break-glass boundary policies allow iam:*/service:* as CEILINGS
-  # whose Deny statements carry the control, and role-write grants are
-  # condition-locked to iam:PermissionsBoundary; telemetry/list actions
-  # (logs, cloudwatch, ssm:DescribeParameters, batch, kafka-cluster) do not
-  # support resource-level permissions. Checkov evaluates statements in
-  # isolation and sees only the wildcard.
+  # Two genuinely-need-"*" cases remain after resource-scoping the tightenable
+  # grants (argo-events SQS/SNS, the ALB controller's EC2/ELB verbs, and the
+  # tenant kafka-cluster verbs are all ARN-scoped now):
+  #   1. The fleet/break-glass/portal boundary policies allow iam:*/service:* as
+  #      CEILINGS whose Deny statements carry the control, and role-write grants
+  #      are condition-locked to iam:PermissionsBoundary.
+  #   2. Telemetry/list actions (logs:Create*, cloudwatch:PutMetricData,
+  #      ssm:DescribeParameters, batch, ec2:Describe*) do not support
+  #      resource-level permissions.
+  # Checkov evaluates statements in isolation and sees only the wildcard.
   - CKV_AWS_355 # "*" resource for restrictable actions
   - CKV_AWS_290 # write access without constraints
   - CKV_AWS_289 # permissions-management access without constraints

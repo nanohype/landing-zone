@@ -19,11 +19,12 @@ variable "service_account" {
 }
 
 variable "policy_statements" {
-  description = "IAM policy statements to attach inline"
+  description = "IAM policy statements to attach inline. Condition is optional (operator -> key -> value, e.g. {StringEquals = {\"iam:AWSServiceName\" = \"elasticloadbalancing.amazonaws.com\"}}); when omitted the rendered statement carries no Condition key."
   type = list(object({
-    Effect   = string
-    Action   = list(string)
-    Resource = list(string)
+    Effect    = string
+    Action    = list(string)
+    Resource  = list(string)
+    Condition = optional(map(map(string)))
   }))
   default = []
 }

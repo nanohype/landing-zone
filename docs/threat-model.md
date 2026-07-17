@@ -38,7 +38,12 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
 - **Tampering / Information disclosure** — state holds resource metadata and some
   secrets material. Mitigated: S3 buckets are versioned + AES-256 encrypted, keyed
   `{env}/{component}/terraform.tfstate`, with native conditional-write locking
-  (`use_lockfile`). Per-component/per-env state = isolated blast radius.
+  (`use_lockfile`). Per-component/per-env state = isolated blast radius. The
+  highest-value state buckets — `fleet-hub` (every vended cluster's OpenTofu state)
+  and `portal-hub` (portal's cross-account state) — go further: SSE-KMS with a
+  dedicated CMK, a bucket policy that denies any non-TLS request
+  (`aws:SecureTransport=false`), and server access logging to a private sibling
+  bucket.
 - **Residual** — bucket policy and account-level SCPs are what keep state private;
   a fork should confirm the tfstate bucket is not readable outside the CI role.
 
@@ -64,6 +69,14 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `tofu test` gate asserts the trust never gains a web-identity action and that
   inline policies pass through unbroadened. Some components (e.g. druid) still use
   IRSA (OIDC trust scoped to a namespace/SA); both are per-tenant, one role each.
+  The `workload-identity` module renders an optional per-statement `Condition`, so
+  a caller's grant can be ARN-scoped **and** tag/StringEquals-locked. The addon and
+  tenant grants use this: the AWS Load Balancer Controller's mutating EC2/ELB verbs
+  are gated on the upstream `elbv2.k8s.aws/cluster` resource tag (it can only touch
+  resources it created), argo-events' SQS/SNS access is scoped to the account/region
+  (not `sqs:*`/`sns:*` on `*`), and each tenant's `kafka-cluster` grant is scoped to
+  that tenant's own MSK cluster/topic/group ARNs. Feature-gated grants (gateway
+  cognito/WAF) are omitted entirely when disabled rather than falling back to `*`.
 - **Residual** — inline policy scope is the tenant author's responsibility; the
   module does not widen it, but it does not audit it either. Keep `Resource`
   scoped or condition-locked (the checkov gate enforces this at CI).

@@ -1,4 +1,8 @@
+data "aws_caller_identity" "current" {}
+
 locals {
+  account_id = data.aws_caller_identity.current.account_id
+
   tags = merge(var.tags, {
     Component = "service-quotas"
     Team      = var.team
@@ -17,11 +21,57 @@ data "aws_servicequotas_service_quota" "this" {
 }
 
 ################################################################################
-# SNS Topic for Alerts
+# SNS Topic for Alerts — SSE-KMS
+#
+# CloudWatch quota-utilization alarms publish here; SSE-SNS makes SNS call
+# kms:GenerateDataKey*/Decrypt as the cloudwatch service principal, so the key
+# policy admits it (scoped to this account).
 ################################################################################
 
+resource "aws_kms_key" "quota_alerts" {
+  description             = "${var.environment} service-quota alerts topic encryption key"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${local.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchAlarmPublish"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_kms_alias" "quota_alerts" {
+  name          = "alias/${var.environment}-service-quota-alerts"
+  target_key_id = aws_kms_key.quota_alerts.key_id
+}
+
 resource "aws_sns_topic" "quota_alerts" {
-  name = "${var.environment}-service-quota-alerts"
+  name              = "${var.environment}-service-quota-alerts"
+  kms_master_key_id = aws_kms_key.quota_alerts.arn
 
   tags = local.tags
 }

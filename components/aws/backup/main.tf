@@ -132,8 +132,54 @@ resource "aws_iam_role_policy_attachment" "restore" {
 # Notifications
 ################################################################################
 
+# Dedicated CMK for the notifications topic. AWS Backup publishes vault events;
+# SSE-SNS makes SNS call kms:GenerateDataKey*/Decrypt as the backup service
+# principal, so the key policy admits it (scoped to this account). Kept separate
+# from the vault CMK so the topic grant never widens the recovery-point key.
+resource "aws_kms_key" "notifications" {
+  description             = "${var.environment} backup notifications topic encryption key"
+  deletion_window_in_days = var.kms_deletion_window
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${local.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowBackupPublish"
+        Effect    = "Allow"
+        Principal = { Service = "backup.amazonaws.com" }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_kms_alias" "notifications" {
+  name          = "alias/${var.environment}-backup-notifications"
+  target_key_id = aws_kms_key.notifications.key_id
+}
+
 resource "aws_sns_topic" "backup_notifications" {
-  name = "${var.environment}-backup-notifications"
+  name              = "${var.environment}-backup-notifications"
+  kms_master_key_id = aws_kms_key.notifications.arn
 
   tags = local.tags
 }

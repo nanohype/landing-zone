@@ -31,6 +31,19 @@ locals {
       Resource = concat(local.s3_buckets, local.s3_objects)
     },
   ]
+
+  # MSK Serverless IAM auth is scoped to THIS tenant's own cluster. The serverless
+  # cluster is named "${local.prefix}-msk" (see msk.tf); kafka-cluster verbs
+  # authorize against cluster / topic / group resource ARNs under that name, with
+  # the cluster UUID (assigned at create time) wildcarded. Every ARN carries the
+  # tenant's account, region, and cluster name, so an ingestion or client pod can
+  # only reach its own tenant's brokers, topics, and consumer groups.
+  msk_cluster_name = "${local.irsa_prefix}-msk"
+  msk_resource_arns = [
+    "arn:aws:kafka:${var.region}:${var.account_id}:cluster/${local.msk_cluster_name}/*",
+    "arn:aws:kafka:${var.region}:${var.account_id}:topic/${local.msk_cluster_name}/*",
+    "arn:aws:kafka:${var.region}:${var.account_id}:group/${local.msk_cluster_name}/*",
+  ]
 }
 
 # Historical node role (read-only S3 access)
@@ -76,7 +89,7 @@ module "ingestion_irsa" {
         "kafka-cluster:DescribeGroup",
         "kafka-cluster:AlterGroup",
       ]
-      Resource = ["*"]
+      Resource = local.msk_resource_arns
     },
   ] : [])
 
@@ -120,7 +133,7 @@ module "msk_client_irsa" {
         "kafka-cluster:DescribeGroup",
         "kafka-cluster:AlterGroup",
       ]
-      Resource = ["*"]
+      Resource = local.msk_resource_arns
     },
   ]
 

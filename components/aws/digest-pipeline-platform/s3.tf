@@ -60,6 +60,27 @@ resource "aws_s3_bucket_public_access_block" "voice_baseline" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_policy" "voice_baseline" {
+  bucket = aws_s3_bucket.voice_baseline.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource = [
+        aws_s3_bucket.voice_baseline.arn,
+        "${aws_s3_bucket.voice_baseline.arn}/*",
+      ]
+      Condition = {
+        Bool = { "aws:SecureTransport" = "false" }
+      }
+    }]
+  })
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "voice_baseline" {
   bucket = aws_s3_bucket.voice_baseline.id
 
@@ -113,6 +134,27 @@ resource "aws_s3_bucket_public_access_block" "raw_aggregations" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "raw_aggregations" {
+  bucket = aws_s3_bucket.raw_aggregations.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource = [
+        aws_s3_bucket.raw_aggregations.arn,
+        "${aws_s3_bucket.raw_aggregations.arn}/*",
+      ]
+      Condition = {
+        Bool = { "aws:SecureTransport" = "false" }
+      }
+    }]
+  })
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "raw_aggregations" {

@@ -57,6 +57,11 @@ mock_provider "aws" {
       arn = "arn:aws:iam::123456789012:policy/development-break-glass-boundary"
     }
   }
+  mock_resource "aws_kms_key" {
+    defaults = {
+      arn = "arn:aws:kms:us-west-2:123456789012:key/break-glass"
+    }
+  }
 }
 
 variables {
@@ -104,7 +109,10 @@ run "trust_scoped_to_trusted_roots_never_wildcard" {
 # be an explicit Deny covering every IAM identity-write verb AND organizations:*, so
 # the emergency admin can neither self-escalate (mint/alter roles & policies) nor
 # re-org the account to persist. Located by Sid; every verb checked individually so
-# dropping any one from the Deny list fails the assertion.
+# dropping any one from the Deny list fails the assertion. The session-persistence
+# and escalation verbs (mint an access key, attach/inline a user policy, publish a
+# new default policy version, rewrite a trust policy, strip/replace a permissions
+# boundary, chain into another role via sts:AssumeRole) are all covered too.
 run "boundary_denies_self_escalation" {
   command = plan
 
@@ -121,9 +129,42 @@ run "boundary_denies_self_escalation" {
       && contains(try(s.Action, []), "iam:DetachRolePolicy")
       && contains(try(s.Action, []), "iam:PutRolePolicy")
       && contains(try(s.Action, []), "iam:DeleteRolePolicy")
+      && contains(try(s.Action, []), "iam:CreateAccessKey")
+      && contains(try(s.Action, []), "iam:AttachUserPolicy")
+      && contains(try(s.Action, []), "iam:PutUserPolicy")
+      && contains(try(s.Action, []), "iam:CreatePolicyVersion")
+      && contains(try(s.Action, []), "iam:UpdateAssumeRolePolicy")
+      && contains(try(s.Action, []), "iam:PutRolePermissionsBoundary")
+      && contains(try(s.Action, []), "sts:AssumeRole")
       && contains(try(s.Action, []), "organizations:*")
     ]) == 1
-    error_message = "break-glass boundary DenyIAMModifications must Deny all IAM identity-write verbs and organizations:* (Effect=Deny)"
+    error_message = "break-glass boundary DenyIAMModifications must Deny all IAM identity-write, session-persistence, and escalation verbs (CreateAccessKey, Attach/PutUserPolicy, CreatePolicyVersion, UpdateAssumeRolePolicy, PutRolePermissionsBoundary, sts:AssumeRole) plus organizations:*"
+  }
+}
+
+# INVARIANT 5 — the assumption-alert topic is encrypted at rest with a CMK whose
+# policy admits the CloudWatch-alarm and EventBridge publishers. If the topic were
+# unencrypted, or the key policy omitted those service principals, the alert that
+# makes break-glass auditable would either leak at rest or never fire.
+run "alert_topic_encrypted_with_publisher_grant" {
+  command = plan
+
+  assert {
+    condition     = aws_sns_topic.break_glass.kms_master_key_id == "arn:aws:kms:us-west-2:123456789012:key/break-glass"
+    error_message = "break-glass alert topic must set kms_master_key_id to the CMK ARN (SSE-KMS)"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_kms_key.break_glass.policy).Statement :
+      s if try(s.Effect, "") == "Allow"
+      && contains(try(s.Principal.Service, []), "cloudwatch.amazonaws.com")
+      && contains(try(s.Principal.Service, []), "events.amazonaws.com")
+      && contains(try(s.Action, []), "kms:GenerateDataKey*")
+      && contains(try(s.Action, []), "kms:Decrypt")
+      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+    ]) == 1
+    error_message = "break-glass alert CMK policy must grant cloudwatch + events kms:GenerateDataKey*/Decrypt scoped by SourceAccount"
   }
 }
 
