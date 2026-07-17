@@ -71,16 +71,29 @@ locals {
 module "network" {
   source = "../../../components/aws/network"
 
-  # network is cluster-agnostic: it provisions one shared VPC per environment,
-  # named and tagged by environment only. The per-cluster subnet tags
+  # network is cluster-agnostic: in create mode it provisions one shared VPC per
+  # environment, named and tagged by environment only. The per-cluster subnet tags
   # (kubernetes.io/cluster/<cluster>, karpenter.sh/discovery) are stamped by the
   # cluster module below (aws_ec2_tag), so co-located sibling spokes each add
   # their own onto the shared subnets — the network module takes no cluster_name.
-  environment                   = var.environment
-  region                        = var.region
-  vpc_cidr                      = var.vpc_cidr
-  max_azs                       = var.max_azs
-  nat_gateways                  = var.nat_gateways
+  # In adopt mode it participates in a VPC owned elsewhere (see network_mode).
+  environment = var.environment
+  region      = var.region
+
+  network_mode = var.network_mode
+
+  vpc_cidr            = var.vpc_cidr
+  ipam_pool_id        = var.ipam_pool_id
+  ipam_netmask_length = var.ipam_netmask_length
+  transit_gateway_id  = var.transit_gateway_id
+  centralized_egress  = var.centralized_egress
+  max_azs             = var.max_azs
+  nat_gateways        = var.nat_gateways
+
+  adopt_vpc_id             = var.adopt_vpc_id
+  adopt_private_subnet_ids = var.adopt_private_subnet_ids
+  adopt_public_subnet_ids  = var.adopt_public_subnet_ids
+
   team                          = var.team
   tags                          = local.spoke_tags
   enable_eks_interface_endpoint = var.enable_eks_interface_endpoint
@@ -97,6 +110,10 @@ module "cluster" {
   vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
   public_subnet_ids  = module.network.public_subnet_ids
+
+  # A participant can't tag a foreign-owned (RAM-shared) subnet, so subnet-ownership
+  # tagging is gated off in adopt mode — the network owner owns tagging there.
+  stamp_subnet_tags = var.network_mode == "create"
 
   cluster_endpoint_public_access       = var.cluster_endpoint_public_access
   cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs

@@ -41,3 +41,18 @@ output "vpc_id" {
   description = "The VPC the cluster lands in"
   value       = module.network.vpc_id
 }
+
+output "private_subnet_ids" {
+  description = "Private subnet IDs the cluster nodes run in (status plumbing for cluster-bootstrap adopt-mode publishing)"
+  value       = module.network.private_subnet_ids
+}
+
+output "public_subnet_ids" {
+  description = "Public subnet IDs for load balancers"
+  value       = module.network.public_subnet_ids
+}
+
+output "private_subnet_azs" {
+  description = "Availability zones of the private subnets, in the same order as private_subnet_ids"
+  value       = module.network.private_subnet_azs
+}
