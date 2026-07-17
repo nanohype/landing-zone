@@ -24,7 +24,7 @@ intentionally — never bulk-delete them.
 | 18b | tflint severity gate hardening | ✅ #138 |
 | 19 | Docs + agent surface | ✅ #139 |
 | 19b | Cluster-bootstrap `monitoring/managed` label | ✅ #140 |
-| 24 | Endpoint posture flip (after rackctl target 23) | ☐ |
+| 24 | Endpoint posture flip (after rackctl target 23) | ✅ #141 |
 
 ---
 
@@ -570,6 +570,31 @@ the env-supplied path safe. Document the input pair and the rackctl path in
 Acceptance: `terragrunt plan` on dev + hub cluster leaves succeeds from the committed
 tree (private); with the two TF_VARs exported, plan shows public + allowlist; docs name
 rackctl as the owner of the fragile input.
+
+Outcome (✅ #141): **shipped; scope widened from dev+hub to all four cluster leaves.**
+The finding named dev + hub, but the flag lived in all four (`development` = true,
+`staging` = false, `production` = true, `hub` = true), so a dev/hub-only removal would
+have left the tree carrying posture in two places and the inversion unresolved. Dropped
+`cluster_endpoint_public_access` from every leaf so none pins posture — the tree is
+uniformly private via the component's own `default = false`. This also fixed the
+inversion in one move: `production` was public while `staging` was private (backwards
+strictness); with the flag gone from both, all four are private in the committed tree.
+Removed `staging`'s now-redundant explicit `= false` for the same reason (no leaf should
+imply it owns posture). The component's fail-closed CIDR validation
+(`components/aws/cluster/variables.tf:99-102`) is untouched — the guard that keeps the
+supplied path safe. Confirmed against rackctl's merged `internal/phases/endpoint.go` the
+exact seam it sends: `TF_VAR_cluster_endpoint_public_access` (bool, `%t`) and
+`TF_VAR_cluster_endpoint_public_access_cidrs` (JSON `list(string)`, e.g.
+`["203.0.113.4/32"]`), with egress-IP autodetect (`checkip.amazonaws.com` → `<ip>/32`)
+when public is requested with an empty allow-list. Verified credential-less: all live
+leaves render clean (`task evaluate`), `tofu validate` on `cluster` valid, `task lint`
+(notice) exit 0, and the fail-closed validation exercised on the component via both
+`-var` and the real `TF_VAR_*` env-var path — private passes, public+empty rejects at
+plan time, public+CIDRs passes. A full resource plan (the actual EKS endpoint wiring)
+needs live AWS credentials and was not run. Documented the ownership split in
+`docs/inputs.md` (new "EKS API endpoint posture" section) and repointed the first-deploy
+walkthrough at it. **This closes landing-zone's queue for the campaign** — only the
+cross-repo re-audit (Target 25) remains, owned elsewhere.
 
 ## Additional scope discovered mid-campaign (not yet assigned a target)
 
