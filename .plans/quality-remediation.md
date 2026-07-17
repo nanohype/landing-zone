@@ -22,7 +22,7 @@ intentionally — never bulk-delete them.
 | 17 | Security batch | ✅ #136 |
 | 18 | Testing batch | ✅ #137 |
 | 18b | tflint severity gate hardening | ✅ #138 |
-| 19 | Docs + agent surface | ☐ |
+| 19 | Docs + agent surface | ✅ #139 |
 | 19b | Cluster-bootstrap `monitoring/managed` label | ☐ |
 | 24 | Endpoint posture flip (after rackctl target 23) | ☐ |
 
@@ -505,6 +505,35 @@ Findings:
 
 Acceptance: every documented command copy-paste-executes from a clean checkout (spot-run
 them); skills invoke real tasks; badge matches LICENSE.
+
+Outcome (✅ #139): **all findings shipped; verified against the current tree (Targets
+2/16/17/18/18b had shifted several line numbers and a few facts since the finding list
+was written).** Spot-ran the credential-less gates on the real tree: `task fmt:check`,
+`task validate` (all roots valid), `task lint` (clean at `notice`), `task evaluate`
+(every live leaf renders on terragrunt 1.0.4), and `task init-backend --dry` (both args
+forward). The corrected CONTRIBUTING include snippet is the exact pattern every live
+leaf already uses, so `task evaluate` passing is proof it evaluates.
+
+Scope discovered beyond the finding list (fixed here, same docs-truth sweep):
+- **The `destroy` skill was a sixth skill the list didn't name** — it invoked terragrunt
+  against stale `live/<env>/<component>/` paths. Repointed to the real
+  `live/aws/<account>/us-west-2/<env>/<component>/` layout, wired its final step to
+  `task destroy`, and added `allowed-tools` frontmatter.
+- **`add-tenant` carried the same stale `live/<env>/…` path** and a `components/<name>/`
+  (vs `components/aws/<name>/`) reference — corrected both.
+- **`troubleshooting.md`'s "Component Not in CI Plan Matrix"** told readers to hand-edit
+  ci.yml matrices and deploy/destroy "allowlists" — both obsolete since Target 2's
+  git-ls-files auto-discovery and the free-form component inputs. Rewrote to the
+  track-the-files reality.
+- **`operations.md`'s CI/CD table and drift scope** were pre-Target-2/18: added the
+  placeholders/test/evaluate/mock-outputs gates, the widened fmt (adds `fleet/` +
+  `terragrunt hcl format`) and checkov (adds `fleet/aws` + `modules/aws`) scope, and
+  changed drift from "production, 8 hardcoded components" to "production + staging,
+  matrix auto-discovered".
+
+Nothing observed relevant to Target 19b (the `monitoring/managed` label producer gap) or
+Target 24 (endpoint posture, blocked on rackctl #23) — both remain untouched by this
+docs pass.
 
 ## Target 24 — Endpoint posture flip (S — only after rackctl target 23 ships)
 
