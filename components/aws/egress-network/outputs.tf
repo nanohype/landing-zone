@@ -32,3 +32,8 @@ output "public_route_table_ids" {
   description = "Public route table IDs — they carry the spoke-supernet return route to the TGW alongside the default internet-gateway route."
   value       = module.vpc.public_route_table_ids
 }
+
+output "spoke_supernet_cidr" {
+  description = "The workload supernet the public route tables return to the TGW — the exact destination the smoke test asserts a TGW-bound return route exists for."
+  value       = var.spoke_supernet_cidr
+}

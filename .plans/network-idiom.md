@@ -19,13 +19,24 @@ comments, or docs (greenfield doctrine).
 | 3 | `shared-network` owner component + RAM share + contract | ✅ |
 | 3-fix | teardown docs + vacuous tag check + IPAM discovery + NAT mapping + intra-subnet cleanup (Fable review) | ✅ |
 | 3b | `egress-network` owner component (central-egress VPC + TGW static default route) | ✅ |
+| 3b-fix | remove the broken TGW association/propagation override + doc/test corrections (Fable review) | ✅ |
 | 4 | cluster-bootstrap publishes network_mode + adopt subnet IDs (public + private) | ⬜ |
 
-Run these **serialized, in order** (1 → 2 → 1-fix → 3 → 3-fix → 3b → 4) — never two
-agents in this repo concurrently. Every target ends in a PR (never a direct push to
-`main`, even though this repo's branch protection allows an admin bypass), CI green
-(poll `gh pr checks` synchronously in the foreground — no backgrounded `--watch`, no
-ending your turn to wait on it), then squash-merge.
+Run these **serialized, in order** (1 → 2 → 1-fix → 3 → 3-fix → 3b → 3b-fix → 4) —
+never two agents in this repo concurrently. Every target ends in a PR (never a
+direct push to `main`, even though this repo's branch protection allows an admin
+bypass), CI green (poll `gh pr checks` synchronously in the foreground — no
+backgrounded `--watch`, no ending your turn to wait on it), then squash-merge.
+
+**Fourth independent review pass (Fable, adversarial, traced the AWS provider's
+actual Go source) landed after Target 3b merged — and reversed the direction of an
+open item Target 3b's own report had recorded.** `egress-network`'s explicit
+`transit_gateway_default_route_table_association`/`_propagation = false` override
+is itself the bug (guarantees a permanent, unfixable drift-then-failed-remediation
+cycle on a real cross-account apply); `network`/`shared-network` leaving those
+attributes unset was already correct and needs no change. Folded into
+**Target 3b-fix** below, along with three smaller doc/test findings from the same
+pass.
 
 **Third independent review pass (Fable, adversarial, ran real probe fixtures
 against a scratchpad copy — repo untouched) landed after Target 3 merged.** Six
@@ -915,7 +926,163 @@ owner-side piece now rather than ship a documented-but-non-functional knob.
 
 ---
 
-## Target 4 — cluster-bootstrap publishes `network_mode` + adopt subnet IDs (public + private) (M)
+## Target 3b-fix — remove the broken TGW association/propagation override + doc/test corrections (S)
+
+**Shipped.** All six findings landed in `components/aws/egress-network` (tgw.tf,
+checks.tf, variables.tf, outputs.tf, tests, smoke-test.sh, README.md). No sibling
+component was touched — `network/tgw.tf` and `shared-network/tgw.tf` were verified
+byte-identical to `main` (they already leave the attributes unset, which is correct).
+Resolution decisions worth recording:
+- **The two `= false` lines are gone; the attributes are now unset (Optional+Computed).**
+  `tgw.tf`'s comment was rewritten from the factually-wrong "a participant cannot
+  manage the owner's associations, so these stay false" to the actual provider
+  behavior: Create gates the owner-side call behind an owner-ID check and skips it on
+  a shared TGW (so `false` prevented nothing), Read hardcodes both to `true`, and
+  Update is unguarded — so `= false` only pins a permanent `true → false` diff whose
+  attempted remediation calls the owner-only disassociate/disable API from a
+  participant account and fails under scheduled drift detection. Unset = no diff.
+- **The test assertion that pinned `association == false && propagation == false` was
+  removed** (not rewritten) — the attributes are now unset, so at plan against a mock
+  provider they resolve known-after-apply and can't be asserted meaningfully. The
+  file's header comment dropped the "association/propagation off" phrasing.
+- **Overlap check enforcement doc corrected, not promoted.** Chose to fix the README
+  sentence over promoting to a `lifecycle.precondition`: `checks.tf` already frames
+  itself as a warn-at-plan / hard-fail-under-`tofu test` contract (gated by
+  `expect_failures`), and the rest of this component's contract lives in `check`
+  blocks — a lone precondition would have been inconsistent. The README now states
+  the real semantics (warns at real plan/apply, blocks in CI via the test suite).
+- **CIDR-shape validation added on `spoke_supernet_cidr`** via
+  `can(cidrnetmask(var.spoke_supernet_cidr))` — a malformed value now fails at
+  variable validation with a clear message before the overlap locals split/mask it
+  (which would otherwise throw a raw function error). New `invalid_supernet_cidr`
+  fixture proves it (`expect_failures = [var.spoke_supernet_cidr]`).
+- **Overlap check is now bidirectional.** `checks.tf` was refactored to test both
+  nestings — egress-base-masked-to-supernet-prefix == supernet-base (egress inside
+  supernet) OR supernet-base-masked-to-egress-prefix == egress-base (the reverse). New
+  `supernet_nested_in_egress` fixture (`egress_vpc_cidr = 100.64.0.0/16`,
+  `spoke_supernet_cidr = 100.64.5.0/24`) fails the check — a case the old
+  one-directional test missed.
+- **smoke-test return-route check fixed + a new `spoke_supernet_cidr` output.** The old
+  check had a vacuous first disjunct (`TransitGatewayId == attachment_id`, never true)
+  and an over-broad fallback (`TransitGatewayId != null` — any TGW route). It now
+  queries the route whose `DestinationCidrBlock` is exactly the spoke supernet and
+  asserts its `TransitGatewayId` is present — so it verifies the specific spoke-return
+  route, not merely "some TGW route." Added a `spoke_supernet_cidr` output so the
+  smoke test reads the exact destination from `outputs.json`.
+- **Shared-hub blast-radius paragraph added** to the README ("One hub per transit
+  gateway" section): one hub across all environments means dev/staging/prod share the
+  hub's NAT gateway source IPs (no per-env egress-IP allowlisting) and NAT port
+  capacity (a runaway non-prod workload can degrade prod egress); per-env isolation
+  needs the per-env TGW route tables already noted as a future addition.
+- **"No `true → false` diff" verification.** With nothing deployed and the mock
+  provider only usable inside `tofu test`, the guarantee is structural: the config no
+  longer contains the `= false` assignment (grep confirms only explanatory comments
+  reference the attributes), so no plan can produce a `true → false` diff on an
+  Optional+Computed field. The attachment still plans cleanly in `default_hub`.
+
+**Depends on:** Target 3b (serialized after it in this repo — already merged, so
+this is next). **Blocks Target 4** (repo-serialized; no functional coupling).
+
+**Context — the fix direction from Target 3b's own report was backwards.** Target
+3b's implementing agent self-flagged that `network`/`shared-network` "latently"
+needed the same `transit_gateway_default_route_table_association`/`_propagation =
+false` override `egress-network` shipped, and that note was recorded as an open
+item. A fourth independent review (Fable, adversarial) traced the actual AWS
+provider source (`hashicorp/aws` v6.54.0,
+`internal/service/ec2/transitgateway_vpc_attachment.go`) for a RAM-shared TGW
+attachment and found the reverse is true:
+- **Create** wraps all association/propagation handling in an owner-ID check and
+  **skips it entirely** on a shared TGW — the explicit `false` flags in
+  `egress-network` never prevented anything, because there was nothing to prevent.
+- **Read** hardcodes both values to `true` for a shared TGW attachment (no drift
+  detection possible on this field on purpose, per the provider's own comment).
+- **Update** has no ownership guard — on any `HasChange`, it unconditionally calls
+  the disassociate/disable APIs.
+- Net effect on `egress-network` as merged: apply succeeds (Create skips), Read
+  then records `true`/`true` in state, so **every subsequent plan shows a permanent
+  `true → false` diff** — and applying that "remediation" hits Update's
+  unconditioned path, which really does call the owner-only
+  `DisassociateTransitGatewayRouteTable`/`DisableTransitGatewayRouteTablePropagation`
+  API against the owner's route table from a participant account, and fails. This
+  repo runs scheduled drift detection, so this would surface as a recurring,
+  unfixable drift finding on every scan.
+- `network`/`shared-network` leaving the attributes **unset** (Optional+Computed,
+  not defaulted) is the correct, provider-blessed shape for a shared TGW — they
+  need no change. The master plan's open item recommending they be "fixed" to match
+  `egress-network` has already been corrected — don't act on the old wording if you
+  see it cached anywhere; this target's spec here is the corrected version.
+- AWS's own docs sentence (*"When a transit gateway is shared with you, you cannot
+  create, modify, or delete its transit gateway route tables, or its transit
+  gateway route table propagations and associations"*) is genuine and was
+  correctly cited — the mistake was applying it to the *flags on the attachment
+  resource* rather than to *actual API calls*, which the provider already avoids
+  making on a participant's behalf.
+
+**Findings:**
+- `components/aws/egress-network/tgw.tf` sets both flags to `false` — remove them.
+  Leaving the arguments unset is sufficient; Optional+Computed attributes with no
+  configured value produce no diff regardless of what Read reports.
+- `components/aws/egress-network/tests/*.tftest.hcl` has an assertion (around line
+  44-47 per the review) asserting the flags equal `false` — this cements the wrong
+  configuration and must be corrected or removed along with the code fix.
+- `components/aws/egress-network/tgw.tf`'s comment describing why the flags are set
+  to `false` (something like "leaving these at their true defaults would make this
+  participant apply attempt an association it has no permission for") is factually
+  wrong per the provider-source trace above — rewrite it to explain why the
+  attributes are left unset instead.
+- `components/aws/egress-network/README.md:94` (per the review) overstates the
+  CIDR-overlap `check` block's enforcement — it claims the plan "fails" on overlap,
+  but `check` blocks are non-blocking by design (warn at real `plan`/`apply`, only
+  hard-fail under `tofu test`) — the component's own `checks.tf` header already
+  admits this. Fix the sentence, or promote the assertion to something that
+  actually blocks (a `lifecycle.precondition` on the TGW attachment resource) if
+  hard-blocking is actually wanted here.
+- The CIDR-overlap check in `checks.tf` is one-directional — it only detects the
+  egress VPC's CIDR falling inside the spoke supernet, not the reverse (the spoke
+  supernet falling inside a larger egress CIDR). Unreachable with the committed
+  defaults (`/8` supernet vs. a `/16`-`/24` egress CIDR) but `spoke_supernet_cidr`
+  has no validation at all — not even CIDR-shape — so a malformed value crashes the
+  check with a raw function error instead of a clear message.
+- `smoke-test.sh`'s return-route check has a vacuous first disjunct (compares a
+  route's TGW ID against the attachment ID, which can never match — the *only*
+  effective clause matches any TGW-bound route, not specifically the spoke-return
+  route to `spoke_supernet_cidr`).
+- The README doesn't document that a single shared egress hub across all
+  environments means dev/staging/prod share NAT gateway source IPs (no per-env
+  third-party egress-IP allowlisting) and share NAT port capacity (a runaway
+  non-prod workload can degrade prod egress) — worth one clarifying paragraph.
+
+**Approach:**
+1. `egress-network/tgw.tf`: delete the two `transit_gateway_default_route_table_association`/
+   `_propagation = false` lines; rewrite the surrounding comment to correctly
+   explain why the attributes are left unset on a RAM-shared TGW attachment (cite
+   the provider's own Create-skip/Read-hardcode behavior, not just the AWS docs
+   sentence in isolation).
+2. Update or remove the test assertion that pinned the old (wrong) `false` values.
+3. `README.md`: fix the overlap-check enforcement sentence to state it's a
+   `tofu test`-only hard-check and a non-blocking warning at real `plan`/`apply`
+   (or promote it to a real `lifecycle.precondition` if you'd rather make it
+   actually block — pick one and make the code and the doc agree). Add the
+   shared-egress-hub blast-radius paragraph.
+4. `checks.tf` / `variables.tf`: add basic CIDR-shape validation on
+   `spoke_supernet_cidr` (reject non-CIDR input with a clear message before the
+   overlap check ever runs), and make the overlap check bidirectional (also detect
+   the supernet-inside-egress case).
+5. `smoke-test.sh`: fix the return-route check to actually match on destination
+   `spoke_supernet_cidr`, not "any TGW-bound route."
+6. Do NOT touch `components/aws/network/tgw.tf` or
+   `components/aws/shared-network/tgw.tf` — they're already correct as shipped.
+
+**Acceptance:**
+- `tofu plan`/`tofu test` on `egress-network` with the corrected flags shows no
+  `true → false` diff on the TGW attachment (the fields simply don't appear in the
+  plan, since they're unset).
+- The corrected test suite still passes in full.
+- A CIDR-shape-invalid `spoke_supernet_cidr` fixture fails with a clear validation
+  message, not a raw function error.
+- A new bidirectional-overlap fixture (supernet CIDR nested inside a larger egress
+  CIDR) fails the `tofu test` overlap check.
+- `task fmt:check`, `task validate`, `task lint`, `tofu test` all green.
 
 **Depends on:** Target 1.
 

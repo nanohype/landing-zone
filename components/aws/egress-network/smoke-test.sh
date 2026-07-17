@@ -12,6 +12,7 @@ PRIVATE_SUBNETS=$(jq -r '.private_subnet_ids.value[]' outputs.json)
 NAT_GATEWAYS=$(jq -r '.nat_gateway_ids.value[]' outputs.json)
 TGW_ATTACHMENT_ID=$(jq -r '.tgw_attachment_id.value' outputs.json)
 PUBLIC_RTBS=$(jq -r '.public_route_table_ids.value[]' outputs.json)
+SPOKE_SUPERNET_CIDR=$(jq -r '.spoke_supernet_cidr.value' outputs.json)
 
 # --- VPC ---
 echo "Checking egress VPC ${VPC_ID}..."
@@ -45,16 +46,20 @@ fi
 echo "  TGW attachment is available"
 
 # --- Spoke return route on the public route tables ---
-echo "Checking the spoke return route (-> TGW) on every public route table..."
+# Verify the specific spoke-return route: a route whose destination is exactly
+# spoke_supernet_cidr and whose target is the transit gateway. Querying by destination (not
+# "any TGW-bound route") is what makes this assert the return path actually exists — a route
+# table could carry an unrelated TGW route and still be missing the spoke return.
+echo "Checking the spoke return route (${SPOKE_SUPERNET_CIDR} -> TGW) on every public route table..."
 for RT_ID in $PUBLIC_RTBS; do
-  TGW_ROUTE=$(aws ec2 describe-route-tables \
+  RETURN_ROUTE_TGW=$(aws ec2 describe-route-tables \
     --route-table-ids "$RT_ID" \
-    --query "RouteTables[0].Routes[?TransitGatewayId=='${TGW_ATTACHMENT_ID}' || TransitGatewayId!=null].DestinationCidrBlock" --output text)
-  if [[ -z "$TGW_ROUTE" ]]; then
-    echo "FAIL: public route table ${RT_ID} has no return route to the TGW — NAT-translated replies cannot reach the spokes"
+    --query "RouteTables[0].Routes[?DestinationCidrBlock=='${SPOKE_SUPERNET_CIDR}'].TransitGatewayId | [0]" --output text)
+  if [[ -z "$RETURN_ROUTE_TGW" || "$RETURN_ROUTE_TGW" == "None" ]]; then
+    echo "FAIL: public route table ${RT_ID} has no ${SPOKE_SUPERNET_CIDR} -> TGW return route — NAT-translated replies cannot reach the spokes"
     exit 1
   fi
-  echo "  ${RT_ID} carries a TGW return route (${TGW_ROUTE})"
+  echo "  ${RT_ID} carries the spoke return route ${SPOKE_SUPERNET_CIDR} -> ${RETURN_ROUTE_TGW}"
 done
 
 echo "PASS: all egress-network checks passed"

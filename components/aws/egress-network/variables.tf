@@ -52,6 +52,15 @@ variable "spoke_supernet_cidr" {
   EOT
   type        = string
   default     = "10.0.0.0/8"
+
+  # Shape guard: the return route and the overlap check both split and mask this value, so a
+  # non-CIDR string would otherwise blow up mid-expression with a raw function error. cidrnetmask
+  # only succeeds on a valid IPv4 CIDR, so this rejects a malformed value at validation time
+  # with a clear message before any downstream expression touches it.
+  validation {
+    condition     = can(cidrnetmask(var.spoke_supernet_cidr))
+    error_message = "spoke_supernet_cidr must be a valid IPv4 CIDR block (e.g. 10.0.0.0/8)."
+  }
 }
 
 # --- Topology / egress --------------------------------------------------------
