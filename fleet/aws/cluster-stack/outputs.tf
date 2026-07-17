@@ -56,3 +56,13 @@ output "private_subnet_azs" {
   description = "Availability zones of the private subnets, in the same order as private_subnet_ids"
   value       = module.network.private_subnet_azs
 }
+
+output "private_subnet_az_ids" {
+  description = "AWS AZ IDs (e.g. usw2-az1) of the private subnets, in the same order as private_subnet_ids. Cross-account-stable, so this is the field the Cluster status should surface (AZ names remap per account)."
+  value       = module.network.private_subnet_az_ids
+}
+
+output "public_subnet_az_ids" {
+  description = "AWS AZ IDs (e.g. usw2-az1) of the public subnets, in the same order as public_subnet_ids. Cross-account-stable companion to public_subnet_ids."
+  value       = module.network.public_subnet_az_ids
+}

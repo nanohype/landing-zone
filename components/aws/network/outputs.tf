@@ -1,3 +1,8 @@
+output "network_mode" {
+  description = "The mode this component ran in (create | adopt). Consumers derive subnet-tagging ownership from it: create stamps its own subnet tags; adopt defers tagging to the VPC owner."
+  value       = var.network_mode
+}
+
 output "vpc_id" {
   description = "The ID of the VPC"
   value       = local.resolved_vpc_id
@@ -33,13 +38,23 @@ output "public_subnet_azs" {
   value       = local.resolved_public_subnet_azs
 }
 
+output "private_subnet_az_ids" {
+  description = "AWS AZ IDs (e.g. usw2-az1) of the private subnets, in the same order as private_subnet_ids. AZ IDs are cross-account-stable — AZ names map to different physical zones per account — so cross-account consumers must key on these, not private_subnet_azs."
+  value       = local.resolved_private_subnet_az_ids
+}
+
+output "public_subnet_az_ids" {
+  description = "AWS AZ IDs (e.g. usw2-az1) of the public subnets, in the same order as public_subnet_ids. Cross-account-stable, unlike public_subnet_azs (names)."
+  value       = local.resolved_public_subnet_az_ids
+}
+
 output "nat_gateway_ids" {
   description = "List of NAT Gateway IDs (empty under centralized_egress or in adopt mode)"
   value       = local.resolved_natgw_ids
 }
 
 output "private_route_table_ids" {
-  description = "List of private route table IDs (one per private subnet)"
+  description = "List of private route table IDs — not 1:1 with subnets. Create mode collapses to a single shared table when nat_gateways = 1; adopt mode resolves one table per adopted subnet, which repeats when subnets share a table. Consumers must de-duplicate before assuming a per-subnet relationship."
   value       = local.resolved_private_route_table_ids
 }
 

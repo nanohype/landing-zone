@@ -42,26 +42,38 @@ data "aws_subnet" "adopt_public" {
   }
 }
 
+# The AWS-managed S3 gateway prefix list for this region. The adopt preflight asserts the
+# *exact* prefix list ID is routed in every shared private route table — matching any
+# non-empty prefix-list route would also accept a DynamoDB (or other) gateway route and
+# pass a network that has no S3 path at all.
+data "aws_ec2_managed_prefix_list" "s3" {
+  count = local.adopt_mode ? 1 : 0
+  name  = "com.amazonaws.${var.region}.s3"
+}
+
 data "aws_route_table" "adopt_private" {
   for_each  = local.adopt_mode ? toset(var.adopt_private_subnet_ids) : toset([])
   subnet_id = each.value
 
   lifecycle {
-    # The S3 gateway endpoint installs a prefix-list route (destination_prefix_list_id +
-    # the endpoint as target) into every private route table it associates with. Its
-    # presence is the participant-observable proof the owner wired the S3 gateway path —
-    # without it, private-subnet image and model-artifact pulls fall to NAT/public
-    # resolution: slower, and billed on NAT data processing.
+    # The S3 gateway endpoint installs a route to the region's S3 managed prefix list into
+    # every private route table it associates with. Asserting the *exact* S3 prefix-list ID
+    # (not just any non-empty prefix-list route) is what makes this participant-observable
+    # proof the owner wired the S3 gateway path — a DynamoDB or other gateway route would
+    # otherwise satisfy a looser check while S3 pulls still fall to NAT/public resolution:
+    # slower, and billed on NAT data processing.
     postcondition {
-      condition     = anytrue([for r in self.routes : try(r.destination_prefix_list_id, "") != ""])
-      error_message = "adopted private route table ${self.id} (subnet ${each.key}) has no S3 gateway prefix-list route. The network owner must associate the S3 gateway VPC endpoint with every shared private route table (see shared-network's contract)."
+      condition     = anytrue([for r in self.routes : try(r.destination_prefix_list_id, "") == data.aws_ec2_managed_prefix_list.s3[0].id])
+      error_message = "adopted private route table ${self.id} (subnet ${each.key}) has no route to the S3 gateway prefix list (${data.aws_ec2_managed_prefix_list.s3[0].id}). The network owner must associate the S3 gateway VPC endpoint with every shared private route table (see shared-network's contract)."
     }
 
-    # A default egress route (NAT or TGW) must exist, or private-subnet nodes cannot
-    # reach the EKS API endpoint or pull from public registries during bootstrap.
+    # A default egress route must both exist AND point at a live target (NAT gateway or
+    # TGW). A 0.0.0.0/0 route left blackholed by a deleted NAT still shows the destination
+    # but reaches nothing, so private-subnet nodes couldn't hit the EKS API endpoint or
+    # pull from public registries during bootstrap — assert the target, not just the CIDR.
     postcondition {
-      condition     = anytrue([for r in self.routes : try(r.cidr_block, "") == "0.0.0.0/0"])
-      error_message = "adopted private route table ${self.id} (subnet ${each.key}) has no default egress route (0.0.0.0/0). The owner must provide NAT or TGW egress on every shared private route table."
+      condition     = anytrue([for r in self.routes : try(r.cidr_block, "") == "0.0.0.0/0" && (try(r.nat_gateway_id, "") != "" || try(r.transit_gateway_id, "") != "")])
+      error_message = "adopted private route table ${self.id} (subnet ${each.key}) has no live default egress route — a 0.0.0.0/0 route must target a NAT gateway or the transit gateway, not a blackhole (e.g. a deleted NAT). The owner must provide working NAT or TGW egress on every shared private route table."
     }
   }
 }
@@ -96,6 +108,11 @@ locals {
   # is local.azs. Adopt mode: read each subnet's AZ, preserving input order.
   resolved_private_subnet_azs = local.create_mode ? local.azs : [for id in var.adopt_private_subnet_ids : data.aws_subnet.adopt_private[id].availability_zone]
   resolved_public_subnet_azs  = local.create_mode ? local.azs : [for id in var.adopt_public_subnet_ids : data.aws_subnet.adopt_public[id].availability_zone]
+
+  # AZ IDs alongside the names — the cross-account-stable identifier (local.az_ids parallels
+  # local.azs in create mode; the adopt subnet data sources carry availability_zone_id).
+  resolved_private_subnet_az_ids = local.create_mode ? local.az_ids : [for id in var.adopt_private_subnet_ids : data.aws_subnet.adopt_private[id].availability_zone_id]
+  resolved_public_subnet_az_ids  = local.create_mode ? local.az_ids : [for id in var.adopt_public_subnet_ids : data.aws_subnet.adopt_public[id].availability_zone_id]
 
   resolved_private_route_table_ids = local.create_mode ? module.vpc[0].private_route_table_ids : [for id in var.adopt_private_subnet_ids : data.aws_route_table.adopt_private[id].route_table_id]
   resolved_public_route_table_ids  = local.create_mode ? module.vpc[0].public_route_table_ids : []
