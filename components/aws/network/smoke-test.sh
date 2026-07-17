@@ -6,7 +6,6 @@ VPC_ID=$(jq -r '.vpc_id.value' outputs.json)
 VPC_CIDR=$(jq -r '.vpc_cidr_block.value' outputs.json)
 PRIVATE_SUBNETS=$(jq -r '.private_subnet_ids.value[]' outputs.json)
 PUBLIC_SUBNETS=$(jq -r '.public_subnet_ids.value[]' outputs.json)
-INTRA_SUBNETS=$(jq -r '.intra_subnet_ids.value[]' outputs.json)
 NAT_GW_IDS=$(jq -r '.nat_gateway_ids.value[]' outputs.json)
 
 # --- VPC ---
@@ -36,17 +35,6 @@ for SUBNET_ID in $PUBLIC_SUBNETS; do
   AZ=$(aws ec2 describe-subnets --subnet-ids "$SUBNET_ID" --query 'Subnets[0].AvailabilityZone' --output text)
   if [[ "$STATE" != "available" ]]; then
     echo "FAIL: public subnet ${SUBNET_ID} state is '${STATE}'"
-    exit 1
-  fi
-  echo "  ${SUBNET_ID} available in ${AZ}"
-done
-
-echo "Checking intra subnets..."
-for SUBNET_ID in $INTRA_SUBNETS; do
-  STATE=$(aws ec2 describe-subnets --subnet-ids "$SUBNET_ID" --query 'Subnets[0].State' --output text)
-  AZ=$(aws ec2 describe-subnets --subnet-ids "$SUBNET_ID" --query 'Subnets[0].AvailabilityZone' --output text)
-  if [[ "$STATE" != "available" ]]; then
-    echo "FAIL: intra subnet ${SUBNET_ID} state is '${STATE}'"
     exit 1
   fi
   echo "  ${SUBNET_ID} available in ${AZ}"

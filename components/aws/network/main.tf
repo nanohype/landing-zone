@@ -84,13 +84,17 @@ module "vpc" {
 
   public_subnets  = [for i, az in local.azs : cidrsubnet(local.subnet_base_cidr, 8, i)]
   private_subnets = [for i, az in local.azs : cidrsubnet(local.subnet_base_cidr, 8, i + 10)]
-  intra_subnets   = [for i, az in local.azs : cidrsubnet(local.subnet_base_cidr, 8, i + 20)]
 
   # Centralized egress routes private traffic out through the transit gateway (see
-  # tgw.tf), so there are no NAT gateways. Otherwise NAT count follows nat_gateways.
+  # tgw.tf), so there are no NAT gateways. Otherwise the module places either a single
+  # shared NAT (nat_gateways = 1) or one NAT per AZ (nat_gateways = max_azs). The upstream
+  # module ties NAT-gateway count to subnet count — it can build one shared NAT or one per
+  # AZ, but not an arbitrary in-between number — so those are the only two counts it can
+  # honor. nat_gateways' own validation rejects an in-between value rather than letting the
+  # module silently round it up to per-AZ.
   enable_nat_gateway     = !var.centralized_egress
   single_nat_gateway     = var.nat_gateways == 1
-  one_nat_gateway_per_az = var.nat_gateways >= var.max_azs
+  one_nat_gateway_per_az = var.nat_gateways == var.max_azs
 
   enable_dns_hostnames = true
   enable_dns_support   = true

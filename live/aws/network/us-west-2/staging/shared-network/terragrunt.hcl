@@ -9,9 +9,10 @@ include "envcommon" {
 
 inputs = {
   # A /16 shared VPC drawn from the org staging IPAM sub-pool (10.16.0.0/12), discovered by
-  # its org-ipam-staging tag. Local-NAT egress across two zones.
+  # its org-ipam-staging tag. Local-NAT egress, one NAT gateway per zone (per-AZ HA — the
+  # module supports a single shared NAT or one per AZ, not an in-between count).
   ipam_netmask_length = 16
-  nat_gateways        = 2
+  nat_gateways        = 3
 
   # RAM-share private + public subnets to the workload-staging account. Placeholder ID.
   consumer_account_ids = ["222222222222"]

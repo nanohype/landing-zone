@@ -95,7 +95,7 @@ authoritative convention.
 
 - **Private** subnets are always shared. **Public** subnets are shared only when
   `share_public_subnets = true` (needed for internet-facing load balancers in the adopting
-  cluster). Intra subnets are never shared.
+  cluster).
 - The share is `allow_external_principals = false` — it resolves only for principals inside
   the owner's AWS Organization.
 - Principals are the account IDs in `consumer_account_ids`.
@@ -134,13 +134,32 @@ There is no automated activation or unshare path; both are manual, per-engagemen
   discovers the pool by its `org-ipam-<environment>` tag, or takes an explicit `ipam_pool_id`
   override.
 
-**Before tearing a share down** (order matters — RAM will not let you unshare a subnet with
-live consumer ENIs, and forcing it orphans state):
+**Before tearing a share down.** AWS enforces nothing at the unshare step. Per AWS's
+[Working with shared subnets](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-sharing-share-subnet-working-with.html)
+("Unshare a shared subnet"), the owner can unshare a shared subnet **at any time**, including
+while consumer resources are still live in it. After the unshare:
+
+- existing participant resources keep running, but the participant **can no longer create new
+  resources** in the subnet — Karpenter node launches and Load Balancer Controller ENI
+  provisioning start failing on the consumer's side, silently, with **nothing surfaced on the
+  owner's side**. AWS managed services with automated workflows (ELB node replacement, auto
+  scaling) that need continuous subnet access degrade the same way over time.
+
+So the drain-first ordering below is **operator discipline, not an AWS-enforced backstop** —
+verify no consumer workload still references the subnet before you revoke, because nothing
+will stop you if one does:
 
 1. Drain the consumer side first — cordon/drain and delete the adopting cluster's nodes and
    any load balancers so no ENIs remain in the shared subnets.
-2. Remove the consumer from `consumer_account_ids` (revokes the principal association).
-3. Only then destroy or re-CIDR the shared VPC.
+2. Remove the consumer from `consumer_account_ids` (revokes the principal association). This
+   is just an `aws_ram_principal_association` destroy: it applies cleanly and immediately
+   regardless of what is still live on the consumer side — no error is raised if you skip
+   step 1.
+3. Only then destroy or re-CIDR the shared VPC. This step is the one AWS *does* guard: while
+   any participant resource still occupies a shared subnet, AWS refuses to let the owner
+   delete the subnet or the VPC, and only permits it after the participants delete their
+   resources. That guard protects the owner's `destroy` — it is not a guard on the unshare in
+   step 2.
 
 ## Inputs (selected)
 

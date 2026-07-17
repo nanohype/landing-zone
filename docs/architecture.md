@@ -122,7 +122,7 @@ Components deployed once in the management account to establish cross-account go
 Provisions the network foundation for each environment:
 
 - VPC with configurable CIDR (literal or IPAM-drawn), `create` or `adopt` mode
-- Subnet tiers: public, private, intra (across AZs)
+- Subnet tiers: public, private (across AZs)
 - NAT gateways (1/2/3 by environment), or centralized egress via the transit gateway
 - VPC endpoints (optional, via the shared `eks-vpc-endpoints` module)
 - VPC flow logs (staging + production)

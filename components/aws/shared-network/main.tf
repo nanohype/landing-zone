@@ -21,8 +21,11 @@ data "aws_availability_zones" "available" {
 # The org IPAM env sub-pool, discovered by the tag org-networking stamps on it
 # (org-ipam-<environment>). Skipped when ipam_pool_id is pinned explicitly. A pool shared in
 # over RAM from the management account is visible to this account's IPAM and discoverable
-# here. one() asserts the tag resolves to exactly one pool — a missing or ambiguous pool
-# fails the plan with a clear message rather than silently picking the wrong CIDR space.
+# here. The postcondition asserts the tag resolves to exactly one pool: a zero-match (the
+# pool is not shared to this account yet, or — since AWS RAM does not always surface an
+# owner's tags to participant accounts — the org-ipam tag is not visible cross-account) and
+# an ambiguous multi-match both fail the plan with a clear, actionable message instead of the
+# raw null-attribute error a bare one().id would throw on an empty result.
 data "aws_vpc_ipam_pools" "env" {
   count = var.ipam_pool_id == "" ? 1 : 0
 
@@ -30,9 +33,18 @@ data "aws_vpc_ipam_pools" "env" {
     name   = "tag:Name"
     values = ["org-ipam-${var.environment}"]
   }
+
+  lifecycle {
+    postcondition {
+      condition     = length(self.ipam_pools) == 1
+      error_message = "IPAM pool discovery for org-ipam-${var.environment} matched ${length(self.ipam_pools)} pools, expected exactly 1. The org env sub-pool is RAM-shared to this network-owner account by org-networking — confirm it is shared to this account, or set ipam_pool_id explicitly to pin the pool. Note: AWS RAM does not always surface an owner's tags to participant accounts, so tag discovery can find zero pools even when the pool is shared; the ipam_pool_id override is the escape hatch for that case."
+    }
+  }
 }
 
 locals {
+  # The postcondition on data.aws_vpc_ipam_pools.env guarantees exactly one pool before this
+  # is evaluated, so one().id resolves cleanly on the discovery path.
   ipam_pool_id = var.ipam_pool_id != "" ? var.ipam_pool_id : one(data.aws_vpc_ipam_pools.env[0].ipam_pools).id
 
   azs = slice(data.aws_availability_zones.available.names, 0, var.max_azs)
@@ -107,13 +119,16 @@ module "vpc" {
 
   public_subnets  = [for i, az in local.azs : cidrsubnet(local.subnet_base_cidr, 8, i)]
   private_subnets = [for i, az in local.azs : cidrsubnet(local.subnet_base_cidr, 8, i + 10)]
-  intra_subnets   = [for i, az in local.azs : cidrsubnet(local.subnet_base_cidr, 8, i + 20)]
 
   # Centralized egress routes private traffic out through the transit gateway (see tgw.tf),
-  # so there are no NAT gateways. Otherwise NAT count follows nat_gateways.
+  # so there are no NAT gateways. Otherwise the module places either a single shared NAT
+  # (nat_gateways = 1) or one NAT per AZ (nat_gateways = max_azs). The upstream module ties
+  # NAT-gateway count to subnet count — one shared NAT or one per AZ, never an arbitrary
+  # in-between number — so those are the only two counts it can honor. nat_gateways' own
+  # validation rejects an in-between value rather than letting the module silently round it up.
   enable_nat_gateway     = !var.centralized_egress
   single_nat_gateway     = var.nat_gateways == 1
-  one_nat_gateway_per_az = var.nat_gateways >= var.max_azs
+  one_nat_gateway_per_az = var.nat_gateways == var.max_azs
 
   enable_dns_hostnames = true
   enable_dns_support   = true
