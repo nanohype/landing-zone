@@ -357,6 +357,15 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # Opts this cluster into the GPU/accelerator ApplicationSet (gpu-operator,
       # nvidia-dra-driver). Off by default so non-GPU shapes skip GPU addons.
       "eks-agent-platform/accelerators" = "true"
+      } : {}, var.enable_managed_monitoring ? {
+      # Opts this cluster into the opencost ApplicationSet, which gates on this
+      # dedicated label rather than eks-agent-platform/enabled. opencost queries
+      # Amazon Managed Prometheus and needs the monitoring/amp-workspace-id
+      # annotation to render, so it targets managed-monitoring clusters, not every
+      # agent-platform cluster. Same condition that stamps the AMP annotations
+      # opencost reads (the monitoring/* annotations below), so a cluster carrying
+      # this label always carries those annotations too.
+      "monitoring/managed" = "true"
     } : {})
     # Per-cluster wiring for the agent-platform operator: the EKS cluster name
     # (the operator creates the tenant Pod Identity associations on it) + the

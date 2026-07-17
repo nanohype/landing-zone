@@ -23,7 +23,7 @@ intentionally — never bulk-delete them.
 | 18 | Testing batch | ✅ #137 |
 | 18b | tflint severity gate hardening | ✅ #138 |
 | 19 | Docs + agent surface | ✅ #139 |
-| 19b | Cluster-bootstrap `monitoring/managed` label | ☐ |
+| 19b | Cluster-bootstrap `monitoring/managed` label | ✅ #140 |
 | 24 | Endpoint posture flip (after rackctl target 23) | ☐ |
 
 ---
@@ -473,6 +473,22 @@ Acceptance: `tofu validate` + `terragrunt render` clean (should remain the estab
 100%); a cluster with managed monitoring enabled carries the label, one without does
 not; note in this file if the eks-gitops selector turns out to expect a different
 value than `"true"` and fix to match rather than asking eks-gitops to change.
+
+Outcome (✅ #140): **shipped; the selector expects exactly `"true"`, no mismatch.**
+Confirmed against `eks-gitops/applicationsets/addons-opencost.yaml` — its clusters
+generator matches `monitoring/managed: "true"` (alongside
+`argocd.argoproj.io/secret-type: cluster`). Added `"monitoring/managed" = "true"` as a
+fourth `var.enable_managed_monitoring`-gated merge clause on the `argocd_cluster`
+Secret's `labels`, sharing the exact gate that already stamps the `monitoring/*`
+annotations (grafana-url, amp-endpoint, amp-workspace-id) opencost reads — so an
+opencost-selected cluster always carries the AMP workspace-id annotation opencost
+templates its `workspaceId` from, and a cluster without managed monitoring carries
+neither. cluster-bootstrap had no `tofu test` suite (the only component lacking one);
+added `tests/cluster-bootstrap.tftest.hcl` (mocked aws/kubernetes/helm/kubectl
+providers, `command = plan`) proving the label is present-and-`"true"` with managed
+monitoring on and absent with it off, and asserting the label/annotation coupling in
+both directions. `tofu validate`, `task lint` (notice), `task evaluate` (all live
+leaves), and `task fmt:check` all clean.
 
 ## Target 19 — Docs + agent surface (M)
 
