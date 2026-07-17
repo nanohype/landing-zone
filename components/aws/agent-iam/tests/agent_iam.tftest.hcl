@@ -359,3 +359,24 @@ run "tenant_baseline_bedrock_empty_allowlist_is_wildcard" {
     error_message = "an empty allowlist must fall back to exactly one BedrockInvoke statement with Resource=[\"*\"] (the explicit escape hatch)"
   }
 }
+
+# The model-artifacts bucket is SSE-KMS with the data CMK, so every tenant role
+# must be able to use that key through S3 (the operator's per-tenant grant is
+# PlatformId-context-scoped and cannot authorize S3's aws:s3:arn context). The
+# grant must be confined to S3 by kms:ViaService so it is not a freeform decrypt.
+run "tenant_baseline_grants_s3_scoped_data_kms" {
+  command = plan
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      s if try(s.Sid, "") == "ModelArtifactsDataKMS"
+      && s.Effect == "Allow"
+      && contains(s.Action, "kms:GenerateDataKey")
+      && contains(s.Action, "kms:Decrypt")
+      && s.Resource == var.data_kms_key_arn
+      && try(s.Condition.StringEquals["kms:ViaService"], "") == "s3.us-west-2.amazonaws.com"
+    ]) == 1
+    error_message = "tenant baseline must grant kms:Decrypt/GenerateDataKey on the data CMK, confined to S3 via kms:ViaService, so tenants can read/write the SSE-KMS model-artifacts bucket"
+  }
+}

@@ -224,6 +224,31 @@ resource "aws_iam_policy" "tenant_baseline" {
         ]
         Resource = "*"
       },
+      {
+        # The model-artifacts bucket is SSE-KMS with the data CMK, and the
+        # operator writes each tenant a bucket-policy grant scoped to
+        # tenants/<platform>/*. To read or write those objects the tenant must
+        # use the data CMK — but only through S3. The ViaService condition
+        # confines this to S3 (the tenant cannot decrypt cmk-data content
+        # directly), and the operator's per-prefix bucket policy is the actual
+        # tenant boundary. S3 SSE-KMS uses the aws:s3:arn encryption context,
+        # which the operator's per-tenant KMS grant (scoped to the PlatformId
+        # context, for a tenant's own direct KMS usage) deliberately does not
+        # cover — so this baseline grant is what authorizes the S3 path.
+        Sid    = "ModelArtifactsDataKMS"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey",
+        ]
+        Resource = var.data_kms_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "s3.${var.region}.amazonaws.com"
+          }
+        }
+      },
     ]
   })
 
