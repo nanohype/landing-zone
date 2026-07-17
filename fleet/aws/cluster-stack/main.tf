@@ -71,9 +71,13 @@ locals {
 module "network" {
   source = "../../../components/aws/network"
 
+  # network is cluster-agnostic: it provisions one shared VPC per environment,
+  # named and tagged by environment only. The per-cluster subnet tags
+  # (kubernetes.io/cluster/<cluster>, karpenter.sh/discovery) are stamped by the
+  # cluster module below (aws_ec2_tag), so co-located sibling spokes each add
+  # their own onto the shared subnets — the network module takes no cluster_name.
   environment                   = var.environment
   region                        = var.region
-  cluster_name                  = var.cluster_name
   vpc_cidr                      = var.vpc_cidr
   max_azs                       = var.max_azs
   nat_gateways                  = var.nat_gateways

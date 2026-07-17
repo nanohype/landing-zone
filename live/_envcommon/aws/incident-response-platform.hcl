@@ -14,7 +14,7 @@ terraform {
 }
 
 dependency "cluster" {
-  config_path = "${get_path_relative_to_include("live")}/../cluster"
+  config_path = "../cluster"
 
   mock_outputs = {
     cluster_name = "mock-eks"

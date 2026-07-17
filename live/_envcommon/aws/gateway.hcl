@@ -8,6 +8,7 @@ dependency "cluster" {
     cluster_security_group_id = "sg-mock"
     cluster_name              = "mock-eks"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 inputs = {

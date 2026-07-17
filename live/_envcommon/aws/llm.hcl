@@ -8,6 +8,7 @@ dependency "network" {
     vpc_id             = "vpc-mock"
     private_subnet_ids = ["subnet-1", "subnet-2", "subnet-3"]
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 dependency "cluster" {
@@ -16,6 +17,7 @@ dependency "cluster" {
     cluster_security_group_id = "sg-mock"
     cluster_name              = "mock-eks"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 inputs = {

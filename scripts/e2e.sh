@@ -163,9 +163,10 @@ teardown() {
   # Now delete the Platform CR; the operator finalizer reaps the tenant IRSA role
   # while the operator is still running (before the cluster is destroyed below).
   kubectl delete platform "$TENANT" -n eks-agent-platform --wait=true --timeout=180s 2>/dev/null || true
-  # Destroy substrate in reverse dependency order. cluster-bootstrap is in-cluster
-  # only (no billable AWS) + finalizer-prone, so it dies with the cluster.
-  for c in agent-iam cluster network; do
+  # Destroy substrate in reverse dependency order (agent-iam depends on secrets;
+  # both depend on cluster). cluster-bootstrap is in-cluster only (no billable AWS)
+  # + finalizer-prone, so it dies with the cluster.
+  for c in agent-iam secrets cluster network; do
     log "destroy $c"
     if ! tg "$c" destroy -auto-approve >/dev/null 2>&1; then
       # Usual causes: a stale state lock (interrupted run) or orphaned EKS SGs/ENIs
@@ -217,7 +218,7 @@ aws logs delete-log-group --log-group-name "/aws/eks/$CLUSTER/cluster" --region 
   echo "  reaped orphaned log group /aws/eks/$CLUSTER/cluster" || true
 # Clear any stale state locks from a prior interrupted run so this apply isn't
 # blocked waiting on a lock that will never release on its own.
-for c in network cluster cluster-bootstrap agent-iam; do clear_lock "$c"; done
+for c in network cluster secrets cluster-bootstrap agent-iam; do clear_lock "$c"; done
 echo "  account $acct OK; region $REGION clean; tenant=$TENANT"
 
 # --- 1. substrate -----------------------------------------------------------
@@ -238,6 +239,12 @@ log "APPLY cluster-bootstrap (CoreDNS fix + portal-reader token + ArgoCD tenants
 # secret annotations cluster-bootstrap sets. This is the production install path.
 TF_VAR_tenants_repo_url="$TENANTS_REPO" TF_VAR_enable_agent_platform=true \
   tg cluster-bootstrap apply -auto-approve
+# secrets provisions the data CMK that agent-iam encrypts its model-artifacts +
+# eval-reports buckets with (dependency.secrets.outputs.kms_key_arn). It MUST apply
+# before agent-iam — the dependency's mock is restricted to validate/plan, so a
+# missing secrets state fails the agent-iam apply loudly instead of baking the mock
+# KMS ARN into real SSE-KMS + IAM config.
+log "APPLY secrets"; tg secrets apply -auto-approve
 log "APPLY agent-iam"; tg agent-iam apply -auto-approve
 
 # --- 2. operator (GitOps: ArgoCD installs the released image) ----------------

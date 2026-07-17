@@ -73,6 +73,12 @@ variable "vpc_id" {
   type        = string
 }
 
+# --- spoke substrate ---------------------------------------------------------
+variable "data_kms_key_arn" {
+  description = "KMS key ARN (the spoke's secrets-component data CMK) that encrypts agent-iam's model-artifacts + eval-reports buckets at rest. The eks-fleet Cluster composition patches it from the spoke's secrets output — the tofu-native equivalent of the env-tree's dependency.secrets.outputs.kms_key_arn wiring."
+  type        = string
+}
+
 variable "operator_permissions_boundary_arn" {
   description = "Permissions-boundary ARN the agent-platform operator role is minted with. The composition sets it to the boundary of whichever fleet role runs this Workspace — fleet-vend's for cross-account vends (SSM /eks-fleet/<env>/fleet-vend/vend_permissions_boundary_arn), fleet-hub's for same-account (SSM /eks-fleet/<env>/fleet-hub/hub_permissions_boundary_arn) — because the fleet roles' CreateRole gate rejects an operator role that doesn't carry their ceiling. Empty (default) = no boundary (running outside the fleet gate)."
   type        = string
