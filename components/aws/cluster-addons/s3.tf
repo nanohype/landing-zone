@@ -38,6 +38,25 @@ module "velero_bucket" {
   tags = local.tags
 }
 
+# Publish the Velero backup bucket name to SSM so cluster-bootstrap can stamp it
+# onto the ArgoCD cluster Secret as the `velero/backup-bucket` annotation, where
+# the addons-velero ApplicationSet reads it as the backup + snapshot storage
+# location. Published to SSM rather than passed as a terragrunt output because
+# cluster-bootstrap also runs under the fleet-vend provider-opentofu path, which
+# has no terragrunt dependency graph and resolves cross-component values through
+# SSM — the same mechanism managed-monitoring and eval-runtime use. Gated on
+# velero_enabled: a cluster without the backup bucket publishes nothing, and
+# cluster-bootstrap leaves the annotation off (see its enable_velero_backup).
+resource "aws_ssm_parameter" "velero_bucket" {
+  count = var.velero_enabled ? 1 : 0
+
+  name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/velero_bucket"
+  type  = "String"
+  value = module.velero_bucket[0].s3_bucket_id
+
+  tags = local.tags
+}
+
 # Loki log storage
 module "loki_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"

@@ -12,6 +12,28 @@ data "aws_ssm_parameter" "eval_reports_bucket" {
   name  = "/eks-agent-platform/${var.cluster_name}/eval-runtime/eval_reports_bucket"
 }
 
+# The cluster-addons component publishes the Velero backup bucket name to SSM;
+# cluster-bootstrap republishes it as the velero/backup-bucket cluster-Secret
+# annotation for the addons-velero ApplicationSet. Gated on enable_velero_backup
+# so a cluster without Velero (development/hub) doesn't fail the parameter read.
+# The live leaves that enable this also order cluster-addons before
+# cluster-bootstrap so the parameter exists by apply time.
+data "aws_ssm_parameter" "velero_bucket" {
+  count = var.enable_velero_backup ? 1 : 0
+  name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/velero_bucket"
+}
+
+# The dns component publishes this environment's primary domain to SSM;
+# cluster-bootstrap republishes it as the external-dns/domain-filter
+# cluster-Secret annotation so the addons-external-dns ApplicationSet confines
+# external-dns to the environment's Route53 zone. Gated on enable_external_dns so
+# a cluster without a hosted zone (the hub) doesn't fail the parameter read. The
+# live leaves that enable this also order dns before cluster-bootstrap.
+data "aws_ssm_parameter" "external_dns_domain_filter" {
+  count = var.enable_external_dns ? 1 : 0
+  name  = "/eks-agent-platform/${var.environment}/dns/domain_filter"
+}
+
 # The managed-monitoring component writes the Amazon Managed Grafana workspace
 # URL to SSM; cluster-bootstrap stamps it onto the cluster Secret so the
 # dashboards ApplicationSet can inject it into the Grafana CR (whose url field

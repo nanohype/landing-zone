@@ -167,3 +167,26 @@ resource "aws_route53_hosted_zone_dnssec" "this" {
 
   depends_on = [aws_route53_key_signing_key.this]
 }
+
+################################################################################
+# external-dns domain filter
+#
+# Publish this environment's primary domain to SSM so cluster-bootstrap can stamp
+# it onto the ArgoCD cluster Secret as the `external-dns/domain-filter`
+# annotation, where the addons-external-dns ApplicationSet reads it to confine
+# external-dns to this environment's Route53 zone (paired with a per-cluster
+# txtOwnerId, so clusters sharing a zone never delete each other's records).
+#
+# Keyed on the environment, not a cluster name: dns is a per-environment
+# component that owns one primary zone and carries no cluster identity, so the
+# environment is its natural key — matching how cluster-bootstrap reads it back.
+# Published to SSM (not a terragrunt output) because cluster-bootstrap also runs
+# under the fleet-vend provider-opentofu path, which resolves cross-component
+# values through SSM rather than the terragrunt dependency graph.
+resource "aws_ssm_parameter" "external_dns_domain_filter" {
+  name  = "/eks-agent-platform/${var.environment}/dns/domain_filter"
+  type  = "String"
+  value = var.domain_name
+
+  tags = local.tags
+}
