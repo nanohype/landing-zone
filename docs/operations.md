@@ -79,11 +79,15 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 
 | Job | Details |
 |-----|---------|
-| **fmt** | Runs `tofu fmt -check -recursive` on `components/` and `modules/`. Fails if any file is unformatted. |
-| **validate** | Matrix auto-discovered from the tree -- one entry per component. Runs `tofu init -backend=false` then `tofu validate`. Catches syntax errors and missing variable definitions. |
-| **tflint** | Runs TFLint recursively with the AWS plugin (`.tflint-aws.hcl`). Enforces naming conventions, documented variables/outputs, and AWS-specific rules. |
-| **checkov** | Security scan on `components/aws/`. Hard gate -- any finding not covered by the documented skip list in `.checkov.yaml` fails the build. |
-| **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan` to show what would change. |
+| **placeholders** | Runs `scripts/no-placeholders.sh`. Hard gate -- fails if an unfilled `PLACEHOLDER`/`FILL_ME`/`<YOUR_*>`-style sentinel appears in applied deploy config. |
+| **fmt** | Runs `tofu fmt -check -recursive` on `components/`, `modules/`, and `fleet/`, plus `terragrunt hcl format --check` on the Terragrunt HCL layer. Fails if any file is unformatted. |
+| **validate** | Matrix auto-discovered from the tree via `git ls-files` -- one entry per component, fleet vend root, and shared module. Runs `tofu init -backend=false` then `tofu validate`. Catches syntax errors and missing variable definitions. |
+| **test** | Auto-discovers every `tests/*.tftest.hcl` suite under `modules/` and `components/` and runs `tofu test` at plan-time against mocked providers (no AWS access). Hard gate on the security contracts (Pod-Identity-only trust, boundary-gated tenant-role writes). |
+| **tflint** | Runs TFLint recursively with the AWS plugin (`.tflint-aws.hcl`) at `--minimum-failure-severity=notice`. Enforces naming conventions, documented variables/outputs, unused-declaration, and version-constraint rules as hard failures. |
+| **checkov** | Security scan on `components/aws/`, `fleet/aws/`, and `modules/aws/`. Hard gate -- any finding not covered by the documented skip list in `.checkov.yaml` fails the build. |
+| **evaluate** | Credential-less `terragrunt render` on every live leaf. Catches include/function/dependency-wiring breakage that per-component `tofu validate` cannot see. |
+| **mock-outputs** | Runs `scripts/check-mock-outputs.py` -- cross-checks every dependency `mock_outputs` key against the target component's real `outputs.tf`, so a renamed output fails here instead of resolving to a stale mock. |
+| **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan` to show what would change (credential-gated -- skips green when `AWS_ROLE_ARN` is unset). |
 
 ### deploy.yml -- Manual Deploy
 
@@ -92,11 +96,13 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 **Inputs:**
 - `account` -- target account alias
 - `region` -- target region
-- `environment` -- development, staging, or production
+- `environment` -- development, staging, or production (the `environment` input is a fixed choice)
 - `component` -- specific component name or "all"
 - `action` -- plan or apply
 
 Uses GitHub environment protection rules -- production requires approval. When `component=all`, runs `terragrunt run --all -- <action>`. Otherwise targets the specific component directory.
+
+The `environment` choice covers only the three workload environments. The management-account `org` components (the [Organization Components](#organization-components) above) are **local-CLI-only** — deploy them with `task apply ACCOUNT=management ENVIRONMENT=org COMPONENT=<component>` under your own admin/SSO credentials. `org` is intentionally not a workflow choice because the management account is applied rarely and by hand.
 
 ### destroy.yml -- Manual Destroy
 
@@ -113,9 +119,9 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 **Trigger:** Cron schedule, 6 AM UTC Monday-Friday. Also supports manual dispatch.
 
-**Scope:** production, 8 components: `network`, `cluster`, `cluster-addons`, `cluster-bootstrap`, `dns`, `cost`, `observability`, `secrets`.
+**Scope:** every `production` and `staging` live leaf, matrix auto-discovered from the tree with `git ls-files` (mirroring `ci.yml`) -- a new production/staging component starts being watched with no workflow edit. Development is ephemeral and the `org`/`hub` control planes are covered by their own bring-up, so both are excluded.
 
-**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each component. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output.
+**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. Credential-gated: the job skips green until `AWS_ROLE_ARN` is set.
 
 **Response:** See [RB-001: Drift Detected](runbooks.md#rb-001-drift-detected) in the runbooks.
 
@@ -176,7 +182,7 @@ The `service-quotas` component monitors service limits -- VPCs per region, EIPs,
 
 ### Drift Detection (drift.yml)
 
-Production infrastructure is checked for drift every weekday morning. Drift issues appear in GitHub with the `drift` label. See the CI/CD section above for details.
+Production and staging infrastructure is checked for drift every weekday morning. Drift issues appear in GitHub with the `drift` label. See the CI/CD section above for details.
 
 ## Secrets Management
 

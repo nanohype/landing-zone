@@ -27,7 +27,7 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 
 3. Do **not** add default tags/labels (`Environment`, `ManagedBy`, `Project`, etc.) -- they are injected by the root `terragrunt.hcl`.
 
-4. Naming: resource names follow `{project}-{env}-{component}-{resource}`. Default tags come from the provider's `default_tags` (injected by the root config).
+4. Naming: resource names are env-first — `{env}-{component}-{resource}` (e.g. `development-cost-anomaly-monitor`). The environment token leads so names sort and scope by environment. Default tags come from the provider's `default_tags` (injected by the root config).
 
 5. Create `live/_envcommon/aws/{name}.hcl` with:
    - `terraform` block pointing to `components/aws/{name}/`
@@ -37,18 +37,23 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 6. Create `live/aws/{account}/{region}/{env}/{name}/terragrunt.hcl` for each target environment:
    ```hcl
    include "root" {
-     path = find_in_parent_folders()
+     path = find_in_parent_folders("root.hcl")
    }
 
    include "envcommon" {
-     path   = "${dirname(find_in_parent_folders())}/_envcommon/aws/{name}.hcl"
-     expose = true
+     path           = "${dirname(find_in_parent_folders("cloud.hcl"))}/../_envcommon/aws/{name}.hcl"
+     merge_strategy = "deep"
    }
 
    inputs = {
      # environment-specific overrides here
    }
    ```
+   `find_in_parent_folders("root.hcl")` names the file explicitly — a bare
+   `find_in_parent_folders()` fails on the installed Terragrunt because the leaf
+   itself is a `terragrunt.hcl`. The envcommon path anchors on `cloud.hcl` (the
+   `live/aws/` marker) and `merge_strategy = "deep"` merges the leaf `inputs` over
+   the envcommon wiring.
 
 7. CI auto-discovers the new component from the tree (`git ls-files`) -- the validate and plan matrix entries materialize on the next PR with no workflow edit.
 

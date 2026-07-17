@@ -35,7 +35,14 @@ tasks:
         for dir in components/aws/*/ fleet/aws/*/ modules/aws/*/; do
           name=${dir%/}
           echo "Validating $name..."
-          (cd "$dir" && tofu init -backend=false -input=false > /dev/null 2>&1 && tofu validate) || exit 1
+          # Init stdout is noise (provider downloads); keep it quiet. Init stderr is
+          # the failure reason — capture it and surface it on abort instead of
+          # swallowing it, so a broken init aborts with an explanation, not a bare
+          # exit. `tofu validate` errors already print to the terminal directly.
+          if ! (cd "$dir" && tofu init -backend=false -input=false > /dev/null 2>/tmp/tofu-init.err); then
+            echo "init FAILED: $name"; sed 's/^/    /' /tmp/tofu-init.err; exit 1
+          fi
+          (cd "$dir" && tofu validate) || exit 1
         done
         echo "All roots valid."
 
@@ -121,9 +128,14 @@ tasks:
   # === Backend ===
 
   init-backend:
-    desc: "Create the S3 state backend"
+    desc: "Create the S3 state backend (ACCOUNT_ID defaults to the caller's account; REGION defaults to us-west-2)"
+    vars:
+      ACCOUNT_ID: '{{.ACCOUNT_ID | default ""}}'
     cmds:
-      - ./scripts/init-backend-aws.sh
+      - |
+        acct="{{.ACCOUNT_ID}}"
+        [ -n "$acct" ] || acct=$(aws sts get-caller-identity --query Account --output text)
+        ./scripts/init-backend-aws.sh "$acct" "{{.REGION}}"
 
   # === End-to-end (manual, real spend) ===
 

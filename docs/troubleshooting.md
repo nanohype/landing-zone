@@ -16,7 +16,7 @@ terragrunt plan
 Or use the Taskfile:
 
 ```bash
-task plan ENVIRONMENT=<env> COMPONENT=<component>
+task plan ACCOUNT=workload-<env> ENVIRONMENT=<env> COMPONENT=<component>
 ```
 
 ## "Unsupported Terraform Core version"
@@ -167,9 +167,11 @@ If you are migrating state to a new bucket, use `terragrunt init -migrate-state`
 
 ## Component Not in CI Plan Matrix
 
-**Symptom:** A new component is not being planned in CI.
+**Symptom:** A new component is not being validated or planned in CI.
 
-**Fix:** Add the component to the matrices in `.github/workflows/ci.yml`:
-1. Add to the `validate` job matrix (component list)
-2. Add to the `plan` job matrix (environment × component combinations)
-3. Add to the `deploy.yml` and `destroy.yml` component allowlists
+**Cause:** The `ci.yml` validate and plan matrices are auto-discovered from the tree with `git ls-files` — nothing is hand-listed in the workflow. A component that CI never runs is almost always untracked.
+
+**Fix:**
+1. `git add` the component (`components/aws/<name>/`) and each live leaf (`live/aws/<account>/<region>/<env>/<name>/terragrunt.hcl`) — discovery only sees tracked files.
+2. Confirm the paths match the discovery shape: `components/<root>/<cloud>/<component>/` for validate, `live/<cloud>/<account>/<region>/<env>/<component>/terragrunt.hcl` for plan.
+3. Push — the `Validate (…)` and `Plan (…)` matrix entries materialize on the next run. No workflow edit is needed; `deploy.yml`/`destroy.yml` take the component as a free-form input, so there is no allowlist to update either.
