@@ -19,7 +19,7 @@ intentionally — never bulk-delete them.
 | 2 | Broken layers + gates | ✅ #132 |
 | 2b | Cluster-secret annotations for velero + external-dns | ✅ #133 |
 | 16 | Naming/tagging cap-clearers | ✅ #134 |
-| 17 | Security batch | ☐ |
+| 17 | Security batch | ✅ #136 |
 | 18 | Testing batch | ☐ |
 | 19 | Docs + agent surface | ☐ |
 | 24 | Endpoint posture flip (after rackctl target 23) | ☐ |
@@ -236,6 +236,51 @@ that these fixes retire.
 
 Acceptance: checkov green with the narrowed skip file; extended tftest suites prove the
 new denies/conditions; four phases green.
+
+Outcome (✅ #136): **all nine findings shipped.** Resolutions and scope discovered:
+
+- **`workload-identity` silently dropped Conditions.** Its `policy_statements` type
+  had no `Condition` attribute, so the ALB tag conditions would have been ignored at
+  the module boundary (caught by `tofu validate`, not just review). Added
+  `Condition = optional(map(map(string)))` + a null-stripping render local. All IAM
+  conditions passed through the module are `map(map(string))`; `optional(any)` does
+  NOT work (heterogeneous condition shapes can't unify for a `list(object)`). If a
+  future caller needs a list-valued or non-string condition through this module, the
+  type needs widening.
+- **checkov narrowing was rationale-only, not skip-removal.** CKV_AWS_355/290/63 fire
+  on ~40 resources across the repo (every IRSA role with a telemetry/describe grant,
+  plus the boundary ceilings) — and the workload-identity module policy is a single
+  shared resource, so per-consumer inline skips are impossible. Kept them as global
+  skips but corrected the rationale (dropped the false kafka-cluster claim) and
+  removed CKV_AWS_26 outright (all SNS now encrypted). Net checkov: 827/82/7
+  passed, 0 failed, 0 parsing errors.
+- **argo-events scoped to account/region, not a per-cluster prefix.** The finding
+  suggested a per-cluster ARN prefix, but argo-events' event-source queue/topic
+  names aren't contractually cluster-prefixed in this repo; a hard prefix match would
+  silently break sensors consuming differently-named queues. Scoped to
+  `arn:…:sqs:<region>:<account>:*` / `sns` + narrowed verbs instead — removes the
+  cross-account/admin surface without assuming a naming convention.
+- **SNS encryption needed per-component CMKs, not `alias/aws/sns`.** Every topic is
+  published to by an AWS service (CloudWatch Alarms, EventBridge, Cost Anomaly,
+  GuardDuty/Security Hub, AWS Backup); the AWS-managed key can't grant those service
+  principals, so each component got a dedicated CMK whose policy admits its
+  publishers (SourceAccount-scoped). "Cheap" monetarily, but it's 6 new CMKs.
+- **incident-response s3.tf docstring was inaccurate** — it claimed the operator
+  manages that bucket's policy, but `eks-agent-platform`'s `ensureBucketPolicy` only
+  touches the shared `ArtifactsBucketName` (its own comment says "terraform does not
+  own this bucket's policy"). Corrected the comment inline; the app buckets have no
+  operator-managed policy, so the terraform TLS-deny is conflict-free.
+- **Access logging added a sibling log bucket per state bucket** (SSE-S3, its own
+  TLS-deny, `logging.s3.amazonaws.com` grant scoped by SourceArn/SourceAccount).
+
+**Rolls into Target 18 (testing):** this target added `role_policy_json` output
+plumbing to cluster-addons and the gateway/pipeline/druid tenant modules + roots (the
+rag idiom) — Target 18's tenant-IRSA suites should build on these. Target 17 tested
+every IAM/KMS/bucket-policy *deny/condition* it introduced; the pure resource-attribute
+changes on the remaining four SNS topics (cost, observability, service-quotas, backup)
+and the three app-bucket TLS-deny policies are asserted representatively (break-glass +
+org-security SNS, the fleet/portal state-bucket policies) but their per-component
+attribute coverage folds into Target 18's broader suite work.
 
 ## Target 18 — Testing batch (M)
 
