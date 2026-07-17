@@ -1,19 +1,31 @@
-# Unit tests for the mode-aware network component. Runs at command = plan against a
-# mocked AWS provider (no AWS access), so they gate the create/adopt behavior contract:
+# Unit tests for the mode-aware network component. Runs against a mocked AWS provider (no
+# AWS access), so they gate the create/adopt behavior contract:
 #
-#   create default   — a VPC is built, no IPAM preview, no TGW attachment.
-#   create + IPAM     — the VPC CIDR is drawn from the pool (the preview data source runs).
-#   create + TGW +    — zero NAT gateways and a default egress route to the transit
-#     centralized       gateway are planned.
-#   adopt (happy)     — nothing is built (no endpoint SG, no TGW, no preview); outputs
-#                       resolve from the supplied IDs; the preflight passes.
-#   adopt (bad vpc)   — a subnet outside adopt_vpc_id fails the plan at the preflight.
-#   adopt (no S3 rt)  — a private route table without the S3 gateway route fails the plan.
+#   create default    — a VPC is built, no IPAM preview/pin, no TGW attachment; subnet AZ
+#                        IDs resolve to cross-account-stable zone IDs.
+#   create + IPAM      — the VPC CIDR is drawn from the pool; the carving base is pinned.
+#   create + TGW +     — zero NAT gateways and a default egress route to the transit
+#     centralized        gateway are planned.
+#   adopt (happy)      — nothing is built (no endpoint SG, no TGW, no preview); outputs
+#                        resolve from the supplied IDs; the preflight passes.
+#   adopt (bad vpc)    — a subnet outside adopt_vpc_id fails the plan at the preflight.
+#   adopt (no S3 rt)   — a private route table without any S3 gateway route fails the plan.
+#   adopt (wrong plist)— a route table with a non-S3 (e.g. DynamoDB) prefix-list route
+#                        fails: the preflight matches the exact S3 prefix list, not any.
+#   adopt (blackhole)  — a 0.0.0.0/0 route with no live target (deleted NAT) fails: the
+#                        preflight asserts the egress target, not just the destination.
+#   mode conflicts     — adopt + a create-mode lever, and create + adopt_* fields, are
+#                        rejected at variable validation, not silently ignored.
+#   ipam netmask range — a netmask below AWS's /28 subnet floor is rejected with the
+#                        variable's own message, not a raw cidrsubnet provider error.
+#   ipam pin day-2     — after apply, a later preview returning a new CIDR does not shift
+#                        the pinned carving base (no destructive subnet replan).
 
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = {
-      names = ["us-west-2a", "us-west-2b", "us-west-2c", "us-west-2d"]
+      names    = ["us-west-2a", "us-west-2b", "us-west-2c", "us-west-2d"]
+      zone_ids = ["usw2-az1", "usw2-az2", "usw2-az3", "usw2-az4"]
     }
   }
   mock_data "aws_vpc_ipam_preview_next_cidr" {
@@ -26,13 +38,21 @@ mock_provider "aws" {
       cidr_block = "10.9.0.0/16"
     }
   }
+  # The region's AWS-managed S3 gateway prefix list. The adopt preflight asserts this exact
+  # ID is routed, so the happy-path route-table mock below routes pl-s3mock to match.
+  mock_data "aws_ec2_managed_prefix_list" {
+    defaults = {
+      id = "pl-s3mock"
+    }
+  }
   # Happy-path adopt defaults: every subnet is in adopt_vpc_id and every private route
   # table carries the S3 gateway prefix-list route plus a default egress route. The
   # failure runs override these per-instance to inject the contract violation.
   mock_data "aws_subnet" {
     defaults = {
-      vpc_id            = "vpc-adopt"
-      availability_zone = "us-west-2a"
+      vpc_id               = "vpc-adopt"
+      availability_zone    = "us-west-2a"
+      availability_zone_id = "usw2-az1"
     }
   }
   # A route object carries the full aws_route_table.routes schema; the mock must supply
@@ -103,9 +123,17 @@ run "create_default" {
     condition     = length(aws_ec2_transit_gateway_vpc_attachment.this) == 0
     error_message = "no TGW attachment should be planned without transit_gateway_id"
   }
+  assert {
+    condition     = length(terraform_data.ipam_cidr_pin) == 0
+    error_message = "no IPAM carving-base pin should exist when ipam_pool_id is unset"
+  }
+  assert {
+    condition     = join(",", output.private_subnet_az_ids) == "usw2-az1,usw2-az2,usw2-az3"
+    error_message = "create mode must resolve subnet AZ IDs (usw2-azN) from the AZ data source's zone_ids, in order"
+  }
 }
 
-# ── create + IPAM: CIDR drawn from the pool ──
+# ── create + IPAM: CIDR drawn from the pool, carving base pinned ──
 run "create_ipam" {
   command = plan
 
@@ -117,6 +145,10 @@ run "create_ipam" {
   assert {
     condition     = length(data.aws_vpc_ipam_preview_next_cidr.this) == 1
     error_message = "the VPC CIDR must be drawn from the IPAM pool via the preview data source"
+  }
+  assert {
+    condition     = length(terraform_data.ipam_cidr_pin) == 1
+    error_message = "create+IPAM must pin the previewed carving base in state (terraform_data.ipam_cidr_pin)"
   }
   assert {
     condition     = length(aws_security_group.vpc_endpoints) == 1
@@ -180,6 +212,14 @@ run "adopt_happy" {
   assert {
     condition     = join(",", output.private_subnet_ids) == "subnet-a,subnet-b,subnet-c"
     error_message = "adopt mode must resolve private_subnet_ids from the supplied IDs, in order"
+  }
+  assert {
+    condition     = output.private_subnet_az_ids[0] == "usw2-az1"
+    error_message = "adopt mode must expose cross-account-stable AZ IDs (usw2-azN) from the subnet data sources, not AZ names"
+  }
+  assert {
+    condition     = output.network_mode == "adopt"
+    error_message = "network_mode must be published so consumers can derive subnet-tagging ownership"
   }
 }
 
@@ -251,4 +291,220 @@ run "adopt_missing_s3_route" {
   expect_failures = [
     data.aws_route_table.adopt_private,
   ]
+}
+
+# ── adopt failure: a prefix-list route for a NON-S3 service passes a loose check but must
+#    fail the exact-S3 assertion (the wrong-prefix-list probe) ──
+run "adopt_wrong_s3_prefix" {
+  command = plan
+
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+  }
+
+  # A route table whose only prefix-list route targets a DynamoDB (not S3) gateway, plus a
+  # live default egress route. A "any non-empty prefix_list_id" check would wrongly pass;
+  # the exact-S3 assertion must reject it.
+  override_data {
+    target = data.aws_route_table.adopt_private
+    values = {
+      route_table_id = "rtb-ddbonly"
+      routes = [
+        {
+          cidr_block                 = ""
+          ipv6_cidr_block            = ""
+          destination_prefix_list_id = "pl-dynamodb"
+          carrier_gateway_id         = ""
+          core_network_arn           = ""
+          egress_only_gateway_id     = ""
+          gateway_id                 = ""
+          instance_id                = ""
+          local_gateway_id           = ""
+          nat_gateway_id             = ""
+          network_interface_id       = ""
+          odb_network_arn            = ""
+          transit_gateway_id         = ""
+          vpc_endpoint_id            = "vpce-ddbmock"
+          vpc_peering_connection_id  = ""
+        },
+        {
+          cidr_block                 = "0.0.0.0/0"
+          ipv6_cidr_block            = ""
+          destination_prefix_list_id = ""
+          carrier_gateway_id         = ""
+          core_network_arn           = ""
+          egress_only_gateway_id     = ""
+          gateway_id                 = ""
+          instance_id                = ""
+          local_gateway_id           = ""
+          nat_gateway_id             = "nat-mock"
+          network_interface_id       = ""
+          odb_network_arn            = ""
+          transit_gateway_id         = ""
+          vpc_endpoint_id            = ""
+          vpc_peering_connection_id  = ""
+        },
+      ]
+    }
+  }
+
+  expect_failures = [
+    data.aws_route_table.adopt_private,
+  ]
+}
+
+# ── adopt failure: a 0.0.0.0/0 route with no live target (blackholed by a deleted NAT)
+#    passes a destination-only check but must fail the egress-target assertion ──
+run "adopt_blackholed_default" {
+  command = plan
+
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+  }
+
+  # A valid S3 gateway route, but the default route's target is empty — a blackhole. A
+  # "cidr_block == 0.0.0.0/0" check would wrongly pass; asserting the target must reject it.
+  override_data {
+    target = data.aws_route_table.adopt_private
+    values = {
+      route_table_id = "rtb-blackhole"
+      routes = [
+        {
+          cidr_block                 = ""
+          ipv6_cidr_block            = ""
+          destination_prefix_list_id = "pl-s3mock"
+          carrier_gateway_id         = ""
+          core_network_arn           = ""
+          egress_only_gateway_id     = ""
+          gateway_id                 = ""
+          instance_id                = ""
+          local_gateway_id           = ""
+          nat_gateway_id             = ""
+          network_interface_id       = ""
+          odb_network_arn            = ""
+          transit_gateway_id         = ""
+          vpc_endpoint_id            = "vpce-s3mock"
+          vpc_peering_connection_id  = ""
+        },
+        {
+          cidr_block                 = "0.0.0.0/0"
+          ipv6_cidr_block            = ""
+          destination_prefix_list_id = ""
+          carrier_gateway_id         = ""
+          core_network_arn           = ""
+          egress_only_gateway_id     = ""
+          gateway_id                 = ""
+          instance_id                = ""
+          local_gateway_id           = ""
+          nat_gateway_id             = ""
+          network_interface_id       = ""
+          odb_network_arn            = ""
+          transit_gateway_id         = ""
+          vpc_endpoint_id            = ""
+          vpc_peering_connection_id  = ""
+        },
+      ]
+    }
+  }
+
+  expect_failures = [
+    data.aws_route_table.adopt_private,
+  ]
+}
+
+# ── mode conflict: adopt mode with a create-mode lever set is rejected, not ignored ──
+run "adopt_rejects_create_lever" {
+  command = plan
+
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+    # A create-mode lever alongside adopt mode. ipam_netmask_length is set to a valid value
+    # so only ipam_pool_id's adopt-reject validation fails, nothing coupled to it.
+    ipam_pool_id        = "ipam-pool-05mock"
+    ipam_netmask_length = 16
+  }
+
+  expect_failures = [
+    var.ipam_pool_id,
+  ]
+}
+
+# ── mode conflict: create mode with adopt_* fields set is rejected, not ignored ──
+run "create_rejects_adopt_fields" {
+  command = plan
+
+  variables {
+    network_mode = "create"
+    adopt_vpc_id = "vpc-adopt"
+  }
+
+  expect_failures = [
+    var.adopt_vpc_id,
+  ]
+}
+
+# ── ipam netmask range: a base longer than /20 carves sub-/28 subnets AWS rejects, so the
+#    variable validation must catch it before the raw cidrsubnet provider error ──
+run "ipam_netmask_too_long" {
+  command = plan
+
+  variables {
+    ipam_pool_id        = "ipam-pool-05mock"
+    ipam_netmask_length = 26
+  }
+
+  expect_failures = [
+    var.ipam_netmask_length,
+  ]
+}
+
+# ── ipam pin: after apply, a later preview returning a different CIDR must not shift the
+#    pinned carving base — the guard against the day-2 destructive subnet replan ──
+run "ipam_pin_apply" {
+  command = apply
+
+  variables {
+    ipam_pool_id        = "ipam-pool-05mock"
+    ipam_netmask_length = 16
+  }
+
+  assert {
+    condition     = terraform_data.ipam_cidr_pin[0].output == "10.42.0.0/16"
+    error_message = "the IPAM carving base must pin to the first previewed CIDR after apply"
+  }
+}
+
+run "ipam_pin_holds_on_day2" {
+  command = plan
+
+  variables {
+    ipam_pool_id        = "ipam-pool-05mock"
+    ipam_netmask_length = 16
+  }
+
+  # Simulate the pool having allocated the first block: the preview now returns the next
+  # free CIDR. The pinned base must ignore it, or every subnet would replan destructively.
+  override_data {
+    target = data.aws_vpc_ipam_preview_next_cidr.this
+    values = {
+      cidr = "10.99.0.0/16"
+    }
+  }
+
+  assert {
+    condition     = data.aws_vpc_ipam_preview_next_cidr.this[0].cidr == "10.99.0.0/16" && terraform_data.ipam_cidr_pin[0].output == "10.42.0.0/16"
+    error_message = "the preview may move on day 2, but the pinned carving base must stay at the first applied CIDR (proves the pin is load-bearing, not decorative)"
+  }
 }

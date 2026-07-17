@@ -12,17 +12,15 @@ variable "environment" {
   }
 }
 
-# Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
-# tflint-ignore: terraform_unused_declarations
 variable "region" {
-  description = "AWS region"
+  description = "AWS region — also selects the AWS-managed S3 gateway prefix list the adopt preflight asserts against (com.amazonaws.<region>.s3)."
   type        = string
 }
 
 variable "network_mode" {
   description = <<-EOT
     create — this component owns a VPC: it builds the VPC, subnets, endpoints, egress,
-    and the ELB role tags (the default; today's only behavior).
+    and the ELB role tags (the default).
 
     adopt — this component participates in a VPC it does not own (a shared VPC in the
     same account, or one shared cross-account via AWS RAM). It builds nothing: it
@@ -38,6 +36,12 @@ variable "network_mode" {
     condition     = can(regex("^(create|adopt)$", var.network_mode))
     error_message = "network_mode must be exactly \"create\" or \"adopt\"."
   }
+
+  # The cross-mode contract (a field from the wrong side is a contradiction, not a no-op)
+  # is enforced on each field's own variable below, referencing network_mode one way — the
+  # levers reject adopt mode, the adopt_* inputs reject create mode. Anchoring both halves
+  # here instead would make network_mode and the adopt_* variables reference each other and
+  # form a validation cycle.
 }
 
 # --- create-mode inputs -----------------------------------------------------
@@ -63,6 +67,13 @@ variable "ipam_pool_id" {
     condition     = var.ipam_pool_id == "" || var.vpc_cidr == "10.0.0.0/16"
     error_message = "ipam_pool_id and a non-default vpc_cidr are mutually exclusive — with an IPAM pool the CIDR is drawn from the pool, so leave vpc_cidr at its default."
   }
+
+  # adopt mode participates in a VPC it does not own, so this create-mode lever has nothing
+  # to act on — reject the combination rather than silently ignoring it.
+  validation {
+    condition     = var.network_mode != "adopt" || var.ipam_pool_id == ""
+    error_message = "ipam_pool_id is a create-mode lever and does not apply when network_mode = adopt — leave it unset for an adopted VPC."
+  }
 }
 
 variable "ipam_netmask_length" {
@@ -70,10 +81,16 @@ variable "ipam_netmask_length" {
   type        = number
   default     = 0
 
-  # An IPAM allocation needs a netmask; a literal allocation must not carry one.
+  # An IPAM allocation needs a netmask; a literal allocation must not carry one. The upper
+  # bound is 20, not the /28 the pool itself allows: subnets are carved 8 bits smaller than
+  # the VPC block (cidrsubnet(..., 8, ...) in main.tf), so a /20 base is the smallest that
+  # still yields /28 subnets — AWS's minimum subnet size — across the public/private/intra
+  # tiers. A longer base (a /21 or beyond) carves sub-/28 subnets AWS rejects at apply, and
+  # anything past /24 fails even earlier with a raw cidrsubnet "insufficient address space"
+  # provider error instead of this message.
   validation {
-    condition     = var.ipam_pool_id == "" ? var.ipam_netmask_length == 0 : (var.ipam_netmask_length >= 16 && var.ipam_netmask_length <= 28)
-    error_message = "ipam_netmask_length must be 0 when no ipam_pool_id is set, and between 16 and 28 when one is."
+    condition     = var.ipam_pool_id == "" ? var.ipam_netmask_length == 0 : (var.ipam_netmask_length >= 16 && var.ipam_netmask_length <= 20)
+    error_message = "ipam_netmask_length must be 0 when no ipam_pool_id is set, and between 16 and 20 when one is — subnets are carved 8 bits smaller than the VPC block, so a base longer than /20 would produce subnets below AWS's /28 minimum."
   }
 }
 
@@ -95,6 +112,13 @@ variable "transit_gateway_id" {
     condition     = var.transit_gateway_id == "" || var.ipam_pool_id != ""
     error_message = "transit_gateway_id requires an IPAM-allocated CIDR (set ipam_pool_id) — a raw literal vpc_cidr can overlap another attached VPC and break TGW routing."
   }
+
+  # adopt mode participates in a VPC it does not own, so this create-mode lever has nothing
+  # to act on — reject the combination rather than silently ignoring it.
+  validation {
+    condition     = var.network_mode != "adopt" || var.transit_gateway_id == ""
+    error_message = "transit_gateway_id is a create-mode lever and does not apply when network_mode = adopt — the VPC owner runs the attachment for an adopted VPC."
+  }
 }
 
 variable "centralized_egress" {
@@ -110,6 +134,13 @@ variable "centralized_egress" {
   validation {
     condition     = !var.centralized_egress || var.transit_gateway_id != ""
     error_message = "centralized_egress requires transit_gateway_id — there is nothing to route the default egress to without a transit gateway."
+  }
+
+  # adopt mode participates in a VPC it does not own, so this create-mode lever has nothing
+  # to act on — reject the combination rather than silently ignoring it.
+  validation {
+    condition     = var.network_mode != "adopt" || !var.centralized_egress
+    error_message = "centralized_egress is a create-mode lever and does not apply when network_mode = adopt — the VPC owner runs egress for an adopted VPC."
   }
 }
 
@@ -161,6 +192,13 @@ variable "adopt_vpc_id" {
     condition     = var.network_mode != "adopt" || var.adopt_vpc_id != ""
     error_message = "adopt_vpc_id is required when network_mode = adopt."
   }
+
+  # create builds its own VPC, so an adopt_* reference to a foreign VPC is meaningless
+  # there — reject it rather than silently ignoring it.
+  validation {
+    condition     = var.network_mode != "create" || var.adopt_vpc_id == ""
+    error_message = "adopt_vpc_id is an adopt-mode input and does not apply when network_mode = create — create builds its own VPC, so leave it empty."
+  }
 }
 
 variable "adopt_private_subnet_ids" {
@@ -172,12 +210,24 @@ variable "adopt_private_subnet_ids" {
     condition     = var.network_mode != "adopt" || length(var.adopt_private_subnet_ids) > 0
     error_message = "adopt_private_subnet_ids must be non-empty when network_mode = adopt."
   }
+
+  # create builds its own subnets — reject adopt_* references under create mode.
+  validation {
+    condition     = var.network_mode != "create" || length(var.adopt_private_subnet_ids) == 0
+    error_message = "adopt_private_subnet_ids is an adopt-mode input and does not apply when network_mode = create — leave it empty."
+  }
 }
 
 variable "adopt_public_subnet_ids" {
   description = "Public subnet IDs in the adopted VPC (adopt mode). Empty is valid for a private-only cluster."
   type        = list(string)
   default     = []
+
+  # create builds its own subnets — reject adopt_* references under create mode.
+  validation {
+    condition     = var.network_mode != "create" || length(var.adopt_public_subnet_ids) == 0
+    error_message = "adopt_public_subnet_ids is an adopt-mode input and does not apply when network_mode = create — leave it empty."
+  }
 }
 
 variable "team" {

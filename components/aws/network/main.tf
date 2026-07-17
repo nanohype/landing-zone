@@ -10,13 +10,18 @@ locals {
 
   azs = slice(data.aws_availability_zones.available.names, 0, var.max_azs)
 
-  # Subnet blocks are carved from the literal vpc_cidr in plain create mode, or from
-  # the IPAM preview when drawing from a pool. The preview is the CIDR IPAM will
-  # allocate next for this pool + netmask, so the carved subnets line up with the
-  # VPC block the module allocates at apply. (The preview is not a reservation; a
-  # single-writer IaC flow is the assumed model, matching the org's per-account,
-  # per-environment VPC ownership.)
-  subnet_base_cidr = local.ipam_enabled ? data.aws_vpc_ipam_preview_next_cidr.this[0].cidr : var.vpc_cidr
+  # AZ IDs parallel to local.azs. Names (us-west-2a) map to different physical zones per
+  # account; IDs (usw2-az1) are the only cross-account-stable zone identifier, which is
+  # what a cross-account subnet consumer must pin on. aws_availability_zones returns names
+  # and zone_ids in the same order, so the same slice lines them up.
+  az_ids = slice(data.aws_availability_zones.available.zone_ids, 0, var.max_azs)
+
+  # Subnet blocks are carved from the literal vpc_cidr in plain create mode, or from the
+  # pinned IPAM base when drawing from a pool. Under IPAM the base comes from
+  # terraform_data.ipam_cidr_pin (see below) rather than the raw preview, so it stays fixed
+  # across day-2 plans — the carved subnets line up with the VPC block the module allocated
+  # at apply, not whatever the pool would preview next.
+  subnet_base_cidr = local.ipam_enabled ? terraform_data.ipam_cidr_pin[0].output : var.vpc_cidr
 
   tags = merge(var.tags, {
     Component = "network"
@@ -25,14 +30,35 @@ locals {
 }
 
 ################################################################################
-# IPAM CIDR preview (create mode, when drawing from a pool)
+# IPAM CIDR preview + pin (create mode, when drawing from a pool)
 ################################################################################
 
+# The preview is the next CIDR the pool would allocate for this netmask. It is not a
+# reservation, and it re-evaluates on every plan — so once the VPC has allocated the
+# previewed block, the next plan previews the following free CIDR.
 data "aws_vpc_ipam_preview_next_cidr" "this" {
   count = local.ipam_enabled ? 1 : 0
 
   ipam_pool_id   = var.ipam_pool_id
   netmask_length = var.ipam_netmask_length
+}
+
+# Pin the preview in state so the subnet-carving base never moves after the first apply.
+# Carving straight off the data source would shift every subnet to a destructive
+# replacement on the next plan (the new CIDRs don't even fit the VPC's already-allocated
+# block, so the replacement can't apply — terraform-aws-modules/vpc#980, and this repo's
+# scheduled drift detection would trip on it immediately). ignore_changes freezes input at
+# the first applied value, so output — the carving base — stays put regardless of what the
+# preview returns on later plans. A single-writer IaC flow is the assumed model, matching
+# the org's per-account, per-environment VPC ownership.
+resource "terraform_data" "ipam_cidr_pin" {
+  count = local.ipam_enabled ? 1 : 0
+
+  input = data.aws_vpc_ipam_preview_next_cidr.this[0].cidr
+
+  lifecycle {
+    ignore_changes = [input]
+  }
 }
 
 ################################################################################
@@ -120,9 +146,10 @@ resource "aws_security_group" "vpc_endpoints" {
     from_port = 443
     to_port   = 443
     protocol  = "tcp"
-    # The VPC's CIDR: the literal vpc_cidr, or the IPAM-previewed block the VPC is
-    # allocated from. Known at plan either way (unlike the module's computed
-    # vpc_cidr_block, which is unknown until apply under IPAM).
+    # The VPC's CIDR: the literal vpc_cidr, or the pinned IPAM base the VPC is allocated
+    # from (terraform_data.ipam_cidr_pin). Either way it's the same block the subnets are
+    # carved from, so the endpoint SG admits exactly the VPC's own address range — not the
+    # module's computed vpc_cidr_block, which is unknown until apply under IPAM.
     cidr_blocks = [local.subnet_base_cidr]
     description = "HTTPS from VPC"
   }
