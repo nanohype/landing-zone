@@ -430,9 +430,12 @@ resource "aws_iam_role_policy" "operator" {
           # `platforms.platform.nanohype.dev did not finalize`.
           "s3:DeleteBucketPolicy",
         ]
+        # model-artifacts only. The operator owns the model-artifacts bucket
+        # policy (ensureBucketPolicy extends it per-tenant); the eval-reports
+        # policy is terraform-owned and static, so the operator must never write
+        # it — granting it here would reintroduce a two-writer policy hazard.
         Resource = [
           aws_s3_bucket.model_artifacts.arn,
-          aws_s3_bucket.eval_reports.arn,
         ]
       },
       {
