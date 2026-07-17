@@ -1,9 +1,11 @@
 variable "environment" {
-  type = string
+  description = "Environment name (development, staging, production). Prefixes every derived tenant resource name."
+  type        = string
 }
 
 variable "region" {
-  type = string
+  description = "AWS region."
+  type        = string
 }
 
 variable "tenant_id" {
@@ -16,6 +18,7 @@ variable "tenant_id" {
 }
 
 variable "tenant_config" {
+  description = "Per-tenant API-gateway configuration: WAF/Cognito/bot-control toggles, deletion protection, stage name, logging level, and the WAF-rate-limit / throttle / Cognito-token knobs."
   type = object({
     waf_enabled                = bool
     cognito_enabled            = bool

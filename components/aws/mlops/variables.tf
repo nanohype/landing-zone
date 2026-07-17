@@ -48,6 +48,20 @@ variable "tenants" {
     sqs_max_receive_count         = optional(number, 3)
     sqs_dlq_retention_days        = optional(number, 14)
   }))
+
+  # no-doubled-env: reject a tenant key that repeats the environment token, which
+  # would compose into a doubled "<env>-mlops-<env>-…" name.
+  validation {
+    condition     = alltrue([for k in keys(var.tenants) : k != var.environment && !startswith(k, "${var.environment}-")])
+    error_message = "a tenant key must not equal or be prefixed with the environment token '${var.environment}-': it composes into a doubled '<env>-mlops-<env>…' resource name."
+  }
+
+  # bucket-global-uniqueness budget: the tightest S3 name is
+  # <env>-mlops-<tenant>-<account:12>-artifacts; S3 caps names at 63 chars.
+  validation {
+    condition     = alltrue([for k in keys(var.tenants) : length("${var.environment}-mlops-${k}-000000000000-artifacts") <= 63])
+    error_message = "a tenant key is too long: '<env>-mlops-<tenant>-<account:12>-artifacts' must fit S3's 63-char limit. With environment='${var.environment}' and a 12-char account id, a tenant key has at most ${63 - length(var.environment) - 30} chars."
+  }
 }
 
 variable "team" {

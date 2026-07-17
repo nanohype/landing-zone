@@ -3,9 +3,13 @@
 ################################################################################
 
 locals {
-  prefix      = "${var.environment}-mlops-${var.tenant_id}"
-  namespace   = "mlops-${var.tenant_id}"
-  tenant_tags = merge(var.tags, { Tenant = var.tenant_id })
+  prefix    = "${var.environment}-mlops-${var.tenant_id}"
+  namespace = "mlops-${var.tenant_id}"
+  # Account-qualified so S3 bucket names are globally unique (S3's namespace is
+  # global). The component's `tenants` variable validation asserts the composed
+  # length fits 63.
+  bucket_prefix = "${local.prefix}-${var.account_id}"
+  tenant_tags   = merge(var.tags, { Tenant = var.tenant_id })
 }
 
 resource "aws_kms_key" "this" {
@@ -23,7 +27,7 @@ module "datasets_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-datasets"
+  bucket = "${local.bucket_prefix}-datasets"
 
   block_public_acls       = true
   block_public_policy     = true
@@ -61,7 +65,7 @@ module "artifacts_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-artifacts"
+  bucket = "${local.bucket_prefix}-artifacts"
 
   block_public_acls       = true
   block_public_policy     = true

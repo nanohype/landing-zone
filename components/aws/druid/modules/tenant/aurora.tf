@@ -6,7 +6,11 @@ locals {
   db_name     = "druid_${replace(var.tenant_id, "-", "_")}"
   db_username = "druid_admin"
   prefix      = "${var.environment}-druid-${var.tenant_id}"
-  tenant_tags = merge(var.tags, { Tenant = var.tenant_id })
+  # Account-qualified so S3 bucket names are globally unique (S3's namespace is
+  # global). The component's `tenants` variable validation asserts the composed
+  # length fits 63.
+  bucket_prefix = "${local.prefix}-${var.account_id}"
+  tenant_tags   = merge(var.tags, { Tenant = var.tenant_id })
 }
 
 resource "aws_db_subnet_group" "this" {

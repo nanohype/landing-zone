@@ -116,9 +116,9 @@ variable "audit_s3_intelligent_tiering_days" {
 }
 
 variable "team" {
-  description = "Owning team for tagging."
+  description = "Owning team for this component (drives the Team tag + ArgoCD AppProject scope)."
   type        = string
-  default     = "protohype"
+  default     = "workplace"
 }
 
 variable "tags" {

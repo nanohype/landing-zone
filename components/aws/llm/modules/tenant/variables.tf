@@ -1,9 +1,16 @@
 variable "environment" {
-  type = string
+  description = "Environment name (development, staging, production). Prefixes every derived tenant resource name."
+  type        = string
 }
 
 variable "region" {
-  type = string
+  description = "AWS region."
+  type        = string
+}
+
+variable "account_id" {
+  description = "AWS account ID. Embedded into S3 bucket names for global uniqueness."
+  type        = string
 }
 
 variable "tenant_id" {
@@ -11,11 +18,12 @@ variable "tenant_id" {
   type        = string
   validation {
     condition     = can(regex("^[a-z0-9]([a-z0-9-]{0,22}[a-z0-9])?$", var.tenant_id))
-    error_message = "tenant_id must be a lowercase RFC-1123 label of at most 24 characters: it is concatenated into S3 bucket (63-char) and IAM role (64-char) names, and a longer id overflows the tightest name (<env>-<domain>-<tenant_id>-<purpose>) once the environment is a full word."
+    error_message = "tenant_id must be a lowercase RFC-1123 label of at most 24 characters: it is concatenated into S3 bucket (63-char) and IAM role (64-char) names. The account-qualified bucket name <env>-<domain>-<tenant_id>-<account>-<purpose> is the tightest; the exact per-component budget for a full-word environment is enforced by the component-level tenants validation."
   }
 }
 
 variable "tenant_config" {
+  description = "Per-tenant LLM configuration: deletion-protection, EFS mount options, SQS tuning, DynamoDB TTL/PITR, HuggingFace token toggle, and model-storage lifecycle windows."
   type = object({
     deletion_protection           = bool
     efs_encryption                = bool
@@ -33,15 +41,18 @@ variable "tenant_config" {
 }
 
 variable "vpc_id" {
-  type = string
+  description = "VPC ID the tenant's EFS mount targets and private endpoints sit in."
+  type        = string
 }
 
 variable "private_subnets" {
-  type = list(string)
+  description = "Private subnet IDs (multi-AZ) for the tenant's EFS mount targets."
+  type        = list(string)
 }
 
 variable "cluster_sg_id" {
-  type = string
+  description = "EKS cluster security group ID used as the ingress source so only pods reach the tenant's data plane."
+  type        = string
 }
 
 variable "cluster_name" {

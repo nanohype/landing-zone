@@ -49,6 +49,14 @@ variable "tenants" {
     throttle_burst_limit       = optional(number, 100)
     throttle_quota_per_month   = optional(number, 500000)
   }))
+
+  # no-doubled-env: reject a tenant key that repeats the environment token, which
+  # would compose into a doubled "<env>-gateway-<env>-…" name. gateway provisions no
+  # S3 buckets, so only the doubling guard applies (no 63-char budget check).
+  validation {
+    condition     = alltrue([for k in keys(var.tenants) : k != var.environment && !startswith(k, "${var.environment}-")])
+    error_message = "a tenant key must not equal or be prefixed with the environment token '${var.environment}-': it composes into a doubled '<env>-gateway-<env>…' resource name."
+  }
 }
 
 variable "team" {

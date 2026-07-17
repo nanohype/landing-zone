@@ -77,9 +77,9 @@ variable "sqs_max_receive_count" {
 }
 
 variable "team" {
-  description = "Owning team for this component (drives tagging + ArgoCD AppProject scope)."
+  description = "Owning team for this component (drives the Team tag + ArgoCD AppProject scope)."
   type        = string
-  default     = "protohype"
+  default     = "reliability"
 }
 
 variable "tags" {

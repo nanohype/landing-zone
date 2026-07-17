@@ -14,6 +14,7 @@ module "tenant" {
 
   environment     = var.environment
   region          = var.region
+  account_id      = local.account_id
   tenant_id       = each.key
   tenant_config   = each.value
   vpc_id          = var.vpc_id

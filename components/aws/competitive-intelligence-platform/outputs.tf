@@ -1,11 +1,11 @@
 output "app_access_policy_arn" {
   description = "Managed policy carrying competitive-intelligence's substrate grants. Reference it from Platform.spec.identity.extraPolicyArns; the eks-agent-platform operator attaches it to the tenant role."
-  value       = aws_iam_policy.app_access.arn
+  value       = module.platform_app.app_access_policy_arn
 }
 
 output "tenant_role_arn" {
   description = "Operator-reconciled tenant role the chart's ServiceAccount is bound to via the EKS Pod Identity association."
-  value       = data.aws_iam_role.tenant.arn
+  value       = module.platform_app.tenant_role_arn
 }
 
 output "aurora_cluster_endpoint" {

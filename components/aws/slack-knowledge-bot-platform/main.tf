@@ -21,8 +21,13 @@
  */
 
 locals {
-  prefix = "slack-knowledge-bot-${var.environment}"
-  tags   = merge({ Component = "slack-knowledge-bot-platform", Tenant = "slack-knowledge-bot" }, var.tags)
+  prefix     = "${var.environment}-slack-knowledge-bot"
+  account_id = data.aws_caller_identity.current.account_id
+  tags = merge({
+    Component = "slack-knowledge-bot-platform"
+    Tenant    = "slack-knowledge-bot"
+    Team      = var.team
+  }, var.tags)
 }
 
 data "aws_caller_identity" "current" {}

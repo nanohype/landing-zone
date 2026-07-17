@@ -7,10 +7,23 @@
  * expiration after `audit_s3_lifecycle_days`.
  */
 
+locals {
+  # Account-qualified so the name is globally unique across accounts (S3's
+  # namespace is global). The precondition asserts it against S3's 63-char limit.
+  audit_bucket = "${local.prefix}-${local.account_id}-audit"
+}
+
 resource "aws_s3_bucket" "audit" {
-  bucket = "${local.prefix}-audit"
+  bucket = local.audit_bucket
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length(local.audit_bucket) <= 63
+      error_message = "bucket ${local.audit_bucket} exceeds S3's 63-character limit."
+    }
+  }
 }
 
 resource "aws_s3_bucket_versioning" "audit" {
