@@ -22,6 +22,7 @@ intentionally — never bulk-delete them.
 | 17 | Security batch | ✅ #136 |
 | 18 | Testing batch | ☐ |
 | 19 | Docs + agent surface | ☐ |
+| 19b | Cluster-bootstrap `monitoring/managed` label | ☐ |
 | 24 | Endpoint posture flip (after rackctl target 23) | ☐ |
 
 ---
@@ -284,6 +285,18 @@ attribute coverage folds into Target 18's broader suite work.
 
 ## Target 18 — Testing batch (M)
 
+**Finding from Target 16 (PR #134):** `terraform_documented_variables`,
+`terraform_documented_outputs`, `terraform_unused_declarations`, and
+`terraform_required_providers` are all warning-severity tflint rules, but CI runs
+`--minimum-failure-severity=error` — so these rules never actually fail a build, which
+is why Target 16 found undescribed variables tflint should have caught. Either raise
+these to error severity (if the repo's real state can pass at that bar today) or add an
+explicit, justified allowlist for any residual violations — don't leave a
+silently-toothless lint gate. Known residuals at time of writing: `secrets/variables.tf`
+unused `cluster_name`, `secrets/main.tf` missing a `random` provider constraint,
+`service-quotas/variables.tf` unused `region`, `slack-knowledge-bot-platform/variables.tf`
+unused `audit_ttl_days`.
+
 Findings: `fleet-hub` (management-account twin of tested fleet-vend) has no suite;
 6 of 7 tenant-IRSA modules untested (only `rag/tests/` exists); drift watch covers 8 of
 23 production components via a hardcoded matrix (`.github/workflows/drift.yml:38-45`)
@@ -300,6 +313,29 @@ staging; `concurrency:` groups keyed on env/component for the mutating workflows
 
 Acceptance: `task test` green locally; drift workflow lists every applied production +
 staging component; two dispatched deploys on one env serialize.
+
+## Target 19b — Cluster-bootstrap `monitoring/managed` label (S)
+
+**Scope discovered by eks-gitops Target 21 (PR #130).** That target made opencost gate
+on a new dedicated label, `monitoring/managed`, instead of overloading
+`eks-agent-platform/enabled` as a monitoring proxy. Nothing produces this label yet —
+`cluster-bootstrap` currently stamps `monitoring/amp-workspace-id` as an *annotation*
+only, under `var.enable_managed_monitoring` (`components/aws/cluster-bootstrap/bootstrap.tf`,
+near line 383), with no corresponding *label*. This is the same producer/consumer gap
+pattern as Target 2b (velero/external-dns annotations) — a small, well-scoped addition,
+not a design question.
+
+Approach: add `"monitoring/managed" = "true"` to the `argocd_cluster` Secret's `labels`
+merge block in `cluster-bootstrap/bootstrap.tf`, conditional on
+`var.enable_managed_monitoring` the same way the existing annotation is gated. Confirm
+against eks-gitops' `applicationsets/addons-opencost.yaml` (read that repo, don't
+guess) that the label key/value this target produces is exactly what the selector there
+expects.
+
+Acceptance: `tofu validate` + `terragrunt render` clean (should remain the established
+100%); a cluster with managed monitoring enabled carries the label, one without does
+not; note in this file if the eks-gitops selector turns out to expect a different
+value than `"true"` and fix to match rather than asking eks-gitops to change.
 
 ## Target 19 — Docs + agent surface (M)
 
@@ -352,3 +388,22 @@ the env-supplied path safe. Document the input pair and the rackctl path in
 Acceptance: `terragrunt plan` on dev + hub cluster leaves succeeds from the committed
 tree (private); with the two TF_VARs exported, plan shows public + allowlist; docs name
 rackctl as the owner of the fragile input.
+
+## Additional scope discovered mid-campaign (not yet assigned a target)
+
+**`tenants-protohype` namespace default (found by Target 16, PR #134):** the four
+`*-platform` components' `namespace` variable still defaults to `tenants-protohype` — a
+retired incubator codename (see `feedback_codename_full_rename` history: the rest of the
+org's cross-layer codename rename was completed, this default is residue or a deliberate
+leftover, unclear which). Target 16 deliberately left it alone because the namespace
+value is part of the cross-repo Platform-CR/eks-gitops contract (the operator reconciles
+against whatever namespace the chart's Platform CR declares) — changing it here without
+coordinating the consuming side risks a live mismatch, not just a cosmetic rename.
+
+**Cross-link:** eks-gitops' Target 21 already renames a related stale reference —
+`addons/ai-platform/agent-platform/base/platform.yaml`'s example tenant `protohypd`
+(a typo'd variant of the same retired name). Whoever picks up either rename should check
+the other repo first: if these are meant to be the same tenant identity, coordinate the
+change; if they're unrelated (one's a namespace default, the other's an example tenant
+id), say so explicitly and proceed independently. Not blocking any other target — flagged
+here so it isn't lost, per the campaign's "fix everything found" doctrine.
