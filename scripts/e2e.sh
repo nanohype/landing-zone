@@ -17,12 +17,12 @@
 #
 set -euo pipefail
 
-# --- config (env-overridable; defaults target the cheap dev tree) -----------
+# --- config (env-overridable; defaults target the cheap development tree) -----------
 : "${E2E_ACCOUNT_ID:?set E2E_ACCOUNT_ID (the real 12-digit AWS account)}"
 REGION="${E2E_REGION:-us-west-2}"
-ENVIRONMENT="${E2E_ENV:-dev}"
-ACCOUNT_DIR="${E2E_ACCOUNT_DIR:-workload-dev}"
-CLUSTER="${E2E_CLUSTER:-dev-eks}"
+ENVIRONMENT="${E2E_ENV:-development}"
+ACCOUNT_DIR="${E2E_ACCOUNT_DIR:-workload-development}"
+CLUSTER="${E2E_CLUSTER:-development-platform}"
 TENANT="${E2E_TENANT:-e2e-smoke}"
 TENANTS_REPO="${E2E_TENANTS_REPO:-git@github.com:nanohype/tenants.git}"
 # Default to the stxkxs profile only when AWS_PROFILE is UNSET (local runs); in

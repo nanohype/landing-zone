@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       account:
-        description: "Target account (e.g., workload-dev, workload-staging)"
+        description: "Target account (e.g., workload-development, workload-staging)"
         required: true
         type: string
-        default: "workload-dev"
+        default: "workload-development"
       region:
         description: "Target region (e.g., us-west-2)"
         required: true
@@ -18,7 +18,7 @@ on:
         required: true
         type: choice
         options:
-          - dev
+          - development
           - staging
       component:
         description: "Component to destroy (e.g., network, cluster, or 'all')"

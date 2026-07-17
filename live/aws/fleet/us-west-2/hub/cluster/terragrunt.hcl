@@ -14,6 +14,9 @@ include "envcommon" {
 # cluster_endpoint_public_access_cidrs (your CIDR) or go private + bastion once the
 # hub is settled.
 inputs = {
+  # The hub cluster IS the fleet control plane, so its base name is "fleet"
+  # (→ hub-fleet), distinct from workload clusters which default to <env>-platform.
+  cluster_name                   = "fleet"
   cluster_endpoint_public_access = true
   # cluster_endpoint_public_access_cidrs = ["<your-cidr>/32"]
   system_node_min_size     = 2

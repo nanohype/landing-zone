@@ -43,9 +43,11 @@ locals {
 
   # agent-iam's tenant permissions boundary — created under /eks-agent-platform/
   # during a same-account vend and carried by every operator-minted tenant role.
-  # Named here so DenyUnboundedRoleWrites can accept it as the one other
-  # legitimate boundary a role written under the hub ceiling may carry.
-  tenant_boundary_arn = "arn:${local.partition}:iam::${local.account_id}:policy/eks-agent-platform/${var.environment}-eks-agent-platform-tenant-boundary"
+  # Each cluster names it <cluster_name>-agent-platform-tenant-boundary, so this is
+  # an env-scoped wildcard (matched with ArnNotLike below): the hub ceiling accepts
+  # the tenant boundary of ANY cluster co-located in this environment, not just the
+  # first one bootstrapped.
+  tenant_boundary_arn = "arn:${local.partition}:iam::${local.account_id}:policy/eks-agent-platform/${var.environment}-*-agent-platform-tenant-boundary"
 
   # Cross-account vend roles the hub may assume (any account, any env), and the
   # same-account cluster roles/policies/profiles it may manage — only under the
@@ -185,7 +187,7 @@ resource "aws_iam_policy" "hub_boundary" {
         ]
         Resource = "*"
         Condition = {
-          StringNotEquals = {
+          ArnNotLike = {
             "iam:PermissionsBoundary" = [
               local.hub_boundary_arn,
               local.tenant_boundary_arn,

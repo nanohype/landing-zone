@@ -28,7 +28,7 @@ resource-tagging standard) and are the identity every resource inherits.
 
 | Local | Required? | Example | Renders as tag |
 |-------|-----------|---------|----------------|
-| `environment` | yes | `"dev"` | `Environment` |
+| `environment` | yes | `"development"` | `Environment` |
 | `cost_center` | yes | `"platform-engineering"` | `CostCenter` |
 | `business_unit` | yes | `"engineering"` | `BusinessUnit` |
 | `data_classification` | yes | `"internal"` | `DataClassification` |

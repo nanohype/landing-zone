@@ -201,7 +201,7 @@ If the state file itself is corrupted:
 6. **Create the environment directory** by copying an existing one under
    `live/aws/<account>/<region>/<env>/`:
    ```bash
-   cp -r live/aws/workload-dev/us-west-2/dev/ live/aws/<new-account>/<region>/<new-env>/
+   cp -r live/aws/workload-development/us-west-2/development/ live/aws/<new-account>/<region>/<new-env>/
    ```
 
 7. **Update `live/aws/<new-account>/<region>/<new-env>/env.hcl`** with the new account ID, region, and environment name
@@ -223,7 +223,7 @@ If the state file itself is corrupted:
 
 ### Upgrade Sequence
 
-Always roll through environments: **dev → staging → production**.
+Always roll through environments: **development → staging → production**.
 
 For each environment:
 

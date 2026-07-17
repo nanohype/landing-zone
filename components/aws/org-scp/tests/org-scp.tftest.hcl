@@ -34,7 +34,7 @@ mock_provider "aws" {
 }
 
 variables {
-  environment = "dev"
+  environment = "development"
   region      = "us-west-2"
   team        = "platform"
 

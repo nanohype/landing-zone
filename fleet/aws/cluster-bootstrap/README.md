@@ -36,7 +36,7 @@ tofu init \
   -backend-config=key=fleet/<name>-bootstrap/terraform.tfstate \
   -backend-config=region=<region>
 AWS_REGION=<region> tofu apply \
-  -var region=<region> -var environment=dev -var team=platform \
+  -var region=<region> -var environment=development -var team=platform \
   -var cluster_name=<name> -var cluster_endpoint=<https-endpoint> \
   -var cluster_certificate_authority_data=<base64-ca> \
   -var oidc_provider_arn=<arn> -var oidc_issuer=<host-no-scheme> -var vpc_id=<vpc>

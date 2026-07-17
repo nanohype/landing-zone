@@ -1,8 +1,8 @@
 variable "environment" {
-  description = "Environment name (dev, staging, production)"
+  description = "Environment name (development, staging, production)"
   type        = string
 
-  # Format contract, not a closed enum: the platform legitimately uses dev, staging,
+  # Format contract, not a closed enum: the platform legitimately uses development, staging,
   # production, prod, hub, org, management, and per-workload derivations, so pinning a
   # fixed set would reject valid environments. This still catches empty/uppercase/typo'd
   # values before they flow into resource names, tags, and SSM paths.
@@ -15,12 +15,6 @@ variable "environment" {
 variable "region" {
   description = "AWS region"
   type        = string
-}
-
-variable "cluster_name" {
-  description = "EKS cluster name (used for Karpenter discovery tags)"
-  type        = string
-  default     = "eks"
 }
 
 variable "vpc_cidr" {
@@ -36,7 +30,7 @@ variable "max_azs" {
 }
 
 variable "nat_gateways" {
-  description = "Number of NAT gateways (1 for dev, 2 for staging, 3 for production)"
+  description = "Number of NAT gateways (1 for development, 2 for staging, 3 for production)"
   type        = number
   default     = 1
 }

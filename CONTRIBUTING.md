@@ -10,7 +10,7 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 
 1. **Branch** -- create a feature branch from `main`
 2. **Validate locally** -- `task fmt:check && task validate && task lint`
-3. **Plan against dev** -- `task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<name>`
+3. **Plan against development** -- `task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=<name>`
 4. **Open a PR** -- CI runs fmt, validate (per-component matrix), tflint, checkov, and the plan matrix
 5. **Review** -- get approval, verify plan output in CI
 6. **Merge** -- deploy via `deploy.yml` workflow dispatch
@@ -105,7 +105,7 @@ Each component's `variables.tf` documents the full tenant schema with defaults.
 
 ## Adding a New Environment
 
-1. Copy an existing environment directory: `cp -r live/aws/{account}/{region}/dev/ live/aws/{account}/{region}/<env>/`
+1. Copy an existing environment directory: `cp -r live/aws/{account}/{region}/development/ live/aws/{account}/{region}/<env>/`
 2. Update the new `env.hcl` with the environment name and any changed metadata
 3. If targeting a new account, create the corresponding `account.hcl`
 4. Adjust component inputs (node counts, feature toggles, etc.)

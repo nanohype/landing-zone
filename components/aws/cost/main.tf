@@ -146,7 +146,7 @@ module "cur_bucket" {
     ]
   })
 
-  force_destroy = var.environment == "dev"
+  force_destroy = var.environment == "development"
 
   tags = merge(local.tags, { Name = "${var.environment}-cur-reports" })
 }

@@ -29,7 +29,7 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   non-empty (an empty list would drop the `sub` condition and let *any* Actions
   token assume the role). No long-lived keys; OIDC federation only.
 - **Elevation of privilege** — the deploy role is powerful. Residual: scope it
-  per-environment; do not share one role across dev and production.
+  per-environment; do not share one role across development and production.
 - **Repudiation** — CloudTrail records the assumed-role session; the `Revision`
   default tag (GITHUB_SHA) ties every mutation to a commit.
 

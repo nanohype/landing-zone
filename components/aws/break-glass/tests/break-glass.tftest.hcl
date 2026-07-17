@@ -49,18 +49,18 @@ mock_provider "aws" {
   # security assertions — boundary attachment is proven by equality, not by value).
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:us-west-2:123456789012:dev-break-glass-alert"
+      arn = "arn:aws:sns:us-west-2:123456789012:development-break-glass-alert"
     }
   }
   mock_resource "aws_iam_policy" {
     defaults = {
-      arn = "arn:aws:iam::123456789012:policy/dev-break-glass-boundary"
+      arn = "arn:aws:iam::123456789012:policy/development-break-glass-boundary"
     }
   }
 }
 
 variables {
-  environment                 = "dev"
+  environment                 = "development"
   region                      = "us-west-2"
   team                        = "platform"
   trusted_account_ids         = ["123456789012"]

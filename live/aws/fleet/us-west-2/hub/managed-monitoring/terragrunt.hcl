@@ -10,7 +10,7 @@ include "envcommon" {
 # The hub's own observability backend: AMP (metrics) + AMG (dashboards) + the
 # grafana-agent IRSA role. Same component the workload envs use; the envcommon
 # wires cluster_name / oidc from ../cluster and environment ("hub") from env.hcl,
-# so the IRSA role auto-names hub-eks-grafana-agent-amp and trusts
+# so the IRSA role auto-names hub-fleet-grafana-agent-amp and trusts
 # system:serviceaccount:monitoring:grafana-agent on the hub cluster's OIDC issuer.
 # AMG uses the component default permission/auth (SERVICE_MANAGED + AWS_SSO) — the
 # fleet account must have IAM Identity Center enabled (or delegated) for AMG.

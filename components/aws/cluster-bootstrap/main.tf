@@ -9,7 +9,7 @@ data "aws_partition" "current" {}
 # the reports bucket needs republishing here.
 data "aws_ssm_parameter" "eval_reports_bucket" {
   count = var.enable_eval_runtime ? 1 : 0
-  name  = "/eks-agent-platform/${var.environment}/eval-runtime/eval_reports_bucket"
+  name  = "/eks-agent-platform/${var.cluster_name}/eval-runtime/eval_reports_bucket"
 }
 
 # The managed-monitoring component writes the Amazon Managed Grafana workspace
@@ -20,17 +20,17 @@ data "aws_ssm_parameter" "eval_reports_bucket" {
 # doesn't fail the parameter read.
 data "aws_ssm_parameter" "grafana_url" {
   count = var.enable_managed_monitoring ? 1 : 0
-  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/grafana_url"
+  name  = "/eks-agent-platform/${var.cluster_name}/managed-monitoring/grafana_url"
 }
 
 data "aws_ssm_parameter" "amp_endpoint" {
   count = var.enable_managed_monitoring ? 1 : 0
-  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/amp_endpoint"
+  name  = "/eks-agent-platform/${var.cluster_name}/managed-monitoring/amp_endpoint"
 }
 
 data "aws_ssm_parameter" "amp_workspace_id" {
   count = var.enable_managed_monitoring ? 1 : 0
-  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/amp_workspace_id"
+  name  = "/eks-agent-platform/${var.cluster_name}/managed-monitoring/amp_workspace_id"
 }
 
 locals {

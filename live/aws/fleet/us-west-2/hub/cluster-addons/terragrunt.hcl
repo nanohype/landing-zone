@@ -10,8 +10,8 @@ include "envcommon" {
 # The hub's addon IRSA roles. The eks-gitops observability stack (grafana-agent,
 # loki, tempo, opencost, kube-state-metrics) and external-secrets bind to these
 # per-addon roles via their ServiceAccount annotations; the envcommon wires the
-# hub cluster's OIDC, so the roles auto-name hub-eks-<addon> (hub-eks-external-secrets,
-# hub-eks-loki, hub-eks-tempo, hub-eks-opencost, hub-eks-cert-manager, ...).
+# hub cluster's OIDC, so the roles auto-name hub-fleet-<addon> (hub-fleet-external-secrets,
+# hub-fleet-loki, hub-fleet-tempo, hub-fleet-opencost, hub-fleet-cert-manager, ...).
 # velero/keda/argo off (workload-plane concerns the hub doesn't run); the rest —
 # opencost, cert-manager, external-secrets, loki/tempo, lb-controller, external-dns —
 # stay on by the component defaults.

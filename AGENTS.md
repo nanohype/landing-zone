@@ -29,7 +29,7 @@ The per-app `<app>-platform` pattern: when an app's resource shape doesn't gener
 
 1. Create `components/aws/<name>/` with `versions.tf`, `variables.tf`, `main.tf`, `outputs.tf`, plus per-resource files (`rds.tf`, `s3.tf`, etc.).
 2. Add `live/_envcommon/aws/<name>.hcl` declaring dependencies on upstream components (typically `network`, `cluster`, `cluster-bootstrap`).
-3. Add `live/aws/<account>/<region>/<env>/<name>/terragrunt.hcl` per environment you want to provision (`workload-dev`, `workload-staging`, `workload-prod`).
+3. Add `live/aws/<account>/<region>/<env>/<name>/terragrunt.hcl` per environment you want to provision (`workload-development`, `workload-staging`, `workload-production`).
 4. Run `tofu fmt -recursive components/aws/<name>` and `tofu validate` from inside the component.
 5. CI auto-discovers the new component via `git ls-files` — no workflow edit needed (`Validate (aws/<name>)` job materializes on the next PR).
 

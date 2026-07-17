@@ -9,7 +9,7 @@ disable-model-invocation: true
 Safely destroy infrastructure. Production is never allowed.
 
 **Arguments:**
-- `$ARGUMENTS[0]` — environment (dev or staging ONLY)
+- `$ARGUMENTS[0]` — environment (development or staging ONLY)
 - `$ARGUMENTS[1]` — component name
 
 ## Steps

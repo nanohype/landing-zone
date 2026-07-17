@@ -205,7 +205,7 @@ role's `CreateRole` is gated on the boundary condition (see the [Threat Model](t
 
 ## Environment Differentiation
 
-| Setting | dev | staging | production |
+| Setting | development | staging | production |
 |---------|-----|---------|------------|
 | NAT gateways | 1 | 2 | 3 (HA) |
 | VPC flow logs | Off | On | On |

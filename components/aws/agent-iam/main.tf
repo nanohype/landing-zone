@@ -5,7 +5,7 @@
 # under a fixed path, gated by a permissions boundary), the tenant permissions
 # boundary (the ceiling for every tenant role), the tenant baseline managed
 # policy, and the SSM parameters the operator reads at startup
-# (/eks-agent-platform/<env>/agent-iam/*).
+# (/eks-agent-platform/<cluster-name>/agent-iam/*).
 ################################################################################
 
 data "aws_caller_identity" "current" {}
@@ -14,7 +14,7 @@ data "aws_partition" "current" {}
 locals {
   account_id       = data.aws_caller_identity.current.account_id
   partition        = data.aws_partition.current.partition
-  irsa_role_prefix = "${var.environment}-eks-agent-platform"
+  irsa_role_prefix = "${var.cluster_name}-agent-platform"
 
   # Path every tenant role is minted under. The operator's IAM permissions are
   # scoped to this path so it can never touch roles outside it. Matches the
@@ -24,18 +24,18 @@ locals {
 
   # The operator's idempotency GetRole runs before the role exists, so IAM
   # authorizes against the bare-name ARN (root path) rather than the path ARN.
-  # Allow the tenant-role name pattern (<env>-*-tenant) so that pre-create
+  # Allow the tenant-role name pattern (<cluster_name>-*-tenant) so that pre-create
   # GetRole resolves to NoSuchEntity instead of AccessDenied.
-  tenant_role_name_arn = "arn:${local.partition}:iam::${local.account_id}:role/${var.environment}-*-tenant"
+  tenant_role_name_arn = "arn:${local.partition}:iam::${local.account_id}:role/${var.cluster_name}-*-tenant"
 
   # Per-Platform session role, created by the operator's Platform controller from
   # spec.attribution (operators + sessionRoleMaxDurationSeconds). Named
-  # <env>-<platform>-session at the ROOT path — not under the tenant path — so the
+  # <cluster_name>-<platform>-session at the ROOT path — not under the tenant path — so the
   # tenant statements above do not cover it and the operator could not manage the
   # role its own controller creates. Same name-scoped shape as tenant_role_name_arn.
-  platform_session_role_arn = "arn:${local.partition}:iam::${local.account_id}:role/${var.environment}-*-session"
+  platform_session_role_arn = "arn:${local.partition}:iam::${local.account_id}:role/${var.cluster_name}-*-session"
 
-  ssm_prefix = "/eks-agent-platform/${var.environment}/agent-iam"
+  ssm_prefix = "/eks-agent-platform/${var.cluster_name}/agent-iam"
 
   # Expand the model allowlist into the resource ARNs a Bedrock invoke grant
   # needs: the foundation-model ARN (AWS-owned, so an empty account segment; any
@@ -326,8 +326,8 @@ resource "aws_iam_role_policy" "operator" {
           "eks:UpdatePodIdentityAssociation",
         ]
         Resource = [
-          "arn:${local.partition}:eks:${var.region}:${local.account_id}:cluster/${var.environment}-*",
-          "arn:${local.partition}:eks:${var.region}:${local.account_id}:podidentityassociation/${var.environment}-*/*",
+          "arn:${local.partition}:eks:${var.region}:${local.account_id}:cluster/${var.cluster_name}",
+          "arn:${local.partition}:eks:${var.region}:${local.account_id}:podidentityassociation/${var.cluster_name}/*",
         ]
       },
       {
@@ -369,7 +369,7 @@ resource "aws_iam_role_policy" "operator" {
         # Read + lifecycle the per-Platform session role. iam:UpdateRole is required
         # for MaxSessionDuration, which is what spec.attribution.sessionRoleMaxDurationSeconds
         # sets — the operator was failing here with AccessDenied on iam:GetRole
-        # dev-ops-session and every Platform hung in phase=Provisioning.
+        # development-platform-ops-session and every Platform hung in phase=Provisioning.
         Sid    = "PlatformSessionRoleRead"
         Effect = "Allow"
         Action = [
@@ -457,7 +457,7 @@ resource "aws_iam_role_policy" "operator" {
 
 ################################################################################
 # SSM parameters the operator reads at startup
-# (/eks-agent-platform/<env>/agent-iam/*).
+# (/eks-agent-platform/<cluster-name>/agent-iam/*).
 ################################################################################
 
 resource "aws_ssm_parameter" "operator_role_arn" {

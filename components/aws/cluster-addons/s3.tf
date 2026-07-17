@@ -155,8 +155,8 @@ module "argo_workflows_bucket" {
 # warning, which is not a gate. So the assertion lives on a terraform_data resource,
 # which creates nothing and fails the plan.
 #
-# Worst case today is 58 chars (production-eks-<12-digit-account>-ap-southeast-4-
-# argo-workflows). The headroom is five characters — a longer environment name is the
+# Worst case today is 62 chars (production-platform-<12-digit-account>-ap-southeast-4-
+# argo-workflows). The headroom is one character — a longer cluster_name is the
 # thing that will break this, and this is what will tell you so.
 ################################################################################
 
@@ -168,7 +168,7 @@ resource "terraform_data" "bucket_name_guard" {
         length("${local.bucket_prefix}-${name}") <= 63
       ])
       error_message = format(
-        "S3 bucket names are limited to 63 characters and the prefix %q (%d chars) leaves too little room: %s. Shorten var.environment.",
+        "S3 bucket names are limited to 63 characters and the prefix %q (%d chars) leaves too little room: %s. Shorten var.cluster_name.",
         local.bucket_prefix,
         length(local.bucket_prefix),
         join(", ", [

@@ -22,7 +22,7 @@ module "karpenter" {
 
   # The node role name is a cross-repo contract: eks-gitops karpenter-resources
   # pins the EC2NodeClass spec.role to "${cluster_name}-karpenter-node" (its
-  # convention across dev/staging/production). The module's default name
+  # convention across development/staging/production). The module's default name
   # (Karpenter-<cluster>-<random>) is unpredictable and unreferenceable, so the
   # EC2NodeClass and the controller's auto-scoped PassRole would point at
   # different roles and Karpenter could never launch a node. Pin to the convention.

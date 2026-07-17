@@ -1,8 +1,8 @@
 variable "environment" {
-  description = "Environment name (dev, staging, production)"
+  description = "Environment name (development, staging, production)"
   type        = string
 
-  # Format contract, not a closed enum: the platform legitimately uses dev, staging,
+  # Format contract, not a closed enum: the platform legitimately uses development, staging,
   # production, prod, hub, org, management, and per-workload derivations, so pinning a
   # fixed set would reject valid environments. This still catches empty/uppercase/typo'd
   # values before they flow into resource names, tags, and SSM paths.
@@ -114,7 +114,7 @@ variable "enable_agent_platform" {
 }
 
 variable "enable_managed_monitoring" {
-  description = "Stamp the Amazon Managed Grafana workspace URL (read from the SSM parameter the managed-monitoring component writes under /eks-agent-platform/<env>/managed-monitoring/) onto the cluster Secret, where the dashboards ApplicationSet injects it into the Grafana CR. Opt-in (default false), mirroring enable_eval_runtime: set true only on a cluster whose managed-monitoring component has already applied and published the parameter — a default-true fails the SSM read on any cluster that doesn't run managed-monitoring. Left false, the dashboards Grafana CR renders without an external URL."
+  description = "Stamp the Amazon Managed Grafana workspace URL (read from the SSM parameter the managed-monitoring component writes under /eks-agent-platform/<cluster-name>/managed-monitoring/) onto the cluster Secret, where the dashboards ApplicationSet injects it into the Grafana CR. Opt-in (default false), mirroring enable_eval_runtime: set true only on a cluster whose managed-monitoring component has already applied and published the parameter — a default-true fails the SSM read on any cluster that doesn't run managed-monitoring. Left false, the dashboards Grafana CR renders without an external URL."
   type        = bool
   default     = false
 }

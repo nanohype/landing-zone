@@ -8,7 +8,7 @@ variable "region" {
 }
 
 variable "environment" {
-  description = "Environment tier (dev, staging, production) — prefixes resource names + tags"
+  description = "Environment tier (development, staging, production) — prefixes resource names + tags"
   type        = string
 }
 

@@ -1,8 +1,8 @@
 variable "environment" {
-  description = "Environment name (dev, staging, production)"
+  description = "Environment name (development, staging, production)"
   type        = string
 
-  # Format contract, not a closed enum: the platform legitimately uses dev, staging,
+  # Format contract, not a closed enum: the platform legitimately uses development, staging,
   # production, prod, hub, org, management, and per-workload derivations, so pinning a
   # fixed set would reject valid environments. This still catches empty/uppercase/typo'd
   # values before they flow into resource names, tags, and SSM paths.
@@ -68,4 +68,9 @@ variable "tags" {
   description = "Common resource tags"
   type        = map(string)
   default     = {}
+}
+
+variable "cluster_name" {
+  description = "Full EKS cluster name this agent-platform substrate serves (e.g. development-platform). Keys the per-cluster SSM contract and the tenant/session role names the operator mints."
+  type        = string
 }

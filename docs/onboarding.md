@@ -53,10 +53,10 @@ All three should pass. If `tflint` fails, make sure you ran `tflint --init -c .t
 ## Your First Plan
 
 ```bash
-task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
 ```
 
-This runs `terragrunt plan` for the network component in dev. You need valid AWS credentials for this step.
+This runs `terragrunt plan` for the network component in development. You need valid AWS credentials for this step.
 
 ## Codebase Walkthrough
 

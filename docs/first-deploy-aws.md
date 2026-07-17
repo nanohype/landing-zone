@@ -74,13 +74,13 @@ aws configure sso
 # SSO Region: us-east-1 (or wherever Identity Center is hosted)
 # CLI default region: us-west-2
 # CLI default output: json
-# Profile name: workload-dev (or whatever)
+# Profile name: workload-development (or whatever)
 
-aws sso login --profile workload-dev
-aws sts get-caller-identity --profile workload-dev
+aws sso login --profile workload-development
+aws sts get-caller-identity --profile workload-development
 ```
 
-Export `AWS_PROFILE=workload-dev` (or set it per-shell) so Terragrunt picks it up automatically.
+Export `AWS_PROFILE=workload-development` (or set it per-shell) so Terragrunt picks it up automatically.
 
 ## Pre-Deploy Setup
 
@@ -137,7 +137,7 @@ Most On-Demand quota increases are auto-approved within 15-30 minutes. EIP incre
 
 ### 10. Decide on public vs private cluster endpoint
 
-Production overlay defaults `cluster_endpoint_public_access = false`. Without a bastion or VPN, you can't `kubectl` against the cluster from your laptop. For initial deploys, flip to `true` in `live/aws/workload-prod/us-west-2/production/cluster/terragrunt.hcl`. You can flip back later once jump-host access is set up.
+Production overlay defaults `cluster_endpoint_public_access = false`. Without a bastion or VPN, you can't `kubectl` against the cluster from your laptop. For initial deploys, flip to `true` in `live/aws/workload-production/us-west-2/production/cluster/terragrunt.hcl`. You can flip back later once jump-host access is set up.
 
 ## Deploy
 
@@ -151,7 +151,7 @@ task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=c
 task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster-addons     # ~5-10 min
 ```
 
-Replace `<env>` with `dev`/`staging`/`production` and account accordingly.
+Replace `<env>` with `development`/`staging`/`production` and account accordingly.
 
 ### Get kubectl access (after `cluster` succeeds)
 
@@ -273,7 +273,7 @@ Design facts at this seam:
 
 Approximate $/day at default sizes:
 
-| Setting | Dev | Production |
+| Setting | Development | Production |
 |---|---|---|
 | EKS control plane | $2.40 | $2.40 |
 | System node pool | $4-6 (1-2× m5.large) | $14 (3× m5.large) |
@@ -336,6 +336,6 @@ leaves billing on:
 E2E_ACCOUNT_ID=<account-id> AWS_PROFILE=workload-<env> task e2e
 ```
 
-It's real, billable AWS (~$0.30-0.60 for a ~30-45 min run on the dev tree) and is
+It's real, billable AWS (~$0.30-0.60 for a ~30-45 min run on the development tree) and is
 **never scheduled** — run it on demand to confirm the whole stack still holds
 together. See `scripts/e2e.sh` for the full set of knobs and prerequisites.

@@ -41,7 +41,8 @@ override_data {
 }
 
 variables {
-  environment       = "dev"
+  environment       = "development"
+  cluster_name      = "development-platform"
   region            = "us-west-2"
   oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED"
   oidc_issuer       = "oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED"

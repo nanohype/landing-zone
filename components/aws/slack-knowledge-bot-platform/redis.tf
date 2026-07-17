@@ -5,7 +5,7 @@
  * the actual limit by replica count without a shared backend.
  *
  * Production posture: multi-AZ with automatic failover, 2 cache
- * clusters (primary + read replica). Dev/staging runs single-node.
+ * clusters (primary + read replica). Development/staging runs single-node.
  */
 
 resource "aws_elasticache_subnet_group" "redis" {

@@ -39,10 +39,12 @@ locals {
   vend_boundary_arn  = "arn:${local.partition}:iam::${local.account_id}:policy${local.iam_path}${local.vend_boundary_name}"
 
   # agent-iam's tenant permissions boundary — created under /eks-agent-platform/
-  # during the vend and carried by every operator-minted tenant role. Named here
-  # so DenyUnboundedRoleWrites can accept it as the one other legitimate boundary
-  # a role written under the vend ceiling may carry.
-  tenant_boundary_arn = "arn:${local.partition}:iam::${local.account_id}:policy/eks-agent-platform/${var.environment}-eks-agent-platform-tenant-boundary"
+  # during the vend and carried by every operator-minted tenant role. Each cluster
+  # names it <cluster_name>-agent-platform-tenant-boundary, so this is an
+  # env-scoped wildcard (matched with ArnNotLike below): the vend ceiling accepts
+  # the tenant boundary of ANY cluster co-located in this environment, not just the
+  # first one bootstrapped.
+  tenant_boundary_arn = "arn:${local.partition}:iam::${local.account_id}:policy/eks-agent-platform/${var.environment}-*-agent-platform-tenant-boundary"
 
   # Roles/policies/instance-profiles the vend role is allowed to manage — only
   # those minted under the eks-fleet path. Pre-create GetRole must also resolve
@@ -145,7 +147,7 @@ resource "aws_iam_policy" "vend_boundary" {
         ]
         Resource = "*"
         Condition = {
-          StringNotEquals = {
+          ArnNotLike = {
             "iam:PermissionsBoundary" = [
               local.vend_boundary_arn,
               local.tenant_boundary_arn,

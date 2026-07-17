@@ -9,15 +9,15 @@ task fmt                                              # format all .tf files
 task fmt:check                                        # check formatting (CI uses this)
 task validate                                         # init + validate every component
 task lint                                             # tflint with AWS plugin
-task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
-task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
+task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 ```
 
 ## Architecture
 
 - **AWS components** under `components/aws/`
-- **Environments:** dev, staging, production, org (management account)
-- **Multi-account isolation:** workload-dev, workload-staging, workload-prod, management
+- **Environments:** development, staging, production, org (management account)
+- **Multi-account isolation:** workload-development, workload-staging, workload-production, management
 - **Multi-region support:** us-west-2
 - **Dependency chain:** `network → cluster → {druid, pipeline, llm, gateway, rag, mlops, governance, observability, secrets, cluster-addons, cluster-bootstrap}`
 - `cost`, `dns`, `backup`, `break-glass`, and `service-quotas` are standalone (no dependencies)
@@ -78,12 +78,12 @@ live/
 1. `task fmt:check` — formatting
 2. `task validate` — syntax + provider validation
 3. `task lint` — tflint rules
-4. `task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<name>` — dry-run against dev
+4. `task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=<name>` — dry-run against development
 
 ## CI/CD
 
 - `ci.yml` — PRs: fmt, validate (per-component matrix), tflint, checkov, plan matrix
 - `deploy.yml` — manual dispatch: account/region/environment/component, plan or apply
-- `destroy.yml` — manual dispatch: dev/staging only, requires confirmation string
+- `destroy.yml` — manual dispatch: development/staging only, requires confirmation string
 - `drift.yml` — scheduled weekday drift detection on production, creates GitHub issues
 - Auth: AWS OIDC (`AWS_ROLE_ARN` repo variable)

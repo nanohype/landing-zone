@@ -14,7 +14,7 @@ provider "aws" {
 
 variables {
   role_name       = "dev-example-tenant"
-  cluster_name    = "dev-eks"
+  cluster_name    = "development-platform"
   namespace       = "example"
   service_account = "example-sa"
 }
@@ -48,7 +48,7 @@ run "association_binds_exact_identity" {
   command = plan
 
   assert {
-    condition     = aws_eks_pod_identity_association.this.cluster_name == "dev-eks"
+    condition     = aws_eks_pod_identity_association.this.cluster_name == "development-platform"
     error_message = "association must target the provided cluster_name"
   }
   assert {

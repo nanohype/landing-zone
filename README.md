@@ -20,7 +20,7 @@ OpenTofu + Terragrunt monorepo for enterprise platform infrastructure on AWS.
          │
          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Environment Layer (dev / staging / production)                     │
+│  Environment Layer (development / staging / production)                     │
 │                                                                     │
 │  ┌──────────┐    ┌──────────┐    ┌──────────────────────────────┐  │
 │  │ network  │───▶│ cluster  │───▶│ druid · pipeline · llm       │  │
@@ -59,9 +59,9 @@ landing-zone/
 │   └── aws/
 │       ├── cloud.hcl
 │       ├── management/     # Management account (org components)
-│       ├── workload-dev/   # Dev account
+│       ├── workload-development/   # Development account
 │       ├── workload-staging/
-│       └── workload-prod/
+│       └── workload-production/
 ├── modules/
 │   └── aws/workload-identity/    # EKS Pod Identity role factory
 ├── scripts/
@@ -88,11 +88,11 @@ git clone <repo-url> && cd landing-zone
 # 2. Create backend infrastructure
 ./scripts/init-backend-aws.sh <account_id> <region>
 
-# 3. Plan all dev components
-task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+# 3. Plan all development components
+task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 
 # 4. Apply a single component
-task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
 ```
 
 ## Task Targets
@@ -116,7 +116,7 @@ Four GitHub Actions workflows, all authenticating via AWS OIDC (`AWS_ROLE_ARN` r
 |----------|---------|---------|
 | `ci.yml` | PR / push | fmt, validate, tflint, checkov, plan (per-component matrix) |
 | `deploy.yml` | Manual | Plan or apply with account/region/env/component inputs |
-| `destroy.yml` | Manual | Dev/staging only, requires confirmation |
+| `destroy.yml` | Manual | Development/staging only, requires confirmation |
 | `drift.yml` | Scheduled | Weekday production drift detection, creates GitHub issues |
 
 ## Documentation
