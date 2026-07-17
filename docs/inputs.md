@@ -58,9 +58,50 @@ most often sets:
 | `cluster_name` | `cluster`, addons | base name, prefixed with `environment` |
 | `cluster_version` | `cluster` | Kubernetes `major.minor`, e.g. `"1.36"` (regex-validated) |
 | `eks_addon_versions` | `cluster` | pinned addon versions; re-pin when `cluster_version` moves |
-| `cluster_endpoint_public_access` + `..._cidrs` | `cluster` | private by default; a non-empty CIDR allow-list is **required** if public is enabled |
+| `cluster_endpoint_public_access` + `..._cidrs` | `cluster` | **not set in the committed tree** — private by default; posture is supplied by rackctl at apply time (see [EKS API endpoint posture](#eks-api-endpoint-posture)) |
 | `tenants` | `druid`, `pipeline`, `llm`, `mlops`, `rag` | per-tenant maps (one IRSA/Pod-Identity role each) |
 | `cluster_iam_role_path` + `cluster_permissions_boundary_arn` | `cluster` | set for cross-account fleet-vend gating; defaults `/` + empty = same-account |
+
+## EKS API endpoint posture
+
+Two `cluster` inputs decide whether the EKS API server is reachable from the public
+internet:
+
+| Input | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `cluster_endpoint_public_access` | `bool` | `false` | `true` exposes a public API endpoint; `false` keeps it private (VPC-only, reached via bastion/VPN) |
+| `cluster_endpoint_public_access_cidrs` | `list(string)` | `[]` | allow-list for the public endpoint. **Required (non-empty) whenever public access is on** — the component fails closed at plan time; there is no `0.0.0.0/0` fallback |
+
+**The committed tree does not set either one.** Every `live/.../cluster/terragrunt.hcl`
+leaf inherits the component's own `false` default, so it is private-by-default and plans
+clean with zero external input — a plan from a fresh checkout never opens the control
+plane and never trips the fail-closed CIDR validation.
+
+Posture is a fragile, per-run choice, so it is owned by
+[rackctl](https://github.com/rackctl/rackctl), not committed. rackctl's `cluster` phase
+reads `cluster.endpointPublicAccess` and `cluster.endpointAllowlist` from `rackctl.yaml`
+and exports them onto the terragrunt runner as two `TF_VAR`s that layer over the generic
+committed tree:
+
+| `TF_VAR` | Carries | Shape |
+|----------|---------|-------|
+| `TF_VAR_cluster_endpoint_public_access` | the bool | `true` / `false` |
+| `TF_VAR_cluster_endpoint_public_access_cidrs` | the allow-list | JSON array, e.g. `["203.0.113.4/32"]` |
+
+When public access is requested with an empty allow-list, rackctl auto-detects the
+operator's public egress IP and scopes the endpoint to `<ip>/32` rather than opening it
+to the world — a public endpoint is never provisioned without an allow-list.
+
+To reproduce the rackctl-supplied path on a manual `task` deploy (terragrunt forwards
+`TF_VAR_*` to tofu), export the pair before applying `cluster`:
+
+```bash
+export TF_VAR_cluster_endpoint_public_access=true
+export TF_VAR_cluster_endpoint_public_access_cidrs="[\"$(curl -s https://checkip.amazonaws.com)/32\"]"
+task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=cluster
+```
+
+Leave them unset for a private endpoint.
 
 ## Bringing up a new environment — checklist
 
