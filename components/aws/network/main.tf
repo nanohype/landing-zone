@@ -3,8 +3,7 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  azs          = slice(data.aws_availability_zones.available.names, 0, var.max_azs)
-  cluster_name = "${var.environment}-${var.cluster_name}"
+  azs = slice(data.aws_availability_zones.available.names, 0, var.max_azs)
 
   tags = merge(var.tags, {
     Component = "network"
@@ -36,15 +35,15 @@ module "vpc" {
   enable_dns_support   = true
 
   # EKS subnet tags
+  # Cluster-ownership + Karpenter-discovery tags are per-cluster and applied by the
+  # cluster component (aws_ec2_tag), not here — the VPC is shared per environment and
+  # cluster-agnostic, so co-located sibling clusters each stamp their own tags.
   public_subnet_tags = {
-    "kubernetes.io/role/elb"                      = "1"
-    "kubernetes.io/cluster/${local.cluster_name}" = "shared"
+    "kubernetes.io/role/elb" = "1"
   }
 
   private_subnet_tags = {
-    "kubernetes.io/role/internal-elb"             = "1"
-    "kubernetes.io/cluster/${local.cluster_name}" = "shared"
-    "karpenter.sh/discovery"                      = local.cluster_name
+    "kubernetes.io/role/internal-elb" = "1"
   }
 
   tags = local.tags

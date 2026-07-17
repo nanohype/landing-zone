@@ -3,7 +3,10 @@
 ################################################################################
 
 locals {
-  irsa_role_prefix = "${var.environment}-eks"
+  # Key on the full cluster name (<environment>-<clusterName>), not the environment,
+  # so this cluster's addon IRSA roles don't collide with a co-located sibling in the
+  # same account and environment.
+  irsa_role_prefix = local.cluster_name
 }
 
 # EBS CSI Driver

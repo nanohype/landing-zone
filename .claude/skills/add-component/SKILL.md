@@ -32,7 +32,7 @@ Scaffold a new component named `$ARGUMENTS`.
    - Set `terraform { source = "${path_in_repo}/components/$ARGUMENTS" }`
    - Add inputs block passing dependency outputs
 
-3. **Create environment directories** for each of dev, staging, production:
+3. **Create environment directories** for each of development, staging, production:
    - `live/{env}/$ARGUMENTS/terragrunt.hcl` with:
      ```hcl
      include "root" {

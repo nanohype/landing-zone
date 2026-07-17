@@ -337,15 +337,6 @@ resource "helm_release" "argocd" {
 # ArgoCD Cluster Secret (drives ApplicationSet generators)
 ################################################################################
 
-# The eks-agent-platform operator reads the EKS cluster name from SSM
-# (operatorconfig sweeps /eks-agent-platform/<env>/) to create the tenant Pod
-# Identity associations. Published here because cluster-bootstrap is the
-# operator-wiring component that carries the cluster name.
-resource "aws_ssm_parameter" "operator_cluster_name" {
-  name  = "/eks-agent-platform/${var.environment}/cluster/name"
-  type  = "String"
-  value = var.cluster_name
-}
 
 resource "kubernetes_secret_v1" "argocd_cluster" {
   metadata {
@@ -370,7 +361,7 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
     # Per-cluster wiring for the agent-platform operator: the EKS cluster name
     # (the operator creates the tenant Pod Identity associations on it) + the
     # deterministic operator role ARN (path-scoped, named by agent-iam as
-    # <env>-eks-agent-platform-operator). The eks-gitops operator ApplicationSet
+    # <cluster_name>-agent-platform-operator). The eks-gitops operator ApplicationSet
     # reads these via the ArgoCD cluster generator and injects them as Helm
     # values, so the operator gets its config without the account ID ever being
     # committed to the public gitops repos. Annotations (not labels) because ARNs
@@ -384,7 +375,7 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       "gitops/repo-url"    = var.gitops_repo_url
       "gitops/repo-branch" = var.gitops_repo_branch
 
-      "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.environment}-eks-agent-platform-operator"
+      "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.cluster_name}-agent-platform-operator"
       }, var.enable_eval_runtime ? {
       # eval-runner reports bucket, read from the eval-runtime SSM param. The
       # eval-runner role is bound by Pod Identity, so no role ARN is published.

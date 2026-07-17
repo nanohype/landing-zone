@@ -9,7 +9,7 @@ allowed-tools: Bash(make plan *), Bash(terragrunt plan *), Bash(terragrunt run-a
 Run `make plan` for the given environment and optional component.
 
 **Arguments:**
-- `$ARGUMENTS[0]` — environment (dev, staging, production, org) — required
+- `$ARGUMENTS[0]` — environment (development, staging, production, org) — required
 - `$ARGUMENTS[1]` — component name (network, cluster, druid, etc.) — defaults to "all"
 
 **Steps:**

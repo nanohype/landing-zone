@@ -9,7 +9,7 @@ output "sns_topic_arns" {
 
 output "dashboard_url" {
   description = "CloudWatch dashboard URL"
-  value       = var.enable_dashboard ? "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${var.environment}-eks-overview" : null
+  value       = var.enable_dashboard ? "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${var.cluster_name}-overview" : null
 }
 
 output "alarm_arns" {

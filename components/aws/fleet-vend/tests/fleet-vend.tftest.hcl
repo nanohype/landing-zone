@@ -53,10 +53,10 @@ override_data {
 }
 
 variables {
-  environment  = "dev"
+  environment  = "development"
   region       = "us-west-2"
   team         = "platform"
-  hub_role_arn = "arn:aws:iam::999999999999:role/dev-eks-fleet-crossplane"
+  hub_role_arn = "arn:aws:iam::999999999999:role/development-eks-fleet-crossplane"
   external_id  = "test-external-id"
 }
 
@@ -109,9 +109,9 @@ run "boundary_denies_unbounded_role_writes" {
       && s.Effect == "Deny"
       && contains(s.Action, "iam:CreateRole")
       && contains(s.Action, "iam:PutRolePermissionsBoundary")
-      && try(s.Condition.StringNotEquals["iam:PermissionsBoundary"], null) == [
-        "arn:aws:iam::123456789012:policy/eks-fleet/dev-eks-fleet-vend-boundary",
-        "arn:aws:iam::123456789012:policy/eks-agent-platform/dev-eks-agent-platform-tenant-boundary",
+      && try(s.Condition.ArnNotLike["iam:PermissionsBoundary"], null) == [
+        "arn:aws:iam::123456789012:policy/eks-fleet/development-eks-fleet-vend-boundary",
+        "arn:aws:iam::123456789012:policy/eks-agent-platform/development-*-agent-platform-tenant-boundary",
       ]
     ]) == 1
     error_message = "boundary must DENY iam:CreateRole/AttachRolePolicy/PutRolePolicy/PutRolePermissionsBoundary whose iam:PermissionsBoundary is not one of the two approved boundary ARNs"
@@ -156,7 +156,7 @@ run "identity_cluster_role_write_is_boundary_gated_and_path_scoped" {
       s if try(s.Sid, "") == "ManageClusterRolesWithBoundary"
       && s.Effect == "Allow"
       && contains(s.Action, "iam:CreateRole")
-      && try(s.Condition.StringEquals["iam:PermissionsBoundary"], "") == "arn:aws:iam::123456789012:policy/eks-fleet/dev-eks-fleet-vend-boundary"
+      && try(s.Condition.StringEquals["iam:PermissionsBoundary"], "") == "arn:aws:iam::123456789012:policy/eks-fleet/development-eks-fleet-vend-boundary"
     ]) == 1
     error_message = "identity policy CreateRole/*RolePolicy must be gated by iam:PermissionsBoundary == the vend boundary ARN"
   }

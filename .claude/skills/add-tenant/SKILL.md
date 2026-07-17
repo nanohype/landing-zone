@@ -22,6 +22,6 @@ Add a new tenant to a multi-tenant component.
 
 4. **Ask** which options they want to customize (or accept all defaults)
 
-5. **Add the tenant** to the `tenants` map in `live/{env}/$ARGUMENTS[0]/terragrunt.hcl` inputs block. If `$ARGUMENTS[2]` is provided, only add to that environment — otherwise add to all three (dev, staging, production)
+5. **Add the tenant** to the `tenants` map in `live/{env}/$ARGUMENTS[0]/terragrunt.hcl` inputs block. If `$ARGUMENTS[2]` is provided, only add to that environment — otherwise add to all three (development, staging, production)
 
 6. **Show a plan preview**: suggest running `/plan {env} $ARGUMENTS[0]` to see what will be created

@@ -7,7 +7,7 @@ variable "region" {
 }
 
 variable "environment" {
-  description = "Environment tier (dev, staging, production) — prefixes resource names + tags"
+  description = "Environment tier (development, staging, production) — prefixes resource names + tags"
   type        = string
 }
 
@@ -56,7 +56,7 @@ variable "cluster_permissions_boundary_arn" {
 variable "cluster_name" {
   description = "EKS cluster base name; the component prefixes it with environment"
   type        = string
-  default     = "eks"
+  default     = "platform"
 }
 
 variable "cluster_version" {
@@ -121,7 +121,7 @@ variable "max_azs" {
 }
 
 variable "nat_gateways" {
-  description = "Number of NAT gateways (1 dev, 2 staging, 3 production)"
+  description = "Number of NAT gateways (1 development, 2 staging, 3 production)"
   type        = number
   default     = 1
 }

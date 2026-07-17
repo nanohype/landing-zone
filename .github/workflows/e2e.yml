@@ -24,11 +24,11 @@ on:
         description: "Region"
         default: "us-west-2"
       environment:
-        description: "Env tree (dev | staging | production)"
-        default: "dev"
+        description: "Env tree (development | staging | production)"
+        default: "development"
       account_dir:
-        description: "Account directory (workload-dev | workload-prod)"
-        default: "workload-dev"
+        description: "Account directory (workload-development | workload-production)"
+        default: "workload-development"
       tenant:
         description: "Tenant name to create"
         default: "e2e-smoke"

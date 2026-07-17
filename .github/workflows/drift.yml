@@ -35,14 +35,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { account: workload-prod, region: us-west-2, env: production, component: network }
-          - { account: workload-prod, region: us-west-2, env: production, component: cluster }
-          - { account: workload-prod, region: us-west-2, env: production, component: cluster-addons }
-          - { account: workload-prod, region: us-west-2, env: production, component: cluster-bootstrap }
-          - { account: workload-prod, region: us-west-2, env: production, component: dns }
-          - { account: workload-prod, region: us-west-2, env: production, component: cost }
-          - { account: workload-prod, region: us-west-2, env: production, component: observability }
-          - { account: workload-prod, region: us-west-2, env: production, component: secrets }
+          - { account: workload-production, region: us-west-2, env: production, component: network }
+          - { account: workload-production, region: us-west-2, env: production, component: cluster }
+          - { account: workload-production, region: us-west-2, env: production, component: cluster-addons }
+          - { account: workload-production, region: us-west-2, env: production, component: cluster-bootstrap }
+          - { account: workload-production, region: us-west-2, env: production, component: dns }
+          - { account: workload-production, region: us-west-2, env: production, component: cost }
+          - { account: workload-production, region: us-west-2, env: production, component: observability }
+          - { account: workload-production, region: us-west-2, env: production, component: secrets }
     steps:
       - uses: actions/checkout@v4
       - uses: opentofu/setup-opentofu@v1

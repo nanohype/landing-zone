@@ -2,7 +2,7 @@ variable "environment" {
   description = "Environment name"
   type        = string
 
-  # Format contract, not a closed enum: the platform legitimately uses dev, staging,
+  # Format contract, not a closed enum: the platform legitimately uses development, staging,
   # production, prod, hub, org, management, and per-workload derivations, so pinning a
   # fixed set would reject valid environments. This still catches empty/uppercase/typo'd
   # values before they flow into resource names, tags, and SSM paths.

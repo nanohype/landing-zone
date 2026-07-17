@@ -9,7 +9,7 @@ allowed-tools: Bash(make plan *), Bash(terragrunt plan *), Bash(terragrunt run-a
 Check for infrastructure drift by running plan and analyzing the output.
 
 **Arguments:**
-- `$ARGUMENTS[0]` — environment (dev, staging, production)
+- `$ARGUMENTS[0]` — environment (development, staging, production)
 - `$ARGUMENTS[1]` — component (optional, defaults to all)
 
 ## Steps

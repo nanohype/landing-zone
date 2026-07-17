@@ -2,9 +2,12 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  account_id       = data.aws_caller_identity.current.account_id
-  partition        = data.aws_partition.current.partition
-  irsa_role_prefix = "${var.environment}-eks"
+  account_id = data.aws_caller_identity.current.account_id
+  partition  = data.aws_partition.current.partition
+  # Key on the full cluster name (<environment>-<clusterName>) so the IRSA roles match
+  # this cluster's AMP/AMG resources (which already key on var.cluster_name) and don't
+  # collide with a co-located sibling cluster in the same account and environment.
+  irsa_role_prefix = var.cluster_name
 
   tags = merge(var.tags, {
     Component = "managed-monitoring"
@@ -199,7 +202,10 @@ resource "aws_grafana_role_association" "viewer" {
 ################################################################################
 
 resource "aws_secretsmanager_secret" "monitoring_endpoints" {
-  name = "eks-managed-monitoring-endpoints"
+  # Cluster-scoped so co-located sibling clusters in one account+region don't
+  # collide on the Secrets Manager name. The eks-gitops ExternalSecret readers
+  # patch remoteRef.key to this same <cluster_name>-… per cluster.
+  name = "${var.cluster_name}-managed-monitoring-endpoints"
   # Endpoints, not credentials — drop the recovery window so a teardown/recreate
   # cycle doesn't collide with a soft-deleted secret of the same name.
   recovery_window_in_days = 0
@@ -216,7 +222,7 @@ resource "aws_secretsmanager_secret_version" "monitoring_endpoints" {
 }
 
 resource "aws_ssm_parameter" "grafana_url" {
-  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/grafana_url"
+  name  = "/eks-agent-platform/${var.cluster_name}/managed-monitoring/grafana_url"
   type  = "String"
   value = "https://${aws_grafana_workspace.this.endpoint}"
 
@@ -228,7 +234,7 @@ resource "aws_ssm_parameter" "grafana_url" {
 # monitoring/amp-endpoint, the opencost ApplicationSet reads it). Same
 # publish-to-SSM pattern as grafana_url so the value never lands in gitops.
 resource "aws_ssm_parameter" "amp_endpoint" {
-  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/amp_endpoint"
+  name  = "/eks-agent-platform/${var.cluster_name}/managed-monitoring/amp_endpoint"
   type  = "String"
   value = aws_prometheus_workspace.this.prometheus_endpoint
 
@@ -238,7 +244,7 @@ resource "aws_ssm_parameter" "amp_endpoint" {
 # AMP workspace id — the opencost chart's native AMP integration keys on the
 # workspace id (opencost.prometheus.amp.workspaceId), not the full URL.
 resource "aws_ssm_parameter" "amp_workspace_id" {
-  name  = "/eks-agent-platform/${var.environment}/managed-monitoring/amp_workspace_id"
+  name  = "/eks-agent-platform/${var.cluster_name}/managed-monitoring/amp_workspace_id"
   type  = "String"
   value = aws_prometheus_workspace.this.id
 
@@ -251,7 +257,7 @@ resource "aws_ssm_parameter" "amp_workspace_id" {
 # grafana-operator pushes every dashboard, data source and alert rule into the
 # AMG workspace using a bearer token it reads from a Secret. The catalog's
 # ExternalSecret has always sourced that token from a Secrets Manager secret
-# named `eks-grafana-token` — but nothing ever created it. It was populated by
+# named `<cluster_name>-grafana-token` (cluster-scoped) — but nothing else creates it. It was populated by
 # hand, which meant `rackctl init` could not produce a green cluster without a
 # human in the loop, and the dashboards app shipped broken on every fresh
 # install.
@@ -293,7 +299,9 @@ resource "aws_grafana_workspace_service_account_token" "bootstrap" {
 }
 
 resource "aws_secretsmanager_secret" "grafana_token" {
-  name = "eks-grafana-token"
+  # Cluster-scoped (see monitoring_endpoints above) — the dashboards ExternalSecret
+  # + rotator CronJob patch this same <cluster_name>-grafana-token per cluster.
+  name = "${var.cluster_name}-grafana-token"
   # The rotator replaces this value in place. Drop the recovery window so a
   # teardown/recreate cycle doesn't collide with a soft-deleted secret of the
   # same name — same reasoning as monitoring_endpoints above.

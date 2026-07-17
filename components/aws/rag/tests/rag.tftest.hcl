@@ -35,11 +35,11 @@ mock_provider "aws" {
 }
 
 variables {
-  environment   = "dev"
+  environment   = "development"
   region        = "us-west-2"
   vpc_id        = "vpc-0123456789abcdef0"
   cluster_sg_id = "sg-0123456789abcdef0"
-  cluster_name  = "dev-hub"
+  cluster_name  = "development-hub"
   team          = "platform"
   tenants = {
     t1 = {}

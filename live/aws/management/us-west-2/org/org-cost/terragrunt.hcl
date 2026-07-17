@@ -38,7 +38,7 @@ inputs = {
         {
           value = "Development"
           rule = {
-            tags = { key = "Environment", values = ["dev"] }
+            tags = { key = "Environment", values = ["development"] }
           }
         },
       ]

@@ -19,7 +19,7 @@ inputs = {
   ipam_top_level_cidr = "10.0.0.0/8"
 
   ipam_pools = {
-    dev = {
+    development = {
       cidr        = "10.0.0.0/12"
       description = "Development environment pool"
     }

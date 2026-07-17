@@ -8,7 +8,7 @@ include "envcommon" {
 }
 
 inputs = {
-  # Dev relaxes safety bars and runs the smallest data-plane footprint.
+  # Development relaxes safety bars and runs the smallest data-plane footprint.
   deletion_protection    = false
   point_in_time_recovery = false
 
@@ -22,7 +22,7 @@ inputs = {
   redis_num_cache_clusters = 1
   redis_multi_az           = false
 
-  # Audit retention: shorter in dev so the bucket doesn't accumulate
+  # Audit retention: shorter in development so the bucket doesn't accumulate
   audit_ttl_days          = 30
   audit_s3_lifecycle_days = 90
 }

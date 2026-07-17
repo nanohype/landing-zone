@@ -8,7 +8,7 @@ include "envcommon" {
 }
 
 inputs = {
-  # Dev allows destroy/recreate without prod safety bars. Staging and
+  # Development allows destroy/recreate without prod safety bars. Staging and
   # production both keep the secure defaults from the component's
   # variables.tf (deletion_protection + point_in_time_recovery both true).
   deletion_protection    = false

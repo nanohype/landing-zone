@@ -7,15 +7,15 @@ Day-to-day procedures for operating the landing-zone infrastructure.
 ### Single Component
 
 ```bash
-task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
-task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=network
+task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
+task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
 ```
 
 ### All Components in an Environment
 
 ```bash
-task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
-task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev
+task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
+task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 ```
 
 Terragrunt resolves the dependency graph and runs components in the correct order.
@@ -44,7 +44,7 @@ For a from-scratch deployment, components must be applied in dependency order: `
 
 Order within the org layer is flexible -- these components have no inter-dependencies.
 
-### Per Environment (dev -> staging -> production)
+### Per Environment (development -> staging -> production)
 
 ```
 1. network
@@ -92,7 +92,7 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 **Inputs:**
 - `account` -- target account alias
 - `region` -- target region
-- `environment` -- dev, staging, or production
+- `environment` -- development, staging, or production
 - `component` -- specific component name or "all"
 - `action` -- plan or apply
 
@@ -103,7 +103,7 @@ Uses GitHub environment protection rules -- production requires approval. When `
 **Trigger:** Workflow dispatch (manual).
 
 **Inputs:**
-- `environment` -- dev or staging only (production excluded)
+- `environment` -- development or staging only (production excluded)
 - `component` -- specific component name or "all"
 - `confirm` -- must exactly match the environment name
 
@@ -136,8 +136,8 @@ Seven components are multi-tenant (`druid`, `pipeline`, `gateway`, `llm`, `mlops
      }
    }
    ```
-4. Plan to verify: `task plan ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
-5. Apply: `task apply ACCOUNT=workload-dev REGION=us-west-2 ENVIRONMENT=dev COMPONENT=<component>`
+4. Plan to verify: `task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=<component>`
+5. Apply: `task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=<component>`
 
 ### Removing a Tenant
 

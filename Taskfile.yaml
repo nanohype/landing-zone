@@ -1,9 +1,9 @@
 version: "3"
 
 vars:
-  ACCOUNT: '{{.ACCOUNT | default "workload-dev"}}'
+  ACCOUNT: '{{.ACCOUNT | default "workload-development"}}'
   REGION: '{{.REGION | default "us-west-2"}}'
-  ENVIRONMENT: '{{.ENVIRONMENT | default "dev"}}'
+  ENVIRONMENT: '{{.ENVIRONMENT | default "development"}}'
   COMPONENT: '{{.COMPONENT | default "all"}}'
 
 tasks:
@@ -102,6 +102,6 @@ tasks:
       - |
         echo ""
         echo "Usage:"
-        echo "  task <target> [ACCOUNT=workload-dev|workload-staging|workload-prod|management] [REGION=us-west-2] [ENVIRONMENT=dev|staging|production|org] [COMPONENT=network|cluster|all]"
+        echo "  task <target> [ACCOUNT=workload-development|workload-staging|workload-production|management] [REGION=us-west-2] [ENVIRONMENT=development|staging|production|org] [COMPONENT=network|cluster|all]"
         echo ""
         task --list

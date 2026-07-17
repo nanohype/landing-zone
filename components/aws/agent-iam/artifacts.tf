@@ -8,8 +8,8 @@
 # on startup, and once the name was supplied by hand it failed again on
 #
 #   ensureBucketPolicy failed: s3:GetBucketPolicy AccessDenied
-#     User: .../dev-eks-agent-platform-operator
-#     Resource: arn:aws:s3:::<env>-eks-<account>-model-artifacts
+#     User: .../development-platform-agent-platform-operator
+#     Resource: arn:aws:s3:::<cluster>-<account>-<region>-model-artifacts
 #
 # leaving every Platform stuck in phase=Provisioning forever. The substrate the
 # operator was written against simply did not exist.
@@ -19,9 +19,9 @@
 # llm module — which is the only other place in the repo that names a model
 # artifacts bucket, and which is never applied on the core path.
 #
-# Naming matches the account-qualified convention used elsewhere
-# (<env>-eks-<account>-*) because S3 bucket names are globally unique: two
-# accounts standing up a `dev` cluster must not collide.
+# Naming matches the account+region-qualified convention used elsewhere
+# (<cluster>-<account>-<region>-*) because S3 bucket names are globally unique: two
+# accounts standing up a cluster of the same name must not collide.
 ################################################################################
 
 locals {
@@ -29,10 +29,12 @@ locals {
   # account deploying the same environment into two regions collides with itself
   # without it. See the note on bucket_prefix in cluster-addons/main.tf.
   #
-  # Worst case 58 chars, inside S3's 63-char limit; asserted at plan time below.
-  model_artifacts_bucket = "${var.environment}-eks-${local.account_id}-${var.region}-model-artifacts"
-  eval_reports_bucket    = "${var.environment}-eks-${local.account_id}-${var.region}-eval-reports"
-  artifacts_ssm_prefix   = "/eks-agent-platform/${var.environment}/model-artifacts"
+  # This account+region-qualified bucket is the TIGHTEST cluster-scoped name in the org
+  # and sets the clusterName length cap: it leaves 12 chars for the base token in us-west-2
+  # (fewer in a longer region). The precondition below asserts it at plan time.
+  model_artifacts_bucket = "${var.cluster_name}-${local.account_id}-${var.region}-model-artifacts"
+  eval_reports_bucket    = "${var.cluster_name}-${local.account_id}-${var.region}-eval-reports"
+  artifacts_ssm_prefix   = "/eks-agent-platform/${var.cluster_name}/model-artifacts"
 }
 
 resource "aws_s3_bucket" "model_artifacts" {
@@ -42,7 +44,7 @@ resource "aws_s3_bucket" "model_artifacts" {
   lifecycle {
     precondition {
       condition     = length(local.model_artifacts_bucket) <= 63
-      error_message = "bucket ${local.model_artifacts_bucket} exceeds S3's 63-character limit; shorten var.environment."
+      error_message = "bucket ${local.model_artifacts_bucket} exceeds S3's 63-character limit; shorten var.cluster_name."
     }
   }
 }
@@ -54,7 +56,7 @@ resource "aws_s3_bucket" "eval_reports" {
   lifecycle {
     precondition {
       condition     = length(local.eval_reports_bucket) <= 63
-      error_message = "bucket ${local.eval_reports_bucket} exceeds S3's 63-character limit; shorten var.environment."
+      error_message = "bucket ${local.eval_reports_bucket} exceeds S3's 63-character limit; shorten var.cluster_name."
     }
   }
 }

@@ -1,8 +1,8 @@
 variable "environment" {
-  description = "Environment name (dev, staging, production)."
+  description = "Environment name (development, staging, production)."
   type        = string
 
-  # Format contract, not a closed enum: the platform legitimately uses dev, staging,
+  # Format contract, not a closed enum: the platform legitimately uses development, staging,
   # production, prod, hub, org, management, and per-workload derivations, so pinning a
   # fixed set would reject valid environments. This still catches empty/uppercase/typo'd
   # values before they flow into resource names, tags, and SSM paths.
@@ -68,7 +68,7 @@ variable "rds_min_acu" {
 }
 
 variable "rds_max_acu" {
-  description = "Aurora Serverless v2 maximum ACU. Production typically wants 8-16; dev/staging stays at 2."
+  description = "Aurora Serverless v2 maximum ACU. Production typically wants 8-16; development/staging stays at 2."
   type        = number
   default     = 2
 }
@@ -80,13 +80,13 @@ variable "rds_backup_retention_days" {
 }
 
 variable "redis_node_type" {
-  description = "ElastiCache Redis node type. cache.t4g.micro is dev-grade; production uses cache.t4g.small or cache.m7g.large depending on throughput."
+  description = "ElastiCache Redis node type. cache.t4g.micro is development-grade; production uses cache.t4g.small or cache.m7g.large depending on throughput."
   type        = string
   default     = "cache.t4g.micro"
 }
 
 variable "redis_num_cache_clusters" {
-  description = "Number of Redis cache clusters in the replication group. 1 for dev (no failover), 2 for production (one read replica + automatic failover)."
+  description = "Number of Redis cache clusters in the replication group. 1 for development (no failover), 2 for production (one read replica + automatic failover)."
   type        = number
   default     = 1
 }

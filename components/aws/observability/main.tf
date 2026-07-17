@@ -14,17 +14,17 @@ locals {
 ################################################################################
 
 resource "aws_sns_topic" "critical" {
-  name = "${var.environment}-eks-alerts-critical"
+  name = "${var.cluster_name}-alerts-critical"
   tags = local.tags
 }
 
 resource "aws_sns_topic" "warning" {
-  name = "${var.environment}-eks-alerts-warning"
+  name = "${var.cluster_name}-alerts-warning"
   tags = local.tags
 }
 
 resource "aws_sns_topic" "info" {
-  name = "${var.environment}-eks-alerts-info"
+  name = "${var.cluster_name}-alerts-info"
   tags = local.tags
 }
 
@@ -100,7 +100,7 @@ resource "aws_sns_topic_subscription" "warning_email" {
 resource "aws_cloudwatch_metric_alarm" "cluster_api_server_errors" {
   count = var.enable_cluster_alarms ? 1 : 0
 
-  alarm_name          = "${var.environment}-eks-api-server-5xx"
+  alarm_name          = "${var.cluster_name}-api-server-5xx"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 3
   metric_name         = "apiserver_request_total"
@@ -122,7 +122,7 @@ resource "aws_cloudwatch_metric_alarm" "cluster_api_server_errors" {
 resource "aws_cloudwatch_metric_alarm" "node_cpu_utilization" {
   count = var.enable_cluster_alarms ? 1 : 0
 
-  alarm_name          = "${var.environment}-eks-node-cpu-high"
+  alarm_name          = "${var.cluster_name}-node-cpu-high"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 3
   metric_name         = "node_cpu_utilization"
@@ -144,7 +144,7 @@ resource "aws_cloudwatch_metric_alarm" "node_cpu_utilization" {
 resource "aws_cloudwatch_metric_alarm" "node_memory_utilization" {
   count = var.enable_cluster_alarms ? 1 : 0
 
-  alarm_name          = "${var.environment}-eks-node-memory-high"
+  alarm_name          = "${var.cluster_name}-node-memory-high"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 3
   metric_name         = "node_memory_utilization"
@@ -166,7 +166,7 @@ resource "aws_cloudwatch_metric_alarm" "node_memory_utilization" {
 resource "aws_cloudwatch_metric_alarm" "cluster_failed_node_count" {
   count = var.enable_cluster_alarms ? 1 : 0
 
-  alarm_name          = "${var.environment}-eks-failed-nodes"
+  alarm_name          = "${var.cluster_name}-failed-nodes"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "cluster_failed_node_count"
@@ -188,7 +188,7 @@ resource "aws_cloudwatch_metric_alarm" "cluster_failed_node_count" {
 resource "aws_cloudwatch_metric_alarm" "pod_restart_count" {
   count = var.enable_cluster_alarms ? 1 : 0
 
-  alarm_name          = "${var.environment}-eks-pod-restarts-high"
+  alarm_name          = "${var.cluster_name}-pod-restarts-high"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "pod_number_of_container_restarts"
@@ -214,7 +214,7 @@ resource "aws_cloudwatch_metric_alarm" "pod_restart_count" {
 resource "aws_cloudwatch_dashboard" "eks" {
   count = var.enable_dashboard ? 1 : 0
 
-  dashboard_name = "${var.environment}-eks-overview"
+  dashboard_name = "${var.cluster_name}-overview"
 
   dashboard_body = jsonencode({
     widgets = [

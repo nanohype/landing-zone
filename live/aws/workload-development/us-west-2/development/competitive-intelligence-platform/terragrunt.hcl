@@ -8,7 +8,7 @@ include "envcommon" {
 }
 
 inputs = {
-  # Dev relaxes safety bars and runs the smallest data-plane footprint.
+  # Development relaxes safety bars and runs the smallest data-plane footprint.
   deletion_protection = false
 
   # Aurora Serverless v2: 0.5 ACU min, 2 ACU ceiling

@@ -1,8 +1,8 @@
 variable "environment" {
-  description = "Environment name (dev, staging, production)"
+  description = "Environment name (development, staging, production)"
   type        = string
 
-  # Format contract, not a closed enum: the platform legitimately uses dev, staging,
+  # Format contract, not a closed enum: the platform legitimately uses development, staging,
   # production, prod, hub, org, management, and per-workload derivations, so pinning a
   # fixed set would reject valid environments. This still catches empty/uppercase/typo'd
   # values before they flow into resource names, tags, and SSM paths.
@@ -20,7 +20,12 @@ variable "region" {
 variable "cluster_name" {
   description = "EKS cluster base name (prefixed with environment)"
   type        = string
-  default     = "eks"
+  default     = "platform"
+
+  validation {
+    condition     = length(var.cluster_name) <= 12
+    error_message = "cluster_name (the base token) must be <= 12 chars. The derived <environment>-<cluster_name> feeds cluster-scoped S3/IAM names; the tightest budget is agent-iam's account+region-qualified model-artifacts bucket (<cluster>-<account>-<region>-model-artifacts), which leaves 12 chars for the base in us-west-2 (fewer in a longer region — caught by the bucket precondition)."
+  }
 }
 
 variable "cluster_version" {

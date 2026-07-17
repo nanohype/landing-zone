@@ -55,7 +55,7 @@ resource "aws_api_gateway_method_settings" "this" {
   settings {
     logging_level      = var.tenant_config.logging_level
     metrics_enabled    = true
-    data_trace_enabled = var.environment == "dev"
+    data_trace_enabled = var.environment == "development"
   }
 }
 
