@@ -20,7 +20,7 @@ intentionally — never bulk-delete them.
 | 2b | Cluster-secret annotations for velero + external-dns | ✅ #133 |
 | 16 | Naming/tagging cap-clearers | ✅ #134 |
 | 17 | Security batch | ✅ #136 |
-| 18 | Testing batch | ☐ |
+| 18 | Testing batch | ✅ #137 |
 | 19 | Docs + agent surface | ☐ |
 | 19b | Cluster-bootstrap `monitoring/managed` label | ☐ |
 | 24 | Endpoint posture flip (after rackctl target 23) | ☐ |
@@ -330,6 +330,54 @@ staging; `concurrency:` groups keyed on env/component for the mutating workflows
 
 Acceptance: `task test` green locally; drift workflow lists every applied production +
 staging component; two dispatched deploys on one env serialize.
+
+Outcome (✅ #137): **all seven assigned items shipped, `task test` green across 26
+suites (all 3 trees, `terragrunt render` still 100% clean).** Resolutions + scope
+discovered:
+
+- **fleet-hub IAM ceiling suite added as a second file** (`fleet-hub-iam.tftest.hcl`),
+  mirroring fleet-vend's four invariants (web-identity trust bound to the crossplane SA,
+  boundary DenyUnboundedRoleWrites + DenyEscalation, identity role-write boundary-gated +
+  path-scoped). It uses the real credential-less provider (skip_* + override_data) — the
+  hub trust is a `data.aws_iam_policy_document` a mock provider mangles. The existing
+  `fleet-hub.tftest.hcl` (state-bucket SSE/TLS, mock provider) stays as-is; the two files'
+  provider choices are each the right tool for what they assert.
+- **Only llm + mlops actually lacked tenant-IRSA tests** (Targets 16/17 had already added
+  suites to druid/pipeline/gateway/governance). Added full scoping + omit-toggle + naming
+  guard suites for both; surfaced `*_policy_json` outputs on their tenant modules + roots
+  (the rag/druid idiom, since neither had `role_policy_json`). Added no-doubled-env guard
+  runs to druid/pipeline/gateway (they had scoping but no naming-guard run).
+- **App-platform TLS-deny: digest needed the real-provider strategy.** incident-response
+  and slack plan clean under a mock provider (with the pod-identity tenant role + Aurora
+  master-secret block mocked). digest's SES identity exposes a purely-computed
+  `dkim_signing_attributes` block an output indexes `[0]` into — a mock renders it empty
+  (plan fails) and it can't be overridden (not in config), so digest uses the real
+  provider (computed → unknown, so the index is harmlessly unknown) with the two bucket
+  ARNs pinned via `override_resource`.
+- **SNS suites assert both the dedicated-CMK SSE wiring and that the key policy admits
+  the publishing service principal** (SourceAccount-scoped) — the reason a dedicated CMK
+  was required over `alias/aws/sns`. Needed valid-ARN mocks for the CMK/topic (and the CE
+  monitor / backup role) so the alarms/subscriptions plan.
+- **drift auto-discovery verified against the live tree:** the discover job now emits
+  every production + staging leaf (23 + 23 = 46, up from the hardcoded 8 production-only),
+  confirmed by running the jq matrix locally against `git ls-files`.
+- **Mutating-workflow concurrency uses a shared `mutate-<env>-<component>` group across
+  deploy.yml AND destroy.yml** (cancel-in-progress false) — so two deploys, two destroys,
+  OR a deploy racing a destroy of the same target all serialize.
+
+**Scope discovered — the "Finding from Target 16" tflint-severity item is ~10× its
+stated size and is carved out.** The note listed ~4 residuals; the real inventory at
+error-off is ~40 warnings: `terraform_unused_declarations` dominates (~30), almost all
+from the deliberate uniform-interface variables every component declares for envcommon
+(`region`/`environment`/`vpc_id`/`cluster_sg_id`) even when a given component doesn't
+reference them, plus 7 components missing `terraform_required_version` /
+`terraform_required_providers` constraints. The two rules that actually caused Target
+16's miss — `terraform_documented_variables` / `terraform_documented_outputs` — already
+pass clean today. Making the gate hard needs an interface-variable-contract decision
+(keep the uniform interface and allowlist unused-declaration on those four vars, or trim
++ rewire envcommon) plus a `versions.tf` backfill — a design-bearing change, not a
+mechanical testing fix, and unsafe to bundle unreviewed into a testing PR. Recommend a
+dedicated bounded lint-gate-hardening target (sibling to Target 19's gate work).
 
 ## Target 19b — Cluster-bootstrap `monitoring/managed` label (S)
 

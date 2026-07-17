@@ -97,3 +97,34 @@ run "connector_kafka_omitted_when_msk_disabled" {
     error_message = "with MSK disabled the connector must carry no kafka-cluster grant"
   }
 }
+
+# no-doubled-env guard at the caller boundary: a tenant keyed with the environment
+# token would compose into a doubled "development-pipeline-development-..." name. The
+# var.tenants validation must reject it. (The passing runs above, keyed "t1", are the
+# positive direction — a short non-env key is accepted. The bucket-length-budget
+# overflow direction is exercised in the governance suite, the repo's tightest
+# tenant namespace.)
+run "rejects_tenant_key_equal_to_environment" {
+  command = plan
+
+  variables {
+    tenants = {
+      development = {}
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# A tenant key prefixed with "<env>-" is the same defect.
+run "rejects_tenant_key_prefixed_with_environment" {
+  command = plan
+
+  variables {
+    tenants = {
+      "development-ingest" = {}
+    }
+  }
+
+  expect_failures = [var.tenants]
+}

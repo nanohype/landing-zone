@@ -11,9 +11,45 @@ permissions:
   issues: write
 
 jobs:
+  # Auto-discovers the drift matrix from the working tree, mirroring ci.yml's
+  # discover job, so a new production/staging live entry starts getting watched
+  # without a workflow edit. The matrix is every
+  # live/<cloud>/<account>/<region>/<env>/<component>/terragrunt.hcl whose env is
+  # production or staging — the two long-lived deployed environments (development is
+  # ephemeral, org/hub are management/fleet control planes covered by their own
+  # bring-up). Uses `git ls-files` so gitignored caches are excluded by construction.
+  discover:
+    name: Discover Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        run: |
+          matrix=$(
+            git ls-files live/ \
+            | grep '/terragrunt\.hcl$' \
+            | jq -R -s -c '
+                split("\n")
+                | map(select(length > 0))
+                | map(split("/"))
+                | map({
+                    cloud: .[1],
+                    account: .[2],
+                    region: .[3],
+                    env: .[4],
+                    component: .[5]
+                  })
+                | map(select(.env == "production" or .env == "staging"))
+              '
+          )
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   detect-drift:
     name: Drift Check (${{ matrix.env }}/${{ matrix.component }})
     runs-on: ubuntu-latest
+    needs: discover
     # Credential guard, mirroring ci.yml's plan job: skip the whole job (green,
     # not red) until the OIDC role is wired up as the AWS_ROLE_ARN repo variable.
     # Without a role, configure-aws-credentials fails with "Could not load
@@ -34,15 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { account: workload-production, region: us-west-2, env: production, component: network }
-          - { account: workload-production, region: us-west-2, env: production, component: cluster }
-          - { account: workload-production, region: us-west-2, env: production, component: cluster-addons }
-          - { account: workload-production, region: us-west-2, env: production, component: cluster-bootstrap }
-          - { account: workload-production, region: us-west-2, env: production, component: dns }
-          - { account: workload-production, region: us-west-2, env: production, component: cost }
-          - { account: workload-production, region: us-west-2, env: production, component: observability }
-          - { account: workload-production, region: us-west-2, env: production, component: secrets }
+        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: opentofu/setup-opentofu@v1
@@ -65,7 +93,7 @@ jobs:
 
       - name: Plan
         id: plan
-        working-directory: live/aws/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
+        working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
         run: |
           set +e
           terragrunt plan -detailed-exitcode -no-color 2>&1 | tee plan.txt
@@ -77,7 +105,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('live/aws/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}/plan.txt', 'utf8');
+            const plan = fs.readFileSync('live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}/plan.txt', 'utf8');
             const truncated = plan.length > 60000 ? plan.substring(0, 60000) + '\n... truncated' : plan;
 
             const title = `Drift detected: ${{ matrix.env }}/${{ matrix.component }}`;

@@ -137,3 +137,32 @@ run "grants_omitted_when_disabled" {
     error_message = "with cognito disabled the gateway-auth role must carry no cognito grant"
   }
 }
+
+# no-doubled-env guard at the caller boundary: a tenant keyed with the environment
+# token would compose into a doubled "development-gateway-development-..." name. The
+# var.tenants validation must reject it. (The passing runs above, keyed "t1", are the
+# positive direction — a short non-env key is accepted.)
+run "rejects_tenant_key_equal_to_environment" {
+  command = plan
+
+  variables {
+    tenants = {
+      development = {}
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# A tenant key prefixed with "<env>-" is the same defect.
+run "rejects_tenant_key_prefixed_with_environment" {
+  command = plan
+
+  variables {
+    tenants = {
+      "development-api" = {}
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
