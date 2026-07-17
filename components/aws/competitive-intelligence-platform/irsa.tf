@@ -21,56 +21,37 @@
  * docs/runbooks/model-access-cutover.md.
  */
 
-# Slow-moving substrate grants for the app pods. Attached to the tenant role
-# by the operator (Platform.spec.identity.extraPolicyArns), never here — the
-# tenant role's attachment set is operator-reconciled state.
-resource "aws_iam_policy" "app_access" {
-  name        = "${local.prefix}-app-access"
-  path        = "/eks-agent-platform/"
-  description = "competitive-intelligence app-pod substrate grants, attached to the tenant role via Platform.spec.identity.extraPolicyArns"
+# Pod Identity + app-access shell (managed policy, tenant-role lookup, and the
+# EKS Pod Identity association) is the shared platform-app module. Only the
+# app-specific substrate statements below are bespoke.
+module "platform_app" {
+  source = "../../../modules/aws/platform-app"
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        # Secrets Manager: app-secrets (Slack + optional LLM API
-        # credentials) and the Aurora-managed master credentials secret.
-        Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-        Resource = [
-          "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:competitive-intelligence/${var.environment}/*",
-          module.aurora.cluster_master_user_secret[0].secret_arn,
-        ]
-      },
-      {
-        # Best-effort metrics from the in-app metrics surface (timing +
-        # counter) when OTel isn't available — fallback CloudWatch path.
-        # PutMetricData has no resource-level scoping in IAM.
-        Effect   = "Allow"
-        Action   = ["cloudwatch:PutMetricData"]
-        Resource = ["*"]
-      },
-    ]
-  })
-
-  tags = local.tags
-}
-
-# The operator-reconciled tenant role, minted from the Platform CR. Resolved
-# by name (the operator's `<env>-<platform>-tenant` contract) so a missing
-# Platform fails the plan loudly instead of minting a dangling association.
-data "aws_iam_role" "tenant" {
-  name = "${var.environment}-competitive-intelligence-tenant"
-}
-
-# Binds the chart's ServiceAccount to the tenant role through EKS Pod
-# Identity — pods receive the role's credentials with no role-arn annotation
-# and no OIDC provider involved.
-resource "aws_eks_pod_identity_association" "app" {
+  app_name        = "competitive-intelligence"
+  environment     = var.environment
   cluster_name    = var.cluster_name
   namespace       = var.namespace
   service_account = var.service_account
-  role_arn        = data.aws_iam_role.tenant.arn
+  tags            = local.tags
 
-  tags = local.tags
+  policy_statements = [
+    {
+      # Secrets Manager: app-secrets (Slack + optional LLM API
+      # credentials) and the Aurora-managed master credentials secret.
+      Effect = "Allow"
+      Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+      Resource = [
+        "arn:aws:secretsmanager:${var.region}:${local.account_id}:secret:competitive-intelligence/${var.environment}/*",
+        module.aurora.cluster_master_user_secret[0].secret_arn,
+      ]
+    },
+    {
+      # Best-effort metrics from the in-app metrics surface (timing +
+      # counter) when OTel isn't available — fallback CloudWatch path.
+      # PutMetricData has no resource-level scoping in IAM.
+      Effect   = "Allow"
+      Action   = ["cloudwatch:PutMetricData"]
+      Resource = ["*"]
+    },
+  ]
 }

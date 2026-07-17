@@ -19,6 +19,11 @@
  */
 
 locals {
-  prefix = "incident-response-${var.environment}"
-  tags   = merge({ Component = "incident-response-platform", Tenant = "incident-response" }, var.tags)
+  prefix     = "${var.environment}-incident-response"
+  account_id = data.aws_caller_identity.current.account_id
+  tags = merge({
+    Component = "incident-response-platform"
+    Tenant    = "incident-response"
+    Team      = var.team
+  }, var.tags)
 }

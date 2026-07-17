@@ -13,7 +13,7 @@ module "document_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-documents"
+  bucket = "${local.bucket_prefix}-documents"
 
   block_public_acls       = true
   block_public_policy     = true

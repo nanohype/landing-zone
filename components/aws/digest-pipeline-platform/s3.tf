@@ -13,10 +13,24 @@
  *   retention (default 90d) — debug value drops fast.
  */
 
+locals {
+  # Account-qualified so the names are globally unique across accounts (S3's
+  # namespace is global). The preconditions assert them against S3's 63-char limit.
+  voice_baseline_bucket   = "${local.prefix}-${local.account_id}-voice-baseline"
+  raw_aggregations_bucket = "${local.prefix}-${local.account_id}-raw-aggregations"
+}
+
 resource "aws_s3_bucket" "voice_baseline" {
-  bucket = "${local.prefix}-voice-baseline"
+  bucket = local.voice_baseline_bucket
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length(local.voice_baseline_bucket) <= 63
+      error_message = "bucket ${local.voice_baseline_bucket} exceeds S3's 63-character limit."
+    }
+  }
 }
 
 resource "aws_s3_bucket_versioning" "voice_baseline" {
@@ -62,9 +76,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "voice_baseline" {
 }
 
 resource "aws_s3_bucket" "raw_aggregations" {
-  bucket = "${local.prefix}-raw-aggregations"
+  bucket = local.raw_aggregations_bucket
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length(local.raw_aggregations_bucket) <= 63
+      error_message = "bucket ${local.raw_aggregations_bucket} exceeds S3's 63-character limit."
+    }
+  }
 }
 
 resource "aws_s3_bucket_versioning" "raw_aggregations" {

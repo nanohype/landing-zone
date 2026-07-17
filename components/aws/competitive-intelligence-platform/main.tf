@@ -18,8 +18,13 @@
  */
 
 locals {
-  prefix = "competitive-intelligence-${var.environment}"
-  tags   = merge({ Component = "competitive-intelligence-platform", Tenant = "competitive-intelligence" }, var.tags)
+  prefix     = "${var.environment}-competitive-intelligence"
+  account_id = data.aws_caller_identity.current.account_id
+  tags = merge({
+    Component = "competitive-intelligence-platform"
+    Tenant    = "competitive-intelligence"
+    Team      = var.team
+  }, var.tags)
 }
 
 data "aws_caller_identity" "current" {}

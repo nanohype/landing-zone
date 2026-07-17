@@ -1,7 +1,11 @@
 locals {
-  prefix      = "${var.environment}-governance-${var.tenant_id}"
-  namespace   = "governance-${var.tenant_id}"
-  tenant_tags = merge(var.tags, { Tenant = var.tenant_id })
+  prefix    = "${var.environment}-governance-${var.tenant_id}"
+  namespace = "governance-${var.tenant_id}"
+  # Account-qualified so S3 bucket names are globally unique (S3's namespace is
+  # global). The component's `tenants` variable validation asserts the composed
+  # length fits 63.
+  bucket_prefix = "${local.prefix}-${var.account_id}"
+  tenant_tags   = merge(var.tags, { Tenant = var.tenant_id })
 }
 
 resource "aws_kms_key" "audit" {
@@ -20,7 +24,7 @@ module "audit_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-audit"
+  bucket = "${local.bucket_prefix}-audit"
 
   block_public_acls       = true
   block_public_policy     = true

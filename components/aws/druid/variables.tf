@@ -49,6 +49,20 @@ variable "tenants" {
     index_logs_expiry   = optional(number, 30)
     msq_expiry          = optional(number, 1)
   }))
+
+  # no-doubled-env: reject a tenant key that repeats the environment token, which
+  # would compose into a doubled "<env>-druid-<env>-…" name.
+  validation {
+    condition     = alltrue([for k in keys(var.tenants) : k != var.environment && !startswith(k, "${var.environment}-")])
+    error_message = "a tenant key must not equal or be prefixed with the environment token '${var.environment}-': it composes into a doubled '<env>-druid-<env>…' resource name."
+  }
+
+  # bucket-global-uniqueness budget: the tightest S3 name is
+  # <env>-druid-<tenant>-<account:12>-deepstorage; S3 caps names at 63 chars.
+  validation {
+    condition     = alltrue([for k in keys(var.tenants) : length("${var.environment}-druid-${k}-000000000000-deepstorage") <= 63])
+    error_message = "a tenant key is too long: '<env>-druid-<tenant>-<account:12>-deepstorage' must fit S3's 63-char limit. With environment='${var.environment}' and a 12-char account id, a tenant key has at most ${63 - length(var.environment) - 32} chars."
+  }
 }
 
 variable "team" {

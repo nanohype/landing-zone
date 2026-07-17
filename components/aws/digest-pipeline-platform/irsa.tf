@@ -22,85 +22,66 @@
  * docs/runbooks/model-access-cutover.md.
  */
 
-# Slow-moving substrate grants for the app pods. Attached to the tenant role
-# by the operator (Platform.spec.identity.extraPolicyArns), never here — the
-# tenant role's attachment set is operator-reconciled state.
-resource "aws_iam_policy" "app_access" {
-  name        = "${local.prefix}-app-access"
-  path        = "/eks-agent-platform/"
-  description = "digest-pipeline app-pod substrate grants, attached to the tenant role via Platform.spec.identity.extraPolicyArns"
+# Pod Identity + app-access shell (managed policy, tenant-role lookup, and the
+# EKS Pod Identity association) is the shared platform-app module. Only the
+# app-specific substrate statements below are bespoke.
+module "platform_app" {
+  source = "../../../modules/aws/platform-app"
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:PutObject",
-        ]
-        Resource = [
-          aws_s3_bucket.voice_baseline.arn,
-          "${aws_s3_bucket.voice_baseline.arn}/*",
-          aws_s3_bucket.raw_aggregations.arn,
-          "${aws_s3_bucket.raw_aggregations.arn}/*",
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ses:SendEmail",
-          "ses:SendRawEmail",
-          "ses:GetSendQuota",
-        ]
-        Resource = [
-          aws_sesv2_email_identity.digest_pipeline.arn,
-          aws_sesv2_configuration_set.digest_pipeline.arn,
-        ]
-      },
-      {
-        # Secrets Manager: digest-pipeline/<env>/db-credentials (managed by RDS),
-        # plus operator-seeded approvers, workos-directory, grafana-cloud.
-        # The chart's ExternalSecret resolves all four.
-        Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-        Resource = [
-          "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:digest-pipeline/${var.environment}/*",
-          # RDS master credentials live at the secret-arn the Aurora
-          # module manages; pulled by ARN rather than path because the
-          # module owns the naming.
-          module.aurora.cluster_master_user_secret[0].secret_arn,
-        ]
-      },
-      {
-        # Best-effort metrics fallback when OTel isn't reachable.
-        # PutMetricData has no resource-level scoping in IAM.
-        Effect   = "Allow"
-        Action   = ["cloudwatch:PutMetricData"]
-        Resource = ["*"]
-      },
-    ]
-  })
-
-  tags = local.tags
-}
-
-# The operator-reconciled tenant role, minted from the Platform CR. Resolved
-# by name (the operator's `<env>-<platform>-tenant` contract) so a missing
-# Platform fails the plan loudly instead of minting a dangling association.
-data "aws_iam_role" "tenant" {
-  name = "${var.environment}-digest-pipeline-tenant"
-}
-
-# Binds the chart's ServiceAccount to the tenant role through EKS Pod
-# Identity — pods receive the role's credentials with no role-arn annotation
-# and no OIDC provider involved.
-resource "aws_eks_pod_identity_association" "app" {
+  app_name        = "digest-pipeline"
+  environment     = var.environment
   cluster_name    = var.cluster_name
   namespace       = var.namespace
   service_account = var.service_account
-  role_arn        = data.aws_iam_role.tenant.arn
+  tags            = local.tags
 
-  tags = local.tags
+  policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:PutObject",
+      ]
+      Resource = [
+        aws_s3_bucket.voice_baseline.arn,
+        "${aws_s3_bucket.voice_baseline.arn}/*",
+        aws_s3_bucket.raw_aggregations.arn,
+        "${aws_s3_bucket.raw_aggregations.arn}/*",
+      ]
+    },
+    {
+      Effect = "Allow"
+      Action = [
+        "ses:SendEmail",
+        "ses:SendRawEmail",
+        "ses:GetSendQuota",
+      ]
+      Resource = [
+        aws_sesv2_email_identity.digest_pipeline.arn,
+        aws_sesv2_configuration_set.digest_pipeline.arn,
+      ]
+    },
+    {
+      # Secrets Manager: digest-pipeline/<env>/db-credentials (managed by RDS),
+      # plus operator-seeded approvers, workos-directory, grafana-cloud.
+      # The chart's ExternalSecret resolves all four.
+      Effect = "Allow"
+      Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+      Resource = [
+        "arn:aws:secretsmanager:${var.region}:${local.account_id}:secret:digest-pipeline/${var.environment}/*",
+        # RDS master credentials live at the secret-arn the Aurora
+        # module manages; pulled by ARN rather than path because the
+        # module owns the naming.
+        module.aurora.cluster_master_user_secret[0].secret_arn,
+      ]
+    },
+    {
+      # Best-effort metrics fallback when OTel isn't reachable.
+      # PutMetricData has no resource-level scoping in IAM.
+      Effect   = "Allow"
+      Action   = ["cloudwatch:PutMetricData"]
+      Resource = ["*"]
+    },
+  ]
 }

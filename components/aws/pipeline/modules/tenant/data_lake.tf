@@ -3,9 +3,13 @@
 ################################################################################
 
 locals {
-  prefix      = "${var.environment}-pipeline-${var.tenant_id}"
-  namespace   = "pipeline-${var.tenant_id}"
-  tenant_tags = merge(var.tags, { Tenant = var.tenant_id })
+  prefix    = "${var.environment}-pipeline-${var.tenant_id}"
+  namespace = "pipeline-${var.tenant_id}"
+  # Account-qualified so S3 bucket names are globally unique (S3's namespace is
+  # global; two accounts vending the same env+tenant must not collide). The
+  # component's `tenants` variable validation asserts the composed length fits 63.
+  bucket_prefix = "${local.prefix}-${var.account_id}"
+  tenant_tags   = merge(var.tags, { Tenant = var.tenant_id })
 }
 
 resource "aws_kms_key" "datalake" {
@@ -23,7 +27,7 @@ module "raw_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-raw"
+  bucket = "${local.bucket_prefix}-raw"
 
   block_public_acls       = true
   block_public_policy     = true
@@ -61,7 +65,7 @@ module "staging_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-staging"
+  bucket = "${local.bucket_prefix}-staging"
 
   block_public_acls       = true
   block_public_policy     = true
@@ -94,7 +98,7 @@ module "curated_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-curated"
+  bucket = "${local.bucket_prefix}-curated"
 
   block_public_acls       = true
   block_public_policy     = true

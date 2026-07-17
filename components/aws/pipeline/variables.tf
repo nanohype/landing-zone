@@ -51,6 +51,20 @@ variable "tenants" {
     staging_lifecycle_expiry_days = optional(number, 180)
     curated_version_expiry_days   = optional(number, 730)
   }))
+
+  # no-doubled-env: reject a tenant key that repeats the environment token, which
+  # would compose into a doubled "<env>-pipeline-<env>-…" name.
+  validation {
+    condition     = alltrue([for k in keys(var.tenants) : k != var.environment && !startswith(k, "${var.environment}-")])
+    error_message = "a tenant key must not equal or be prefixed with the environment token '${var.environment}-': it composes into a doubled '<env>-pipeline-<env>…' resource name."
+  }
+
+  # bucket-global-uniqueness budget: the tightest S3 name is
+  # <env>-pipeline-<tenant>-<account:12>-staging; S3 caps names at 63 chars.
+  validation {
+    condition     = alltrue([for k in keys(var.tenants) : length("${var.environment}-pipeline-${k}-000000000000-staging") <= 63])
+    error_message = "a tenant key is too long: '<env>-pipeline-<tenant>-<account:12>-<suffix>' must fit S3's 63-char limit. With environment='${var.environment}' and a 12-char account id, a tenant key has at most ${63 - length(var.environment) - 31} chars."
+  }
 }
 
 variable "team" {

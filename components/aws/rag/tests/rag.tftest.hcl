@@ -100,3 +100,19 @@ run "bedrock_api_empty_allowlist_is_wildcard" {
     error_message = "an empty tenant allowlist must fall back to Resource=[\"*\"] (the explicit escape hatch)"
   }
 }
+
+# no-doubled-env guard at the caller boundary: a tenant keyed with the
+# environment token would compose into a doubled "development-rag-development-..."
+# name. The var.tenants validation must reject it. (The passing runs above,
+# keyed "t1", are the positive direction — a short non-env key is accepted.)
+run "rejects_tenant_key_equal_to_environment" {
+  command = plan
+
+  variables {
+    tenants = {
+      development = {}
+    }
+  }
+
+  expect_failures = [var.tenants]
+}

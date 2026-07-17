@@ -6,7 +6,7 @@ module "deepstorage_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-deepstorage"
+  bucket = "${local.bucket_prefix}-deepstorage"
 
   block_public_acls       = true
   block_public_policy     = true
@@ -30,7 +30,7 @@ module "indexlogs_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-indexlogs"
+  bucket = "${local.bucket_prefix}-indexlogs"
 
   block_public_acls       = true
   block_public_policy     = true
@@ -64,7 +64,7 @@ module "msq_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.prefix}-msq"
+  bucket = "${local.bucket_prefix}-msq"
 
   block_public_acls       = true
   block_public_policy     = true
