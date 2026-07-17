@@ -388,6 +388,18 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # workspace id to point opencost at Managed Prometheus through a sigv4 proxy.
       "monitoring/amp-endpoint"     = data.aws_ssm_parameter.amp_endpoint[0].value
       "monitoring/amp-workspace-id" = data.aws_ssm_parameter.amp_workspace_id[0].value
+      } : {}, var.enable_velero_backup ? {
+      # Velero backup bucket, read from the SSM parameter the cluster-addons
+      # component publishes. The addons-velero ApplicationSet injects it as the
+      # backup + snapshot storage location. Absent where Velero isn't run
+      # (development/hub) — the addons-velero generator excludes those clusters.
+      "velero/backup-bucket" = data.aws_ssm_parameter.velero_bucket[0].value
+      } : {}, var.enable_external_dns ? {
+      # This environment's primary domain, read from the SSM parameter the dns
+      # component publishes. The addons-external-dns ApplicationSet uses it as
+      # external-dns's domainFilter, confining the controller to this cluster's
+      # Route53 zone. Absent on the hub, which runs no external-dns.
+      "external-dns/domain-filter" = data.aws_ssm_parameter.external_dns_domain_filter[0].value
     } : {})
   }
 

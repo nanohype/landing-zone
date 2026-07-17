@@ -17,7 +17,7 @@ intentionally — never bulk-delete them.
 | # | target | status |
 |---|---|---|
 | 2 | Broken layers + gates | ✅ #132 |
-| 2b | Cluster-secret annotations for velero + external-dns | ☐ |
+| 2b | Cluster-secret annotations for velero + external-dns | ✅ #133 |
 | 16 | Naming/tagging cap-clearers | ☐ |
 | 17 | Security batch | ☐ |
 | 18 | Testing batch | ☐ |
@@ -126,6 +126,21 @@ dev; `terragrunt render` clean; open an issue or note in this file if `component
 turns out not to expose a per-environment zone at all (in which case this target's
 external-dns half is blocked on a real product decision, not an implementation detail —
 stop and flag it rather than inventing a zone).
+
+Outcome (✅ #133): **both halves shipped.** `components/aws/dns` does expose a usable
+per-environment zone — its `domain_name` output (each leaf sets a distinct
+`development.example.com` / `staging.example.com` / `example.com`), so the external-dns
+half was not blocked. velero publishes from `cluster-addons` to
+`/eks-agent-platform/<cluster-name>/cluster-addons/velero_bucket`; dns publishes
+`domain_name` to `/eks-agent-platform/<environment>/dns/domain_filter` (keyed on the
+environment — dns has no cluster identity). `cluster-bootstrap` reads both back behind
+`enable_velero_backup` / `enable_external_dns` (default false) and stamps the two
+annotations. Ordering fix beyond the documented chain: `cluster-addons`, `dns`, and
+`cluster-bootstrap` were unordered siblings under `cluster`, so a fresh
+`terragrunt run --all` could read the SSM params before their producers wrote them —
+each enabling leaf now declares a `dependencies` block ordering the producers first
+(development: `../dns`; staging/production: `../cluster-addons` + `../dns`; hub: none,
+carries neither annotation).
 
 ## Target 16 — Naming/tagging cap-clearers (L)
 

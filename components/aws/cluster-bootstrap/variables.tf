@@ -130,3 +130,15 @@ variable "enable_eval_runtime" {
   type        = bool
   default     = false
 }
+
+variable "enable_velero_backup" {
+  description = "Stamp the Velero backup bucket (read from the SSM parameter cluster-addons writes under /eks-agent-platform/<cluster-name>/cluster-addons/velero_bucket) onto the cluster Secret as the velero/backup-bucket annotation, where the addons-velero ApplicationSet reads it as the backup storage location. Opt-in (default false); enable on backup-bearing clusters (staging/production) after cluster-addons has applied with velero_enabled — the enabling live leaves order cluster-addons before cluster-bootstrap. Leave false on clusters without Velero (development/hub), which the addons-velero generator does not target."
+  type        = bool
+  default     = false
+}
+
+variable "enable_external_dns" {
+  description = "Stamp this environment's primary domain (read from the SSM parameter the dns component writes under /eks-agent-platform/<environment>/dns/domain_filter) onto the cluster Secret as the external-dns/domain-filter annotation, where the addons-external-dns ApplicationSet reads it to scope external-dns to the environment's Route53 zone. Opt-in (default false); enable on clusters with a hosted zone (development/staging/production) after the dns component has applied — the enabling live leaves order dns before cluster-bootstrap. Leave false on the hub, which runs no external-dns."
+  type        = bool
+  default     = false
+}
