@@ -21,6 +21,7 @@ intentionally — never bulk-delete them.
 | 16 | Naming/tagging cap-clearers | ✅ #134 |
 | 17 | Security batch | ✅ #136 |
 | 18 | Testing batch | ✅ #137 |
+| 18b | tflint severity gate hardening | ☐ |
 | 19 | Docs + agent surface | ☐ |
 | 19b | Cluster-bootstrap `monitoring/managed` label | ☐ |
 | 24 | Endpoint posture flip (after rackctl target 23) | ☐ |
@@ -378,6 +379,45 @@ pass clean today. Making the gate hard needs an interface-variable-contract deci
 + rewire envcommon) plus a `versions.tf` backfill — a design-bearing change, not a
 mechanical testing fix, and unsafe to bundle unreviewed into a testing PR. Recommend a
 dedicated bounded lint-gate-hardening target (sibling to Target 19's gate work).
+
+## Target 18b — tflint severity gate hardening (S)
+
+**Scope discovered by Target 18 (PR #137) — see its own "Scope discovered" note above
+for the full inventory.** Decision (made here, not escalated — bounded and mechanical
+once split correctly):
+
+1. **`terraform_required_version` / `terraform_required_providers`: raise to error.**
+   No design question — 7 components are missing the constraint outright. Backfill a
+   `versions.tf` matching the repo's existing 36-component pattern
+   (`>= 1.11.0`, `aws ~> 6.0`) for each. Mechanical, do it, raise the rule.
+2. **`terraform_documented_variables` / `terraform_documented_outputs`: raise to error.**
+   Already pass clean today (confirmed by Target 18) — this is free, just flip the
+   severity so a future regression can't slip through the way Target 16's did.
+3. **`terraform_unused_declarations`: raise to error, WITH a scoped, documented
+   exception for the uniform envcommon interface.** The repo's own convention
+   (`landing-zone/CLAUDE.md`: "Dependency wiring lives in `live/_envcommon/aws/{name}.hcl`,
+   not in the component itself") is why every component declares the same interface
+   variables (`region`/`environment`/`vpc_id`/`cluster_sg_id`) even when a specific
+   component doesn't reference one — that's the uniform envcommon contract working as
+   designed, not dead code. Do NOT trim these or rewire envcommon per-component (that
+   would be the disruptive option and gets worse the interface, not better). Instead:
+   scope a tflint-level exception (inline `# tflint-ignore` comments on the four known
+   interface variables, or a rule-config exclusion if tflint supports pattern-based
+   scoping) with a comment explaining the uniform-interface rationale — the same
+   narrowed-skip-with-rationale idiom Target 17 already established for checkov. This
+   makes the rule catch genuine dead code (a variable nothing anywhere references) while
+   not fighting the repo's own documented convention.
+
+Approach: implement in the order above (1 and 2 are trivial; 3 needs the scoped
+exception mechanism worked out — check tflint's plugin docs for the right suppression
+primitive, don't invent a workaround if a native one exists). Run the full tflint suite
+at error severity afterward and confirm 0 unexplained failures — every remaining
+suppression must carry a rationale comment, mirroring `.checkov.yaml`'s style.
+
+Acceptance: `task lint`/CI's tflint step at `--minimum-failure-severity=error` passes
+clean; a deliberately unused, non-interface variable introduced in a test component
+fails the gate (prove the rule is live, not just suppressed into silence); every
+suppression in the config or inline has a one-line rationale.
 
 ## Target 19b — Cluster-bootstrap `monitoring/managed` label (S)
 
