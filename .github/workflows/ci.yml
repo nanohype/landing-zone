@@ -246,13 +246,16 @@ jobs:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]
     runs-on: ubuntu-latest
-    # The plan jobs need AWS credentials (vars.AWS_ROLE_ARN). Until that repo
-    # variable is set, the plan is
-    # advisory: it still runs and surfaces output, but a missing-credentials
-    # failure does not block the build. The hard gates are the placeholder
-    # check, fmt, validate, tflint, and checkov (checkov gated by the
-    # documented skip list in .checkov.yaml).
-    continue-on-error: true
+    # The plan jobs need AWS credentials (vars.AWS_ROLE_ARN). continue-on-error is
+    # tied to whether that variable is set:
+    #   - unset (e.g. a fork without cloud creds): continue-on-error is true and the
+    #     Plan step below skips entirely, so the matrix entry comes back green-skipped
+    #     rather than forcing a fork to fail on a plan it can't run.
+    #   - set: continue-on-error is false, so a real `terragrunt plan` failure blocks
+    #     the build — an honest gate, not an advisory that swallows regressions.
+    # The always-hard gates are the placeholder check, fmt, validate, tflint, checkov,
+    # the tofu test suites, terragrunt evaluate, and the mock-outputs cross-check.
+    continue-on-error: ${{ vars.AWS_ROLE_ARN == '' }}
     if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false

@@ -57,3 +57,13 @@ output "irsa_api_gateway_role_arn" {
   description = "IAM role ARN for API gateway IRSA"
   value       = module.api_gateway_irsa.iam_role_arn
 }
+
+output "inference_server_policy_json" {
+  description = "Rendered inline IAM policy JSON for the inference-server role. Lets tests assert the model-bucket/KMS/EFS scoping."
+  value       = module.inference_server_irsa.role_policy_json
+}
+
+output "api_gateway_policy_json" {
+  description = "Rendered inline IAM policy JSON for the api-gateway role. Lets tests assert the SQS/DynamoDB scoping."
+  value       = module.api_gateway_irsa.role_policy_json
+}

@@ -14,6 +14,8 @@ output "tenant_outputs" {
       ecr_repository_uri             = tenant.ecr_repository_uri
       irsa_inference_server_role_arn = tenant.irsa_inference_server_role_arn
       irsa_api_gateway_role_arn      = tenant.irsa_api_gateway_role_arn
+      inference_server_policy_json   = tenant.inference_server_policy_json
+      api_gateway_policy_json        = tenant.api_gateway_policy_json
     }
   }
 }

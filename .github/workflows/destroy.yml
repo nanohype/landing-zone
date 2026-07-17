@@ -34,6 +34,15 @@ permissions:
   id-token: write
   contents: read
 
+# Serialize mutating runs against the same environment/component. The group is shared
+# with deploy.yml (same `mutate-<env>-<component>` key) so a destroy can't race a
+# deploy of the same target, and two destroys of one target queue rather than both
+# tearing down concurrently. cancel-in-progress is false: never abort a destroy
+# mid-flight — a partial teardown is worse than a queued one.
+concurrency:
+  group: mutate-${{ inputs.environment }}-${{ inputs.component }}
+  cancel-in-progress: false
+
 jobs:
   destroy:
     name: Destroy ${{ inputs.environment }}/${{ inputs.component }}

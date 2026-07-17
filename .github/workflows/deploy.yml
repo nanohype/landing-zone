@@ -38,6 +38,16 @@ permissions:
   id-token: write
   contents: read
 
+# Serialize mutating runs against the same environment/component so two dispatched
+# applies (or an apply racing a destroy) can't plan-and-write concurrently against one
+# target's state. The group is shared with destroy.yml (same `mutate-<env>-<component>`
+# key) so deploy and destroy of the same target queue behind each other too.
+# cancel-in-progress is false: never abort an apply mid-flight — let it finish and run
+# the next dispatch after.
+concurrency:
+  group: mutate-${{ inputs.environment }}-${{ inputs.component }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: ${{ inputs.action }} ${{ inputs.environment }}/${{ inputs.component }}

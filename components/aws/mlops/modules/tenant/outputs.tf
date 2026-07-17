@@ -92,3 +92,18 @@ output "namespace" {
   description = "Kubernetes namespace for this tenant's MLOps workloads"
   value       = local.namespace
 }
+
+output "training_worker_policy_json" {
+  description = "Rendered inline IAM policy JSON for the training-worker role. Lets tests assert the S3/KMS/DynamoDB/SQS scoping."
+  value       = module.training_worker_irsa.role_policy_json
+}
+
+output "model_registry_policy_json" {
+  description = "Rendered inline IAM policy JSON for the model-registry role. Lets tests assert the DynamoDB/S3 scoping."
+  value       = module.model_registry_irsa.role_policy_json
+}
+
+output "mlops_api_policy_json" {
+  description = "Rendered inline IAM policy JSON for the mlops-api role. Lets tests assert the read-scoped grants."
+  value       = module.mlops_api_irsa.role_policy_json
+}
