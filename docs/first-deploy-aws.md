@@ -156,7 +156,7 @@ Replace `<env>` with `development`/`staging`/`production` and account accordingl
 ### Get kubectl access (after `cluster` succeeds)
 
 ```bash
-aws eks update-kubeconfig --name <env>-eks --region us-west-2 --profile workload-<env>
+aws eks update-kubeconfig --name <env>-platform --region us-west-2 --profile workload-<env>
 kubectl get nodes
 ```
 
@@ -291,7 +291,6 @@ Approximate $/day at default sizes:
 |---|---|---|
 | `aws sso login` opens browser but auth never completes | popup blocker, or wrong start URL | Verify URL with `aws configure sso list`. Try `aws sso login --no-browser` for a code-based flow. |
 | `Unable to locate credentials` from terragrunt | `AWS_PROFILE` not set | `export AWS_PROFILE=workload-<env>` |
-| `task init-backend` says `Usage:` | Taskfile not forwarding args | Run directly: `./scripts/init-backend-aws.sh $ACCOUNT_ID us-west-2` |
 | `terragrunt: Working dir components/aws/X does not exist` | envcommon source path bug | Path must be `${dirname(find_in_parent_folders("cloud.hcl"))}/../../components/...` (`../..`) |
 | `LimitExceeded: ... vCPUs ... cannot be increased` during cluster | quota too low | Request increase via Service Quotas console / `aws service-quotas request-service-quota-increase` |
 | EKS cluster create fails with `InvalidParameterException` re: SG/subnet | network module didn't fully complete | Re-apply `network`, then re-apply `cluster` |

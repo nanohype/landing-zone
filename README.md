@@ -3,7 +3,7 @@
 ![OpenTofu](https://img.shields.io/badge/OpenTofu-%3E%3D1.11-blue?logo=opentofu)
 ![Terragrunt](https://img.shields.io/badge/Terragrunt-latest-blue?logo=terraform)
 ![AWS](https://img.shields.io/badge/AWS-Platform-FF9900?logo=amazonaws)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-Apache_2.0-green)
 
 OpenTofu + Terragrunt monorepo for enterprise platform infrastructure on AWS.
 
@@ -110,14 +110,15 @@ task help             Show all targets
 
 ## CI/CD
 
-Four GitHub Actions workflows, all authenticating via AWS OIDC (`AWS_ROLE_ARN` repo variable — no long-lived credentials).
+Five GitHub Actions workflows, all authenticating via AWS OIDC (`AWS_ROLE_ARN` repo variable — no long-lived credentials).
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR / push | fmt, validate, tflint, checkov, plan (per-component matrix) |
+| `ci.yml` | PR / push | placeholders, fmt, validate, tofu test, tflint, checkov, terragrunt evaluate, mock-outputs cross-check, plan (per-component matrix) |
 | `deploy.yml` | Manual | Plan or apply with account/region/env/component inputs |
 | `destroy.yml` | Manual | Development/staging only, requires confirmation |
-| `drift.yml` | Scheduled | Weekday production drift detection, creates GitHub issues |
+| `drift.yml` | Scheduled | Weekday production + staging drift detection, creates GitHub issues |
+| `e2e.yml` | Manual | Provisions a real substrate, installs the operator, deploys a tenant via GitOps, tears down (never scheduled) |
 
 ## Documentation
 

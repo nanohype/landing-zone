@@ -83,8 +83,9 @@ live/
 
 ## CI/CD
 
-- `ci.yml` — PRs: fmt, validate (per-component matrix), tflint, checkov, plan matrix
+- `ci.yml` — PRs: placeholders gate, fmt, validate (per-component matrix), tofu test, tflint, checkov, terragrunt evaluate (live-leaf render), mock-outputs cross-check, plan matrix
 - `deploy.yml` — manual dispatch: account/region/environment/component, plan or apply
 - `destroy.yml` — manual dispatch: development/staging only, requires confirmation string
-- `drift.yml` — scheduled weekday drift detection on production, creates GitHub issues
+- `drift.yml` — scheduled weekday drift detection on production + staging (matrix auto-discovered), creates GitHub issues
+- `e2e.yml` — manual dispatch: provisions a real substrate, installs the operator, deploys a tenant via GitOps, then tears down (never scheduled — real spend)
 - Auth: AWS OIDC (`AWS_ROLE_ARN` repo variable)
