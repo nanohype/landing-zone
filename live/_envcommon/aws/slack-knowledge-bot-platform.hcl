@@ -15,7 +15,7 @@ terraform {
 }
 
 dependency "network" {
-  config_path = "${get_path_relative_to_include("live")}/../network"
+  config_path = "../network"
 
   mock_outputs = {
     vpc_id             = "vpc-00000000"
@@ -25,11 +25,11 @@ dependency "network" {
 }
 
 dependency "cluster" {
-  config_path = "${get_path_relative_to_include("live")}/../cluster"
+  config_path = "../cluster"
 
   mock_outputs = {
-    cluster_name  = "mock-eks"
-    cluster_sg_id = "sg-00000000"
+    cluster_name              = "mock-eks"
+    cluster_security_group_id = "sg-00000000"
   }
   mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
@@ -38,5 +38,5 @@ inputs = {
   vpc_id             = dependency.network.outputs.vpc_id
   private_subnet_ids = dependency.network.outputs.private_subnet_ids
   cluster_name       = dependency.cluster.outputs.cluster_name
-  cluster_sg_id      = dependency.cluster.outputs.cluster_sg_id
+  cluster_sg_id      = dependency.cluster.outputs.cluster_security_group_id
 }

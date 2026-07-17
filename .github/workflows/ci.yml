@@ -28,6 +28,7 @@ jobs:
           tofu_version: "1.11.5"
       - run: tofu fmt -check -recursive components/
       - run: tofu fmt -check -recursive modules/
+      - run: tofu fmt -check -recursive fleet/
       - uses: gruntwork-io/terragrunt-action@v3
         with:
           tg_version: "1.0.8"
@@ -39,10 +40,12 @@ jobs:
   # Auto-discovers the matrices from the working tree so new components and
   # new live entries don't need a workflow edit to start getting their own
   # Validate / Plan check. The validate matrix lists every
-  # components/<cloud>/<component>/ directory; the plan matrix lists every
+  # <root>/<cloud>/<component>/ directory across components/, fleet/, and
+  # modules/ (the vend roots and shared modules validate alongside the
+  # components); the plan matrix lists every
   # live/<cloud>/<account>/<region>/<env>/<component>/terragrunt.hcl. Both
-  # use `git ls-files` so .terragrunt-cache/ and other gitignored paths are
-  # excluded by construction.
+  # use `git ls-files` so .terraform/, .terragrunt-cache/, and other
+  # gitignored paths are excluded by construction.
   discover:
     name: Discover Matrices
     runs-on: ubuntu-latest
@@ -54,14 +57,14 @@ jobs:
       - id: matrices
         run: |
           validate=$(
-            git ls-files components/ \
-            | awk -F'/' 'NF >= 3 && $2 != "" && $3 != "" { print $2 "/" $3 }' \
+            git ls-files components/ fleet/ modules/ \
+            | awk -F'/' 'NF >= 3 && $1 != "" && $2 != "" && $3 != "" { print $1 "/" $2 "/" $3 }' \
             | sort -u \
             | jq -R -s -c '
                 split("\n")
                 | map(select(length > 0))
                 | map(split("/"))
-                | map({cloud: .[0], component: .[1]})
+                | map({root: .[0], cloud: .[1], component: .[2]})
               '
           )
           plan=$(
@@ -84,7 +87,7 @@ jobs:
           echo "plan=$plan" >> "$GITHUB_OUTPUT"
 
   validate:
-    name: Validate (${{ matrix.cloud }}/${{ matrix.component }})
+    name: Validate (${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }})
     runs-on: ubuntu-latest
     needs: discover
     strategy:
@@ -97,7 +100,7 @@ jobs:
         with:
           tofu_version: "1.11.5"
       - name: Init and Validate
-        working-directory: components/${{ matrix.cloud }}/${{ matrix.component }}
+        working-directory: ${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }}
         run: |
           tofu init -backend=false -input=false
           tofu validate
@@ -148,24 +151,96 @@ jobs:
           tflint_version: v0.63.1
       - run: tflint --init --config .tflint-aws.hcl
       - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=components/aws --minimum-failure-severity=error
+      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=fleet/aws --minimum-failure-severity=error
+      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=modules/aws --minimum-failure-severity=error
 
   checkov:
     name: Security Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: bridgecrewio/checkov-action@v12
+      # HARD gate across every Terraform tree — components, the fleet vend roots,
+      # and the shared modules. Any finding not covered by .checkov.yaml fails the
+      # build. The deliberately-accepted posture trade-offs (single-region
+      # durability, provider-managed encryption, public endpoints with IP
+      # allowlists) and checkov false positives are enumerated there as
+      # skip-check entries, one line of rationale each — accepted and documented,
+      # never silently advisory. The same config_file (its global skip list)
+      # applies to all three scans.
+      - name: Scan components/aws
+        uses: bridgecrewio/checkov-action@v12
         with:
           directory: components/aws/
           framework: terraform
-          # HARD gate: any finding not covered by .checkov.yaml fails the
-          # build. The deliberately-accepted posture trade-offs (single-region
-          # durability, provider-managed encryption, public endpoints with IP
-          # allowlists) and checkov false positives are enumerated there as
-          # skip-check entries, one line of rationale each — accepted and
-          # documented, never silently advisory.
           soft_fail: false
           config_file: .checkov.yaml
+      - name: Scan fleet/aws
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: fleet/aws/
+          framework: terraform
+          soft_fail: false
+          config_file: .checkov.yaml
+      - name: Scan modules/aws
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: modules/aws/
+          framework: terraform
+          soft_fail: false
+          config_file: .checkov.yaml
+
+  # Credential-less evaluation of every live leaf. `terragrunt render` resolves the
+  # full config — includes, functions, and dependency wiring — against mock outputs,
+  # so it catches breakage that per-component `tofu validate` cannot see: an
+  # unresolvable include function, a config_path that doesn't exist, or a
+  # dependency reference into a mock that lacks the key. `--no-auto-init` keeps it
+  # fast and offline (dependency output fetches fail straight to the mocks). This is
+  # the gate that makes the terragrunt layer fail on a PR instead of at apply time.
+  evaluate:
+    name: Terragrunt Evaluate (live)
+    runs-on: ubuntu-latest
+    env:
+      TERRAGRUNT_ACCOUNT_ID: "111111111111"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.11.5"
+      - uses: gruntwork-io/terragrunt-action@v3
+        with:
+          tg_version: "1.0.8"
+          tofu_version: "1.11.5"
+      - name: Render every live leaf
+        run: |
+          set -uo pipefail
+          fail=0
+          while IFS= read -r leaf; do
+            dir=$(dirname "$leaf")
+            if ! ( cd "$dir" && TG_NON_INTERACTIVE=true terragrunt render \
+                     --format json --no-auto-init >/dev/null 2>/tmp/render.err ); then
+              echo "::error::terragrunt render failed for $dir"
+              tail -8 /tmp/render.err | sed 's/^/    /'
+              fail=1
+            fi
+          done < <(git ls-files 'live/**/terragrunt.hcl' | grep '/terragrunt\.hcl$')
+          if [ "$fail" -ne 0 ]; then
+            echo "One or more live leaves failed terragrunt evaluation (see errors above)."
+            exit 1
+          fi
+          echo "All live leaves evaluate cleanly against their mocks."
+
+  # Guards the dependency mocks: every mock_outputs key must be a real output of the
+  # component the dependency points at, so a renamed component output fails here
+  # instead of silently resolving to a stale mock value at plan/apply time.
+  mock-outputs:
+    name: Mock Outputs Cross-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-mock-outputs.py
 
   plan:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})

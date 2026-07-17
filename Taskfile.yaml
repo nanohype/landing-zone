@@ -19,29 +19,51 @@ tasks:
     cmds:
       - tofu fmt -recursive components/
       - tofu fmt -recursive modules/
+      - tofu fmt -recursive fleet/
 
   fmt:check:
     desc: Check formatting without modifying files
     cmds:
       - tofu fmt -check -recursive components/
       - tofu fmt -check -recursive modules/
+      - tofu fmt -check -recursive fleet/
 
   validate:
-    desc: Validate all components
+    desc: Validate every component, fleet vend root, and shared module
     cmds:
       - |
-        for dir in components/aws/*/; do
-          name=$(basename "$dir")
-          echo "Validating aws/$name..."
+        for dir in components/aws/*/ fleet/aws/*/ modules/aws/*/; do
+          name=${dir%/}
+          echo "Validating $name..."
           (cd "$dir" && tofu init -backend=false -input=false > /dev/null 2>&1 && tofu validate) || exit 1
         done
-        echo "All components valid."
+        echo "All roots valid."
 
   lint:
-    desc: Run tflint on all components
+    desc: Run tflint on components, fleet vend roots, and shared modules
     cmds:
       - tflint --init --config "$PWD/.tflint-aws.hcl"
       - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=components/aws --minimum-failure-severity=error
+      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=fleet/aws --minimum-failure-severity=error
+      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=modules/aws --minimum-failure-severity=error
+
+  check:mocks:
+    desc: Cross-check dependency mock_outputs keys against real component outputs
+    cmds:
+      - python3 scripts/check-mock-outputs.py
+
+  evaluate:
+    desc: Credential-less terragrunt render across every live leaf (config evaluation gate)
+    cmds:
+      - |
+        fail=0
+        while IFS= read -r leaf; do
+          dir=$(dirname "$leaf")
+          if ! (cd "$dir" && TG_NON_INTERACTIVE=true terragrunt render --format json --no-auto-init > /dev/null 2>/tmp/render.err); then
+            echo "render FAILED: $dir"; tail -6 /tmp/render.err | sed 's/^/    /'; fail=1
+          fi
+        done < <(git ls-files 'live/**/terragrunt.hcl' | grep '/terragrunt\.hcl$')
+        [ "$fail" -eq 0 ] && echo "All live leaves evaluate cleanly." || exit 1
 
   # === Planning ===
 

@@ -9,6 +9,7 @@ dependency "cluster" {
     oidc_issuer       = "oidc.eks.us-west-2.amazonaws.com/id/MOCK"
     cluster_name      = "mock-eks"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 # The secrets component's KMS key encrypts the model-artifacts + eval-reports
@@ -20,6 +21,7 @@ dependency "secrets" {
   mock_outputs = {
     kms_key_arn = "arn:aws:kms:us-west-2:123456789012:key/mock"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 inputs = {

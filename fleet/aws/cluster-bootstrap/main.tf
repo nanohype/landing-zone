@@ -15,8 +15,10 @@ module "agent_iam" {
 
   environment       = var.environment
   region            = var.region
+  cluster_name      = var.cluster_name
   oidc_provider_arn = var.oidc_provider_arn
   oidc_issuer       = var.oidc_issuer
+  data_kms_key_arn  = var.data_kms_key_arn
 
   # The vend/hub boundary — the fleet role running this Workspace may only
   # create roles that carry its own ceiling (fleet-vend/fleet-hub CreateRole

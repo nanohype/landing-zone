@@ -9,6 +9,7 @@ dependency "cluster" {
     cluster_endpoint                   = "https://mock.eks.amazonaws.com"
     cluster_certificate_authority_data = "bW9jaw=="
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 dependency "network" {
@@ -16,6 +17,7 @@ dependency "network" {
   mock_outputs = {
     vpc_id = "vpc-mock"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 inputs = {

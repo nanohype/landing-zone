@@ -7,6 +7,7 @@ dependency "cluster" {
   mock_outputs = {
     cluster_name = "mock-eks"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
 inputs = {
