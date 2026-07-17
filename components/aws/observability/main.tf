@@ -10,22 +10,70 @@ locals {
 }
 
 ################################################################################
-# SNS Topics
+# SNS Topics — SSE-KMS
+#
+# CloudWatch Alarms publish to these topics; SSE-SNS makes SNS call
+# kms:GenerateDataKey*/Decrypt as the cloudwatch service principal, so the key
+# policy admits it (scoped to this account) or the alarm notification is dropped.
 ################################################################################
 
-resource "aws_sns_topic" "critical" {
-  name = "${var.cluster_name}-alerts-critical"
+resource "aws_kms_key" "alerts" {
+  description             = "${var.cluster_name} alert topic encryption key"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${local.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchAlarmPublish"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
+    ]
+  })
+
   tags = local.tags
+}
+
+resource "aws_kms_alias" "alerts" {
+  name          = "alias/${var.cluster_name}-alerts"
+  target_key_id = aws_kms_key.alerts.key_id
+}
+
+resource "aws_sns_topic" "critical" {
+  name              = "${var.cluster_name}-alerts-critical"
+  kms_master_key_id = aws_kms_key.alerts.arn
+  tags              = local.tags
 }
 
 resource "aws_sns_topic" "warning" {
-  name = "${var.cluster_name}-alerts-warning"
-  tags = local.tags
+  name              = "${var.cluster_name}-alerts-warning"
+  kms_master_key_id = aws_kms_key.alerts.arn
+  tags              = local.tags
 }
 
 resource "aws_sns_topic" "info" {
-  name = "${var.cluster_name}-alerts-info"
-  tags = local.tags
+  name              = "${var.cluster_name}-alerts-info"
+  kms_master_key_id = aws_kms_key.alerts.arn
+  tags              = local.tags
 }
 
 resource "aws_sns_topic_policy" "critical" {

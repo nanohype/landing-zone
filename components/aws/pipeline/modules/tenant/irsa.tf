@@ -26,6 +26,19 @@ locals {
     aws_glue_catalog_database.this.arn,
     "arn:aws:glue:${var.region}:${var.account_id}:table/${aws_glue_catalog_database.this.name}/*",
   ]
+
+  # MSK Serverless IAM auth is scoped to THIS tenant's own cluster. The serverless
+  # cluster is named local.irsa_prefix (see msk.tf: cluster_name = local.prefix,
+  # the same tenant-qualified string). kafka-cluster verbs authorize against
+  # cluster / topic / group resource ARNs under that name; the cluster UUID is
+  # assigned by MSK at create time, so it is wildcarded. Every ARN carries the
+  # tenant's account, region, and cluster name, so a connector can only reach its
+  # own tenant's brokers, topics, and consumer groups — never another tenant's.
+  msk_resource_arns = [
+    "arn:aws:kafka:${var.region}:${var.account_id}:cluster/${local.irsa_prefix}/*",
+    "arn:aws:kafka:${var.region}:${var.account_id}:topic/${local.irsa_prefix}/*",
+    "arn:aws:kafka:${var.region}:${var.account_id}:group/${local.irsa_prefix}/*",
+  ]
 }
 
 ################################################################################
@@ -183,7 +196,7 @@ module "connector_irsa" {
           "kafka-cluster:DescribeGroup",
           "kafka-cluster:AlterGroup",
         ]
-        Resource = ["*"]
+        Resource = local.msk_resource_arns
       },
     ] : [],
     [

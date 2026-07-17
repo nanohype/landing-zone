@@ -85,9 +85,24 @@ locals {
 
 ################################################################################
 # Fleet state bucket — provider-opentofu writes each vended cluster's tofu state
-# here (per-cluster key via the Workspace initArgs). Versioned + encrypted +
-# private; S3 native locking (use_lockfile), no DynamoDB table.
+# here (per-cluster key via the Workspace initArgs). This holds the OpenTofu
+# state of every vended cluster: the highest-value data in the fleet's blast
+# radius. Hardened accordingly — versioned, SSE-KMS with a dedicated CMK,
+# in-transit TLS enforced by bucket policy, server access logs to a private
+# sibling bucket, public access blocked; S3 native locking (use_lockfile).
 ################################################################################
+
+resource "aws_kms_key" "fleet_state" {
+  description             = "eks-fleet ${var.environment} tofu state bucket encryption key"
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+  tags                    = local.tags
+}
+
+resource "aws_kms_alias" "fleet_state" {
+  name          = "alias/eks-fleet-${var.environment}-state"
+  target_key_id = aws_kms_key.fleet_state.key_id
+}
 
 resource "aws_s3_bucket" "fleet_state" {
   bucket = var.state_bucket_name
@@ -105,8 +120,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "fleet_state" {
   bucket = aws_s3_bucket.fleet_state.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.fleet_state.arn
     }
+    bucket_key_enabled = true
   }
 }
 
@@ -116,6 +133,101 @@ resource "aws_s3_bucket_public_access_block" "fleet_state" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "fleet_state" {
+  bucket = aws_s3_bucket.fleet_state.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource = [
+        aws_s3_bucket.fleet_state.arn,
+        "${aws_s3_bucket.fleet_state.arn}/*",
+      ]
+      Condition = {
+        Bool = { "aws:SecureTransport" = "false" }
+      }
+    }]
+  })
+}
+
+resource "aws_s3_bucket_logging" "fleet_state" {
+  bucket        = aws_s3_bucket.fleet_state.id
+  target_bucket = aws_s3_bucket.fleet_state_logs.id
+  target_prefix = "state-access/"
+}
+
+# Access-log sink for the state bucket. Private, its own TLS deny, and grants
+# only the S3 logging service principal PutObject for this source bucket.
+resource "aws_s3_bucket" "fleet_state_logs" {
+  bucket = "${var.state_bucket_name}-logs"
+  tags   = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length("${var.state_bucket_name}-logs") <= 63
+      error_message = "log bucket ${var.state_bucket_name}-logs exceeds S3's 63-character limit; shorten state_bucket_name."
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "fleet_state_logs" {
+  bucket                  = aws_s3_bucket.fleet_state_logs.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "fleet_state_logs" {
+  bucket = aws_s3_bucket.fleet_state_logs.id
+  rule {
+    apply_server_side_encryption_by_default {
+      # SSE-S3 on the log target: S3 log delivery encrypts with the target
+      # bucket's default key, and a CMK on a log sink adds a per-object kms cost
+      # with no marginal benefit for access-log records.
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "fleet_state_logs" {
+  bucket = aws_s3_bucket.fleet_state_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowS3ServerAccessLogging"
+        Effect    = "Allow"
+        Principal = { Service = "logging.s3.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.fleet_state_logs.arn}/*"
+        Condition = {
+          ArnLike      = { "aws:SourceArn" = aws_s3_bucket.fleet_state.arn }
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+        }
+      },
+      {
+        Sid       = "DenyInsecureTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.fleet_state_logs.arn,
+          "${aws_s3_bucket.fleet_state_logs.arn}/*",
+        ]
+        Condition = {
+          Bool = { "aws:SecureTransport" = "false" }
+        }
+      },
+    ]
+  })
 }
 
 ################################################################################

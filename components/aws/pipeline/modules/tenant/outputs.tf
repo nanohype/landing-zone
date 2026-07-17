@@ -27,3 +27,8 @@ output "glue_database" {
   description = "Glue catalog database name"
   value       = aws_glue_catalog_database.this.name
 }
+
+output "connector_policy_json" {
+  description = "Rendered inline IAM policy JSON for the connector role (null if no statements). Lets tests assert the kafka-cluster scoping."
+  value       = module.connector_irsa.role_policy_json
+}

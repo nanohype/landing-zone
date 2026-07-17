@@ -3,9 +3,9 @@
  * postmortem PDFs, incident timeline snapshots, and any other artifact
  * worth keeping beyond the DDB audit table's TTL window.
  *
- * The chart's Platform CR also references this bucket as
- * spec.storage.bucket — the eks-agent-platform operator applies the
- * bucket policy that scopes access to the incident-response IRSA role.
+ * The incident-response IRSA role reaches this bucket through the app-access
+ * policy (Platform.spec.identity.extraPolicyArns); this component owns the
+ * bucket's resource policy, which seeds the in-transit-TLS deny baseline below.
  */
 
 locals {
@@ -52,6 +52,27 @@ resource "aws_s3_bucket_public_access_block" "audit" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "audit" {
+  bucket = aws_s3_bucket.audit.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource = [
+        aws_s3_bucket.audit.arn,
+        "${aws_s3_bucket.audit.arn}/*",
+      ]
+      Condition = {
+        Bool = { "aws:SecureTransport" = "false" }
+      }
+    }]
+  })
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "audit" {

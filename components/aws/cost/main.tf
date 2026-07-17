@@ -152,11 +152,57 @@ module "cur_bucket" {
 }
 
 ################################################################################
-# Cost Alerts SNS Topic
+# Cost Alerts SNS Topic — SSE-KMS
+#
+# AWS Cost Anomaly Detection publishes to this topic; SSE-SNS makes SNS call
+# kms:GenerateDataKey*/Decrypt as the costalerts service principal, so the key
+# policy admits it (scoped to this account).
 ################################################################################
 
+resource "aws_kms_key" "cost_alerts" {
+  description             = "${var.environment} cost alerts topic encryption key"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${local.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCostAnomalyPublish"
+        Effect    = "Allow"
+        Principal = { Service = "costalerts.amazonaws.com" }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_kms_alias" "cost_alerts" {
+  name          = "alias/${var.environment}-cost-alerts"
+  target_key_id = aws_kms_key.cost_alerts.key_id
+}
+
 resource "aws_sns_topic" "cost_alerts" {
-  name = "${var.environment}-cost-alerts"
+  name              = "${var.environment}-cost-alerts"
+  kms_master_key_id = aws_kms_key.cost_alerts.arn
 
   tags = local.tags
 }

@@ -12,12 +12,64 @@ locals {
 }
 
 ################################################################################
-# SNS Topic — Shared Security Alerts
+# SNS Topic — Shared Security Alerts (SSE-KMS)
+#
+# EventBridge, GuardDuty, and Security Hub publish findings here; SSE-SNS makes
+# SNS call kms:GenerateDataKey*/Decrypt as those service principals, so the key
+# policy admits them (scoped to this account).
 ################################################################################
 
-resource "aws_sns_topic" "security_alerts" {
-  name = "org-security-alerts"
+resource "aws_kms_key" "security_alerts" {
+  description             = "org security alerts topic encryption key"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${local.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid    = "AllowSecurityServicePublish"
+        Effect = "Allow"
+        Principal = {
+          Service = [
+            "events.amazonaws.com",
+            "guardduty.amazonaws.com",
+            "securityhub.amazonaws.com",
+          ]
+        }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
+    ]
+  })
+
   tags = merge(local.tags, { Name = "org-security-alerts" })
+}
+
+resource "aws_kms_alias" "security_alerts" {
+  name          = "alias/org-security-alerts"
+  target_key_id = aws_kms_key.security_alerts.key_id
+}
+
+resource "aws_sns_topic" "security_alerts" {
+  name              = "org-security-alerts"
+  kms_master_key_id = aws_kms_key.security_alerts.arn
+  tags              = merge(local.tags, { Name = "org-security-alerts" })
 }
 
 resource "aws_sns_topic_policy" "security_alerts" {

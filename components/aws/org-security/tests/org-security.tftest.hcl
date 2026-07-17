@@ -38,6 +38,11 @@ mock_provider "aws" {
       arn = "arn:aws:sns:us-west-2:123456789012:org-security-alerts"
     }
   }
+  mock_resource "aws_kms_key" {
+    defaults = {
+      arn = "arn:aws:kms:us-west-2:123456789012:key/org-security-alerts"
+    }
+  }
 }
 
 variables {
@@ -101,6 +106,34 @@ run "sns_publish_scoped_to_named_services" {
       && s.Resource == aws_sns_topic.security_alerts.arn
     ])
     error_message = "every alerts-topic statement must be sns:Publish from a named service principal scoped to the topic — no wildcard principal, no widened action"
+  }
+}
+
+# INVARIANT 1b — the alerts topic is encrypted at rest with a CMK whose policy
+# admits exactly the three finding publishers (EventBridge, GuardDuty, Security
+# Hub) via kms:GenerateDataKey*/Decrypt, scoped by SourceAccount. An unencrypted
+# topic leaks findings at rest; a key policy missing a publisher silently drops
+# that source's findings when SSE-SNS tries to encrypt.
+run "alerts_topic_encrypted_with_publisher_grants" {
+  command = plan
+
+  assert {
+    condition     = aws_sns_topic.security_alerts.kms_master_key_id == "arn:aws:kms:us-west-2:123456789012:key/org-security-alerts"
+    error_message = "org-security alerts topic must set kms_master_key_id to the CMK ARN (SSE-KMS)"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_kms_key.security_alerts.policy).Statement :
+      s if try(s.Effect, "") == "Allow"
+      && contains(try(s.Principal.Service, []), "events.amazonaws.com")
+      && contains(try(s.Principal.Service, []), "guardduty.amazonaws.com")
+      && contains(try(s.Principal.Service, []), "securityhub.amazonaws.com")
+      && contains(try(s.Action, []), "kms:GenerateDataKey*")
+      && contains(try(s.Action, []), "kms:Decrypt")
+      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+    ]) == 1
+    error_message = "alerts CMK policy must grant events + guardduty + securityhub kms:GenerateDataKey*/Decrypt scoped by SourceAccount"
   }
 }
 

@@ -24,3 +24,13 @@ output "s3_bucket_names" {
     argo_workflows = try(module.argo_workflows_bucket[0].s3_bucket_id, null)
   }
 }
+
+output "alb_controller_policy_json" {
+  description = "Rendered inline IAM policy JSON for the AWS Load Balancer Controller role. Lets tests assert the elbv2.k8s.aws/cluster tag conditions."
+  value       = module.alb_controller_irsa.role_policy_json
+}
+
+output "argo_events_policy_json" {
+  description = "Rendered inline IAM policy JSON for the argo-events role (null when disabled). Lets tests assert the SQS/SNS ARN scoping."
+  value       = try(module.argo_events_irsa[0].role_policy_json, null)
+}

@@ -46,13 +46,21 @@ resource "aws_kms_key" "compliance" {
         }
       },
       {
+        # Scoped by SourceAccount so only CloudTrail acting on behalf of this
+        # account can decrypt with the key — parity with AllowCloudTrailEncrypt.
         Sid       = "AllowCloudTrailDecrypt"
         Effect    = "Allow"
         Principal = { Service = "cloudtrail.amazonaws.com" }
         Action    = "kms:Decrypt"
         Resource  = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
       },
       {
+        # Same SourceAccount scoping for AWS Config's use of the shared key.
         Sid       = "AllowConfigEncrypt"
         Effect    = "Allow"
         Principal = { Service = "config.amazonaws.com" }
@@ -61,6 +69,11 @@ resource "aws_kms_key" "compliance" {
           "kms:GenerateDataKey",
         ]
         Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
       },
     ]
   })

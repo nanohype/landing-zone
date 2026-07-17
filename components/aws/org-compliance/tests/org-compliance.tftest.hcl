@@ -171,6 +171,29 @@ run "kms_key_rotates_and_cloudtrail_grant_is_account_scoped" {
     ]) == 1
     error_message = "KMS 'AllowCloudTrailEncrypt' must be Allow and confined to aws:SourceAccount == this account (confused-deputy guard)"
   }
+
+  # The DECRYPT grant and the Config grant carry the same confused-deputy guard.
+  # Without it, cloudtrail/config acting for ANY account could read or write with
+  # this key — parity with the encrypt statement above.
+  assert {
+    condition = length([
+      for s in jsondecode(aws_kms_key.compliance.policy).Statement :
+      s if s.Sid == "AllowCloudTrailDecrypt"
+      && s.Effect == "Allow"
+      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+    ]) == 1
+    error_message = "KMS 'AllowCloudTrailDecrypt' must be confined to aws:SourceAccount == this account (confused-deputy guard)"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_kms_key.compliance.policy).Statement :
+      s if s.Sid == "AllowConfigEncrypt"
+      && s.Effect == "Allow"
+      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+    ]) == 1
+    error_message = "KMS 'AllowConfigEncrypt' must be confined to aws:SourceAccount == this account (confused-deputy guard)"
+  }
 }
 
 # -----------------------------------------------------------------------------

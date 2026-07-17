@@ -42,3 +42,13 @@ output "msk_bootstrap" {
   description = "MSK bootstrap servers (if enabled)"
   value       = var.tenant_config.msk_enabled ? aws_msk_serverless_cluster.this[0].arn : null
 }
+
+output "ingestion_policy_json" {
+  description = "Rendered inline IAM policy JSON for the ingestion role. Lets tests assert the kafka-cluster scoping."
+  value       = module.ingestion_irsa.role_policy_json
+}
+
+output "msk_client_policy_json" {
+  description = "Rendered inline IAM policy JSON for the MSK client role (null when msk disabled)."
+  value       = try(module.msk_client_irsa[0].role_policy_json, null)
+}
