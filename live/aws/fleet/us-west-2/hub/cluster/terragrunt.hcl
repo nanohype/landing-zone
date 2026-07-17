@@ -9,16 +9,13 @@ include "envcommon" {
 
 # The hub runs Crossplane + provider-opentofu + ArgoCD (and, later, portal) on the
 # system node group — it does NOT install the eks-gitops Karpenter catalog — so the
-# system pool carries the whole control-plane load. Public endpoint so you can reach
-# the API for kubectl / portal / ArgoCD; tighten with
-# cluster_endpoint_public_access_cidrs (your CIDR) or go private + bastion once the
-# hub is settled.
+# system pool carries the whole control-plane load. The API endpoint is private by
+# default; the public/allow-list posture is supplied at apply time by rackctl via
+# TF_VAR_cluster_endpoint_public_access(_cidrs) — see docs/inputs.md.
 inputs = {
   # The hub cluster IS the fleet control plane, so its base name is "fleet"
   # (→ hub-fleet), distinct from workload clusters which default to <env>-platform.
-  cluster_name                   = "fleet"
-  cluster_endpoint_public_access = true
-  # cluster_endpoint_public_access_cidrs = ["<your-cidr>/32"]
+  cluster_name             = "fleet"
   system_node_min_size     = 2
   system_node_desired_size = 2
   system_node_max_size     = 4

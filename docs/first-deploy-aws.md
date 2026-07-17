@@ -137,7 +137,16 @@ Most On-Demand quota increases are auto-approved within 15-30 minutes. EIP incre
 
 ### 10. Decide on public vs private cluster endpoint
 
-Production overlay defaults `cluster_endpoint_public_access = false`. Without a bastion or VPN, you can't `kubectl` against the cluster from your laptop. For initial deploys, flip to `true` in `live/aws/workload-production/us-west-2/production/cluster/terragrunt.hcl`. You can flip back later once jump-host access is set up.
+Every committed `cluster` leaf is **private by default** — the API endpoint is reachable only from inside the VPC (bastion/VPN), and the tree plans clean with no endpoint input at all. Posture is not hand-edited into the tree; it is supplied at apply time as two `TF_VAR`s (see [inputs.md](inputs.md#eks-api-endpoint-posture)). rackctl sets them from `rackctl.yaml`, auto-detecting your egress IP when you ask for public access without an allow-list.
+
+To reach the API from your laptop on a manual deploy, export the pair before `task apply ... COMPONENT=cluster`:
+
+```bash
+export TF_VAR_cluster_endpoint_public_access=true
+export TF_VAR_cluster_endpoint_public_access_cidrs="[\"$(curl -s https://checkip.amazonaws.com)/32\"]"
+```
+
+Leave them unset for a private endpoint. A public endpoint with an empty allow-list is rejected at plan time — there is no `0.0.0.0/0` fallback.
 
 ## Deploy
 
