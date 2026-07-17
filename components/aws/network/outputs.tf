@@ -23,11 +23,6 @@ output "public_subnet_ids" {
   value       = local.resolved_public_subnet_ids
 }
 
-output "intra_subnet_ids" {
-  description = "List of intra subnet IDs (empty in adopt mode — intra subnets are an owner concern)"
-  value       = local.resolved_intra_subnet_ids
-}
-
 output "private_subnet_azs" {
   description = "Availability zones of the private subnets, in the same order as private_subnet_ids"
   value       = local.resolved_private_subnet_azs

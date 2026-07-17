@@ -20,6 +20,9 @@
 #                        variable's own message, not a raw cidrsubnet provider error.
 #   ipam pin day-2     — after apply, a later preview returning a new CIDR does not shift
 #                        the pinned carving base (no destructive subnet replan).
+#   nat in-between     — an explicit nat_gateways between 1 and max_azs is rejected at
+#                        variable validation (the module can build only 1 or one-per-AZ).
+#   nat per-az         — nat_gateways = max_azs plans exactly one NAT gateway per zone.
 
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
@@ -131,6 +134,10 @@ run "create_default" {
     condition     = join(",", output.private_subnet_az_ids) == "usw2-az1,usw2-az2,usw2-az3"
     error_message = "create mode must resolve subnet AZ IDs (usw2-azN) from the AZ data source's zone_ids, in order"
   }
+  assert {
+    condition     = length(output.nat_gateway_ids) == 1
+    error_message = "nat_gateways = 1 (default) must plan exactly one shared NAT gateway"
+  }
 }
 
 # ── create + IPAM: CIDR drawn from the pool, carving base pinned ──
@@ -178,6 +185,35 @@ run "create_tgw_centralized" {
   assert {
     condition     = length(output.nat_gateway_ids) == 0
     error_message = "centralized egress must plan zero NAT gateways"
+  }
+}
+
+# ── nat_gateways: an in-between count (neither 1 nor max_azs) is rejected at plan, not
+#    silently rounded up to per-AZ — the module cannot build an arbitrary NAT count ──
+run "nat_gateways_rejects_in_between" {
+  command = plan
+
+  variables {
+    # max_azs defaults to 3, so 2 is neither a single shared NAT nor one-per-AZ.
+    nat_gateways = 2
+  }
+
+  expect_failures = [
+    var.nat_gateways,
+  ]
+}
+
+# ── nat_gateways = max_azs: one NAT gateway per zone (the honored per-AZ count) ──
+run "nat_gateways_per_az" {
+  command = plan
+
+  variables {
+    nat_gateways = 3
+  }
+
+  assert {
+    condition     = length(output.nat_gateway_ids) == 3
+    error_message = "nat_gateways = max_azs must plan exactly one NAT gateway per zone (3)"
   }
 }
 

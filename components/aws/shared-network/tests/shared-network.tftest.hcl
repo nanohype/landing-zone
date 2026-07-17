@@ -11,6 +11,12 @@
 #     ipam_pin_holds_day2  later preview returns a different CIDR (no destructive replan).
 #   ipam_netmask_range  — a base longer than /20 is rejected by the variable's own message.
 #   discovery_resolves  — with no explicit pool, the env sub-pool is discovered by tag.
+#   discovery_zero_match — no pool carries the org-ipam tag: a clear postcondition error, not
+#                          a raw null-attribute crash.
+#   contract_cluster_tag — a kubernetes.io/cluster/* tag injected via var.tags lands on every
+#                          shared subnet and fails the role-tag contract check.
+#   nat in-between /     — an explicit nat_gateways between 1 and max_azs is rejected; a value
+#     nat per-az           equal to max_azs plans one NAT gateway per zone.
 
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
@@ -90,8 +96,8 @@ run "nat_egress" {
     error_message = "no TGW attachment should be planned without transit_gateway_id"
   }
   assert {
-    condition     = length(output.nat_gateway_ids) >= 1
-    error_message = "local-NAT egress must plan at least one NAT gateway"
+    condition     = length(output.nat_gateway_ids) == 1
+    error_message = "nat_gateways = 1 must plan exactly one shared NAT gateway"
   }
   assert {
     condition     = length(aws_ram_resource_share.subnets) == 1
@@ -231,5 +237,77 @@ run "discovery_resolves" {
   assert {
     condition     = output.ipam_pool_id == "ipam-pool-discovered"
     error_message = "the discovered pool ID must resolve from the tag lookup"
+  }
+}
+
+# ── discovery zero-match: no pool carries the org-ipam tag → the data source's postcondition
+#    fails with a clear message, not a raw null-attribute crash from one().id ──
+run "discovery_zero_match" {
+  command = plan
+
+  variables {
+    ipam_pool_id         = ""
+    consumer_account_ids = ["111111111111"]
+  }
+
+  # Simulate the org-ipam-<env> tag matching no pool in this account (not shared yet, or the
+  # tag is not visible cross-account over RAM).
+  override_data {
+    target = data.aws_vpc_ipam_pools.env
+    values = {
+      ipam_pools = []
+    }
+  }
+
+  expect_failures = [
+    data.aws_vpc_ipam_pools.env,
+  ]
+}
+
+# ── contract violation: a kubernetes.io/cluster/* tag injected via var.tags lands on every
+#    shared subnet and must fail the role-tag check (the effective-tag-set assertion) ──
+run "contract_cluster_tag_via_tags" {
+  command = plan
+
+  variables {
+    consumer_account_ids = ["111111111111"]
+    tags = {
+      "kubernetes.io/cluster/rogue" = "owned"
+    }
+  }
+
+  expect_failures = [
+    check.role_tags_no_cluster_binding,
+  ]
+}
+
+# ── nat_gateways: an in-between count (neither 1 nor max_azs) is rejected at plan, not
+#    silently rounded up to per-AZ ──
+run "nat_gateways_rejects_in_between" {
+  command = plan
+
+  variables {
+    # max_azs defaults to 3, so 2 is neither a single shared NAT nor one-per-AZ.
+    nat_gateways         = 2
+    consumer_account_ids = ["111111111111"]
+  }
+
+  expect_failures = [
+    var.nat_gateways,
+  ]
+}
+
+# ── nat_gateways = max_azs: one NAT gateway per zone (the honored per-AZ count) ──
+run "nat_gateways_per_az" {
+  command = plan
+
+  variables {
+    nat_gateways         = 3
+    consumer_account_ids = ["111111111111"]
+  }
+
+  assert {
+    condition     = length(output.nat_gateway_ids) == 3
+    error_message = "nat_gateways = max_azs must plan exactly one NAT gateway per zone (3)"
   }
 }

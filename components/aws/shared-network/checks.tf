@@ -39,13 +39,22 @@ check "consumers_declared" {
   }
 }
 
+# The effective tag set on each shared subnet is what the VPC module actually stamps: its
+# base tags (local.tags — var.tags merged with Component/Team) plus the tier's role tags. A
+# cluster-ownership tag can slip in via any of those, most realistically through a leaf's
+# var.tags, so the check asserts over the merged effective set, not just the two role-tag
+# constants — asserting over the constants alone would pass a kubernetes.io/cluster/* key
+# injected through var.tags straight onto every subnet.
 check "role_tags_no_cluster_binding" {
   assert {
     condition = (
       contains(keys(local.public_subnet_role_tags), "kubernetes.io/role/elb") &&
       contains(keys(local.private_subnet_role_tags), "kubernetes.io/role/internal-elb") &&
-      alltrue([for k in concat(keys(local.public_subnet_role_tags), keys(local.private_subnet_role_tags)) : !startswith(k, "kubernetes.io/cluster/")])
+      alltrue([
+        for k in keys(merge(local.tags, local.public_subnet_role_tags, local.private_subnet_role_tags)) :
+        !startswith(k, "kubernetes.io/cluster/")
+      ])
     )
-    error_message = "the shared subnets must carry the ELB role tags and NO kubernetes.io/cluster/<cluster> ownership tag — a shared VPC is bound to no single cluster (see subnet_tags.tf)."
+    error_message = "the shared subnets must carry the ELB role tags and NO kubernetes.io/cluster/<cluster> ownership tag. The effective subnet tag set is var.tags (via local.tags) plus the ELB role tags — a shared VPC is bound to no single cluster, so a cluster-ownership tag injected through var.tags is rejected here (see subnet_tags.tf)."
   }
 }

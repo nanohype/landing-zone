@@ -18,11 +18,6 @@ output "public_subnet_ids" {
   value       = module.vpc.public_subnets
 }
 
-output "intra_subnet_ids" {
-  description = "Intra subnet IDs — owner-internal, never shared."
-  value       = module.vpc.intra_subnets
-}
-
 output "private_subnet_azs" {
   description = "Availability zone NAMES of the private subnets, in the same order as private_subnet_ids. Same-account readability only — names map to different physical zones per account, so cross-account consumers must use private_subnet_az_ids."
   value       = local.azs

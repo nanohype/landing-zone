@@ -8,7 +8,10 @@ include "envcommon" {
 }
 
 inputs = {
-  nat_gateways         = 2
+  # One NAT gateway per zone (per-AZ HA egress). The module supports a single shared NAT (1)
+  # or one per AZ (= max_azs); an in-between count is not expressible, so staging mirrors
+  # production's per-AZ egress posture.
+  nat_gateways         = 3
   enable_flow_logs     = true
   enable_vpc_endpoints = true
 }

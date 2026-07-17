@@ -41,7 +41,7 @@ variable "ipam_netmask_length" {
 
   # Subnets are carved 8 bits smaller than the VPC block (cidrsubnet(..., 8, ...) in
   # main.tf), so a /20 base is the smallest that still yields /28 subnets — AWS's minimum
-  # subnet size — across the public/private/intra tiers. A longer base carves sub-/28
+  # subnet size — across the public and private tiers. A longer base carves sub-/28
   # subnets AWS rejects at apply, and anything past /24 fails even earlier with a raw
   # cidrsubnet "insufficient address space" provider error instead of this message.
   validation {
@@ -58,9 +58,27 @@ variable "max_azs" {
 }
 
 variable "nat_gateways" {
-  description = "Number of NAT gateways (1 for development, 2 for staging, 3 for production). Ignored under centralized_egress (0 NAT gateways)."
+  description = <<-EOT
+    Number of NAT gateways for local egress. Must be either 1 (a single shared NAT gateway —
+    lowest cost, no per-AZ redundancy) or max_azs (one NAT gateway per zone — full HA). An
+    in-between count is not supported: the VPC module ties NAT-gateway count to subnet count,
+    so it builds one shared NAT or one per AZ, never an arbitrary number. Ignored under
+    centralized_egress (0 NAT gateways). The value equals the number of NAT gateways actually
+    deployed.
+  EOT
   type        = number
   default     = 1
+
+  # The upstream terraform-aws-modules/vpc module derives NAT-gateway count from
+  # single_nat_gateway (1) or one_nat_gateway_per_az (length(azs)) — there is no input for an
+  # arbitrary count, and each private route table routes to nat[subnet_index]. A value like 2
+  # with max_azs = 3 cannot be honored; left unguarded it silently plans max_azs gateways.
+  # Reject it here so the mismatch surfaces at plan with a clear message instead of a silent
+  # cost/behavior surprise.
+  validation {
+    condition     = var.nat_gateways == 1 || var.nat_gateways == var.max_azs
+    error_message = "nat_gateways must be 1 (a single shared NAT gateway) or equal to max_azs (one NAT gateway per zone). terraform-aws-modules/vpc couples NAT-gateway count to subnet count, so an in-between value like 2 with max_azs = 3 cannot be built and would otherwise silently plan max_azs gateways. Choose 1 for cost or max_azs for per-AZ HA."
+  }
 }
 
 variable "transit_gateway_id" {

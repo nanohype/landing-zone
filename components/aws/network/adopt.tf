@@ -102,7 +102,6 @@ locals {
 
   resolved_private_subnet_ids = local.create_mode ? module.vpc[0].private_subnets : var.adopt_private_subnet_ids
   resolved_public_subnet_ids  = local.create_mode ? module.vpc[0].public_subnets : var.adopt_public_subnet_ids
-  resolved_intra_subnet_ids   = local.create_mode ? module.vpc[0].intra_subnets : []
 
   # Create mode: subnets are built one-per-AZ across local.azs, in order, so the AZ list
   # is local.azs. Adopt mode: read each subnet's AZ, preserving input order.

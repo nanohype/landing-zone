@@ -10,6 +10,7 @@ VPC_CIDR=$(jq -r '.vpc_cidr_block.value' outputs.json)
 PRIVATE_SUBNETS=$(jq -r '.private_subnet_ids.value[]' outputs.json)
 PUBLIC_SUBNETS=$(jq -r '.public_subnet_ids.value[]' outputs.json)
 RAM_SHARE_ARN=$(jq -r '.ram_share_arn.value // empty' outputs.json)
+CONSUMER_ACCOUNTS=$(jq -r '.consumer_account_ids.value[]' outputs.json)
 
 # --- VPC ---
 echo "Checking shared VPC ${VPC_ID}..."
@@ -73,6 +74,26 @@ if [[ -n "$RAM_SHARE_ARN" ]]; then
     exit 1
   fi
   echo "  RAM share is ACTIVE"
+
+  # An ACTIVE share is not the same as a resolved share. If org-wide resource sharing is not
+  # enabled in AWS Organizations, a principal association to another org account is accepted
+  # but never resolves (it sits FAILED / ASSOCIATING) while the share itself still reports
+  # ACTIVE — the exact "silently never resolves" failure the README's activation section
+  # warns about. Check each configured consumer's PRINCIPAL association actually reached
+  # ASSOCIATED, not just that the share exists.
+  echo "Checking each consumer's RAM principal association resolved..."
+  for ACCT in $CONSUMER_ACCOUNTS; do
+    ASSOC_STATUS=$(aws ram get-resource-share-associations \
+      --association-type PRINCIPAL \
+      --resource-share-arns "$RAM_SHARE_ARN" \
+      --principal "$ACCT" \
+      --query 'resourceShareAssociations[0].status' --output text)
+    if [[ "$ASSOC_STATUS" != "ASSOCIATED" ]]; then
+      echo "FAIL: consumer ${ACCT} principal association is '${ASSOC_STATUS}', expected 'ASSOCIATED' — the share is ACTIVE but this association never resolved. Enable resource sharing with AWS Organizations (aws ram enable-sharing-with-aws-organizations) and confirm ${ACCT} is in the owner's organization."
+      exit 1
+    fi
+    echo "  ${ACCT} -> principal association ASSOCIATED"
+  done
 else
   echo "No RAM share (consumer_account_ids empty) — skipping share check"
 fi

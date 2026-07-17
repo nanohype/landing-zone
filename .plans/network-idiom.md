@@ -17,14 +17,23 @@ comments, or docs (greenfield doctrine).
 | 2 | IP + auth hygiene on cluster addon config | ✅ |
 | 1-fix | adopt preflight precision + validation gaps + IPAM day-2 replan bug (Fable review) | ✅ |
 | 3 | `shared-network` owner component + RAM share + contract | ✅ |
+| 3-fix | teardown docs + vacuous tag check + IPAM discovery + NAT mapping + intra-subnet cleanup (Fable review) | ✅ |
 | 3b | `egress-network` owner component (central-egress VPC + TGW static default route) | ⬜ |
 | 4 | cluster-bootstrap publishes network_mode + adopt subnet IDs (public + private) | ⬜ |
 
-Run these **serialized, in order** (1 → 2 → 1-fix → 3 → 3b → 4) — never two agents in
-this repo concurrently. Every target ends in a PR (never a direct push to `main`,
-even though this repo's branch protection allows an admin bypass), CI green (poll
-`gh pr checks` synchronously in the foreground — no backgrounded `--watch`, no ending
-your turn to wait on it), then squash-merge.
+Run these **serialized, in order** (1 → 2 → 1-fix → 3 → 3-fix → 3b → 4) — never two
+agents in this repo concurrently. Every target ends in a PR (never a direct push to
+`main`, even though this repo's branch protection allows an admin bypass), CI green
+(poll `gh pr checks` synchronously in the foreground — no backgrounded `--watch`, no
+ending your turn to wait on it), then squash-merge.
+
+**Third independent review pass (Fable, adversarial, ran real probe fixtures
+against a scratchpad copy — repo untouched) landed after Target 3 merged.** Six
+findings, one HIGH (a teardown-safety claim in the README that contradicts actual
+AWS behavior — AWS does not block unsharing a subnet with live consumer ENIs, it
+silently allows it and only new resource creation fails afterward). All folded into
+**Target 3-fix** below — none are strategic forks, all are bugs/doc-corrections, so
+no user decision was needed before proceeding.
 
 **Second independent review pass (Fable, reviewing the plan itself, not any
 implementation) landed after Target 2 merged.** Three real findings folded into the
@@ -565,10 +574,224 @@ not a `shared-network` component change — no action needed here.)
 
 ---
 
+## Target 3-fix — shared-network teardown docs, vacuous check, IPAM discovery, NAT mapping, intra-subnet cleanup (M)
+
+**Shipped.** All six findings landed across `components/aws/shared-network` (README,
+checks.tf, main.tf, variables.tf, outputs.tf, smoke-test.sh, tests), `components/aws/network`
+(main.tf, variables.tf, outputs.tf, adopt.tf, smoke-test.sh, tests — items 4 and 6 are shared
+logic), the two staging live leaves, and `docs/architecture.md`. Resolution decisions worth
+recording:
+- **Item 1 — verified against AWS's own docs before rewriting.** AWS's
+  [Working with shared subnets](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-sharing-share-subnet-working-with.html)
+  ("Unshare a shared subnet") is explicit: the owner can unshare **at any time**, existing
+  participant resources keep running, the participant just can no longer *create new*
+  resources, and the ONE AWS-enforced backstop is on subnet/VPC **deletion** (the owner can't
+  delete a shared subnet/VPC while participant resources still occupy it), NOT on the unshare.
+  The old README claimed RAM blocks the unshare and forcing it orphans state — the exact
+  inverse. Rewrote the teardown section to that mechanism: revoking a consumer is just an
+  `aws_ram_principal_association` destroy that applies cleanly regardless of live ENIs;
+  drain-first is operator discipline, not an AWS backstop; the delete-guard is called out as
+  the only real enforcement, and as guarding the owner's `destroy`, not the unshare.
+- **Item 2 — the check now asserts over the effective merged tag set.**
+  `role_tags_no_cluster_binding` reads
+  `keys(merge(local.tags, local.public_subnet_role_tags, local.private_subnet_role_tags))`,
+  which is what the VPC module actually stamps on each subnet — so a
+  `kubernetes.io/cluster/*` key injected via a leaf's `var.tags` (which flows into
+  `local.tags`) is now caught. New `contract_cluster_tag_via_tags` fixture proves it fails the
+  check at plan.
+- **Item 3 — IPAM discovery zero/multi-match is now a clear postcondition, not a null crash.**
+  `data.aws_vpc_ipam_pools.env` gained a `postcondition` asserting exactly one pool; the
+  data-source node errors with an actionable message (pool not shared to this account, or the
+  org-ipam tag not visible cross-account — set `ipam_pool_id` explicitly) before the
+  `one().id` local can hit a null. New `discovery_zero_match` fixture (`override_data` →
+  empty `ipam_pools`) proves it. Added to the master plan's open-items list for live
+  confirmation.
+- **Item 4 — KEY FINDING: exactly-2 NAT gateways is structurally impossible with
+  `terraform-aws-modules/vpc`, so the acceptance's literal "plans exactly 2" is not
+  achievable; implemented the closest correct behavior instead.** The module derives NAT count
+  from `nat_gateway_count = single_nat_gateway ? 1 : one_nat_gateway_per_az ? length(azs) :
+  max_subnet_length` and each private route table routes to `nat[subnet_index]` — so for a
+  3-AZ/3-private-subnet VPC the only counts it can build are **1** (single) or **3** (per-AZ).
+  There is no input for an arbitrary count; a value of 2 silently fell through to per-AZ (3),
+  the observed bug. Fix: a variable validation on `nat_gateways` rejecting any value that is
+  neither `1` nor `max_azs`, with a message explaining the module constraint — the silent
+  mismatch becomes a clear plan-time error. Both staging leaves (`workload-staging` `network`
+  and `network`-account `shared-network`) moved `nat_gateways = 2` → `3` (per-AZ HA); since
+  they were already silently planning 3, this is a no-op on the actual plan but removes the
+  misleading "2 / across two zones" claim. New `nat_gateways_rejects_in_between` (expects the
+  validation to fail) + `nat_gateways_per_az` (asserts 3 gateways) fixtures in both
+  components; `create_default`/`nat_egress` now assert the single-NAT count == 1.
+- **Item 5 — smoke-test checks principal-association resolution.**
+  `shared-network/smoke-test.sh` now runs `aws ram get-resource-share-associations
+  --association-type PRINCIPAL --principal <acct>` per configured consumer and fails unless
+  the status is `ASSOCIATED` — catching the "share ACTIVE but association never resolved"
+  case (org-wide sharing not enabled) the README warns about. Verified by `bash -n` +
+  code review; no live RAM share exists to exercise (nothing is deployed).
+- **Item 6 — intra subnet tier dropped** from both components: the `intra_subnets` module
+  input, the `intra_subnet_ids` output, `network`'s `resolved_intra_subnet_ids` local and
+  its smoke-test block, and the `docs/architecture.md` subnet-tier line. The `tgw_intra_org`
+  route (intra-*organization* 10.0.0.0/8 routing) is unrelated and untouched. Grep confirms
+  zero remaining consumers in repo source.
+- **Noted, out of scope:** `components/aws/shared-network/.terraform.lock.hcl` is untracked
+  (a Target 3 miss — the repo's `.gitignore` un-ignores `components/aws/*/.terraform.lock.hcl`
+  and every other component tracks its lock). Left untracked here: committing the locally
+  generated lock would carry an unintended aws-provider bump (6.55.0 vs siblings' 6.54.0) into
+  a docs/logic PR, and CI regenerates the lock during `validate` anyway (Target 3 merged green
+  without it). Worth a dedicated hygiene commit that pins it to the sibling version.
+
+**Depends on:** Target 3 (serialized after it in this repo — already merged, so this
+is next). **Blocks Target 3b** — items 1 and 3 below are load-bearing for whatever
+`egress-network` copies from `shared-network`'s patterns (README teardown language,
+IPAM discovery-by-tag), and item 4 (NAT mapping) is a shared bug `egress-network`
+would otherwise re-inherit a third time.
+
+**Context:** a second independent adversarial review (Fable, ran real probe fixtures
+against a scratchpad copy — repo untouched) of the merged `shared-network` component
+found six issues, three of them execution-confirmed. One is a genuinely dangerous
+documentation defect — fix it first.
+
+**Findings:**
+
+1. **HIGH — the README documents a teardown safety mechanism AWS does not provide.**
+   `components/aws/shared-network/README.md` (teardown section) currently claims RAM
+   will not let you unshare a subnet with live consumer ENIs, and that forcing it
+   orphans state. AWS's actual documented behavior is the opposite: the owner CAN
+   unshare a subnet with participants at any time — existing participant resources
+   keep running, but the participant can no longer *create new* resources in that
+   subnet (Karpenter node launches, LBC ENI provisioning start failing, silently,
+   with no error surfaced on the owner side). Concrete failure this enables: an
+   operator removes a consumer from `consumer_account_ids`, trusting the README that
+   AWS will block them if anything is still live in that subnet — the `apply`
+   succeeds cleanly (it's just an `aws_ram_principal_association` destroy), and the
+   danger surfaces later, silently, on the consumer's side. **Fix:** rewrite the
+   teardown section to state the real mechanism — AWS provides no enforcement here,
+   the drain-first ordering (verify no consumer workloads still reference the
+   subnet before revoking the share) is entirely an operator discipline, not an
+   AWS-enforced backstop. Keep the drain-first *sequence* recommendation (it's
+   correct); fix only the claimed enforcement point.
+2. **`check "role_tags_no_cluster_binding"` (`checks.tf`) is vacuous** — it asserts
+   over the two hardcoded local maps (`local.public_subnet_role_tags` /
+   `local.private_subnet_role_tags`, `subnet_tags.tf`), not the actual merged tag
+   set the VPC module applies to each subnet (`local.tags` = `merge(var.tags, …)`,
+   passed as the module's `tags` input, which the upstream module merges into every
+   subnet's tags). Probe-confirmed: setting
+   `tags = { "kubernetes.io/cluster/rogue" = "owned" }` via the component's own
+   `var.tags` input plans that key onto every shared subnet with the check still
+   green — the realistic drift vector (someone adds a cluster tag via a leaf's
+   `tags` input) sails through the exact check meant to catch it. The shipped test
+   suite has the same blindness (asserts over `output.subnet_role_tags`, which
+   mirrors the same constants). **Fix:** rewrite the check to assert over
+   `keys(merge(local.tags, local.public_subnet_role_tags, local.private_subnet_role_tags))`
+   (or equivalent — the actual effective tag set), not the two locals alone. Add a
+   test fixture that sets a `kubernetes.io/cluster/*` key via `var.tags` and expects
+   the check to fail.
+3. **IPAM pool tag-discovery (`main.tf`, filtering on `tag:Name = org-ipam-<env>`)
+   likely fails in the exact cross-account topology it was built for.** AWS RAM does
+   not surface owner-written tags to participant accounts — the same fact this
+   component's own subnet-tagging design correctly relies on (no
+   `kubernetes.io/cluster/*` visible cross-account). If that holds for `ec2:IpamPool`
+   resources too (plausible — the variable's own description already hedges this as
+   "the escape hatch for when the RAM-shared pool is not tag-discoverable"), the tag
+   filter matches **zero** pools in the network-owner account on first real
+   activation. Probe-confirmed failure mode: a zero-match doesn't produce the "clear
+   message" the code comments claim — `one()` returns `null`, then the following
+   `.id` reference explodes with a raw `Attempt to get attribute from null value`
+   trace. **Fix:** wrap the lookup so a zero-match fails with an explicit, actionable
+   error (a `precondition` block or `try()`-based check: "org-ipam-<env> pool not
+   found or not shared to this account — set `ipam_pool_id` explicitly instead").
+   Add this as an explicit open item in the master plan's unexercised-against-live-
+   AWS list (alongside the existing subnet-RAM-tag-visibility one) — it needs live
+   confirmation the same way that one does.
+4. **`nat_gateways` silently mis-maps for any explicit value between 1 and
+   `max_azs`** — inherited from `network` (Target 1, already merged) and now also
+   present in `shared-network` (same mapping logic, same bug). The mapping only
+   special-cases `nat_gateways == 1` (single NAT) and `nat_gateways >= max_azs`
+   (per-AZ) — any other explicit value (e.g. `2` with `max_azs = 3`) falls through
+   to per-AZ. Probe-confirmed: the committed staging `shared-network` leaf sets
+   `nat_gateways = 2` with a comment "Local-NAT egress across two zones" and plans
+   **3** NAT gateways, not 2 — silent cost/behavior mismatch between stated intent
+   and actual plan. `variables.tf`'s description ("1 for development, 2 for staging,
+   3 for production") is wrong for the staging case in both components. **Fix:**
+   correct the mapping in both `components/aws/network/main.tf` and
+   `components/aws/shared-network/main.tf` to actually honor an explicit
+   in-between value (e.g. `one_nat_gateway_per_az` only when
+   `nat_gateways == max_azs`, and thread the exact count through when
+   `1 < nat_gateways < max_azs` — check what the upstream `terraform-aws-modules/vpc`
+   module actually supports for an explicit NAT count; it may need a different input
+   than the single/per-az booleans this repo currently uses).
+5. **`smoke-test.sh` doesn't check the one failure mode the README explicitly warns
+   about** — a RAM share whose *principal associations* never resolved (org-wide
+   resource sharing not enabled in AWS Organizations, which the README calls out as
+   a real "silently never resolves" risk) still reports the share itself as
+   `ACTIVE`. The smoke test only checks share status, not principal-association
+   resolution. **Fix:** add an `aws ram get-resource-share-associations
+   --association-type PRINCIPAL` check confirming each configured consumer's
+   association actually resolved, not just that the share exists.
+6. **The intra subnet tier is carved but never consumed anywhere in the repo** — in
+   either `network` or `shared-network`. Grep confirms zero consumers of
+   `intra_subnet_ids` anywhere; the natural candidate consumer (the TGW attachment)
+   uses private subnets instead. In `shared-network` specifically no consumer is
+   even possible (an adopting cluster can't reach unshared subnets). This is a
+   vestigial scaffold under this org's greenfield doctrine — carved address space
+   that claims a purpose it doesn't deliver. **Fix:** drop the intra subnet tier
+   from both `network` and `shared-network` (simplest, lowest-risk — doesn't touch
+   the already-tested TGW attachment logic, which correctly stays on private
+   subnets). If a genuine future need for a dedicated TGW-attachment subnet tier
+   emerges, that's a new, deliberately-scoped addition — not a reason to keep
+   today's unused one.
+
+**Approach:** fix items 1-6 across `components/aws/shared-network/{README.md,
+checks.tf, main.tf, smoke-test.sh}`, `components/aws/network/main.tf` (items 4 and
+6 — shared with `shared-network`), and update the master plan's open-items list for
+item 3.
+
+**Acceptance:**
+- Item 1: README teardown section reviewed and confirmed to state the real AWS
+  mechanism, not the invented one (cite the AWS documentation used to verify, in
+  the PR description).
+- Item 2: probe fixture (cluster tag injected via `var.tags`) now fails the check
+  at `plan`; existing 8/8 suite still passes.
+- Item 3: a zero-match IPAM pool lookup fixture fails with an explicit, readable
+  error message, not a null-attribute trace.
+- Item 4: a `nat_gateways = 2, max_azs = 3` fixture in both `network` and
+  `shared-network` plans exactly 2 NAT gateways, not 3; the staging
+  `shared-network` leaf's actual plan (fixture-simulated, since nothing is
+  deployed) matches its own "across two zones" comment.
+- Item 5: `smoke-test.sh` fails clearly against a simulated/documented
+  never-resolved-association scenario (test this logically/via code review if a
+  live RAM share isn't available to exercise — document how you verified it).
+- Item 6: `intra_subnet_ids`/`intra_subnets` removed from both components' outputs
+  and VPC module calls; `task validate`/`task lint` confirm no dangling references.
+- `task fmt:check`, `task validate`, `task lint`, `tofu test` all green (full
+  existing suite across both `network` and `shared-network`, plus new fixtures for
+  items 2-4).
+
+---
+
 ## Target 3b — `egress-network` owner component: central-egress VPC + TGW static default route (M)
 
 **Depends on:** Target 1 (network var-naming conventions; no other coupling — this
 is a standalone component, independent of Target 3's `shared-network`).
+
+> **Note from Target 3-fix (shipped — patterns to inherit / avoid):**
+> - **NAT count: use the validated `nat_gateways` idiom, don't re-inherit the silent-3 bug.**
+>   `terraform-aws-modules/vpc` cannot build an arbitrary NAT count — only `1` (single) or
+>   `max_azs` (one-per-AZ), because `nat_gateway_count` is derived from the single/per-az
+>   booleans and each private route table routes to `nat[subnet_index]`. `network` and
+>   `shared-network` now reject any in-between `nat_gateways` value at variable validation.
+>   `egress-network`'s NAT gateways should follow the same {1 | max_azs} contract (a central
+>   egress hub typically wants per-AZ NAT for HA); copy the validation, not a raw numeric knob.
+> - **No IPAM discovery here.** The zero-match tag-discovery footgun 3-fix hardened in
+>   `shared-network` (item 3) does not apply — the plan already scopes `egress-network` to its
+>   own dedicated CIDR block, not the workload IPAM pools. Keep it that way; don't add
+>   `data.aws_vpc_ipam_pools` tag discovery.
+> - **No intra subnet tier.** 3-fix removed the unused intra tier from both existing
+>   components (item 6). Build `egress-network` with public + NAT-facing private subnets only.
+> - **Teardown/README framing.** `egress-network` shares no subnets (it's a TGW hub with a
+>   static default route, not a RAM subnet share), so it has no unshare story — but the same
+>   "AWS enforces nothing at revoke; only delete is guarded; ordering is operator discipline"
+>   framing 3-fix corrected in item 1 applies to detaching the TGW attachment / removing the
+>   static route. Don't claim an AWS backstop that isn't there.
 
 **Context — why this exists.** A second independent review pass found that Target
 1's `centralized_egress` lever (route a `create`-mode cluster's default egress
