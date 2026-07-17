@@ -74,3 +74,20 @@ variable "cluster_name" {
   description = "Full EKS cluster name this agent-platform substrate serves (e.g. development-platform). Keys the per-cluster SSM contract and the tenant/session role names the operator mints."
   type        = string
 }
+
+variable "data_kms_key_arn" {
+  description = "KMS key ARN (the secrets component's data CMK) that encrypts the model-artifacts and eval-reports buckets at rest. Wired from dependency.secrets.outputs.kms_key_arn in the live layer; the tenant/session roles the operator mints already carry kms:Decrypt/GenerateDataKey (see the tenant ceiling grant in main.tf), and the key policy delegates to account IAM, so no key-policy edit is required for tenant access."
+  type        = string
+}
+
+variable "artifacts_lifecycle_noncurrent_expiration_days" {
+  description = "Delete non-current object versions in the model-artifacts and eval-reports buckets after N days."
+  type        = number
+  default     = 90
+}
+
+variable "artifacts_access_logs_retention_days" {
+  description = "Retention (days) for S3 server-access logs in the artifacts access-logs bucket."
+  type        = number
+  default     = 365
+}

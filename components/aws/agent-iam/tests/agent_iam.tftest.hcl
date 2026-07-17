@@ -46,6 +46,7 @@ variables {
   region            = "us-west-2"
   oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED"
   oidc_issuer       = "oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED"
+  data_kms_key_arn  = "arn:aws:kms:us-west-2:123456789012:key/EXAMPLE-DATA-CMK"
 }
 
 # The load-bearing invariant: the operator can create/modify a tenant role ONLY
@@ -197,6 +198,91 @@ run "artifact_buckets_are_locked_down" {
     )
     error_message = "artifact + eval-report buckets must have versioning Enabled (evidence must survive overwrite)"
   }
+
+  # Both data buckets encrypt at rest with the data CMK specifically — not SSE-S3,
+  # and not the aws/s3 managed key: assert the algorithm AND that the key is
+  # var.data_kms_key_arn (a fallback to the managed key would still be aws:kms).
+  # rule is a set, so match with for-expressions rather than indexing.
+  assert {
+    condition = (
+      anytrue([
+        for r in aws_s3_bucket_server_side_encryption_configuration.model_artifacts.rule :
+        anytrue([for d in r.apply_server_side_encryption_by_default :
+        d.sse_algorithm == "aws:kms" && d.kms_master_key_id == var.data_kms_key_arn])
+      ]) &&
+      anytrue([
+        for r in aws_s3_bucket_server_side_encryption_configuration.eval_reports.rule :
+        anytrue([for d in r.apply_server_side_encryption_by_default :
+        d.sse_algorithm == "aws:kms" && d.kms_master_key_id == var.data_kms_key_arn])
+      ])
+    )
+    error_message = "model-artifacts and eval-reports buckets must be SSE-KMS encrypted with the data CMK (var.data_kms_key_arn)"
+  }
+
+  # The access-logs bucket is the audit sink for both data buckets: it blocks
+  # public access, is encrypted, and its policy admits only the S3 log-delivery
+  # service (scoped to this account by the SourceAccount condition).
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_public_access_block.access_logs.block_public_acls,
+      aws_s3_bucket_public_access_block.access_logs.block_public_policy,
+      aws_s3_bucket_public_access_block.access_logs.ignore_public_acls,
+      aws_s3_bucket_public_access_block.access_logs.restrict_public_buckets,
+    ])
+    error_message = "access-logs bucket must block all public access"
+  }
+
+  assert {
+    condition = anytrue([
+      for r in aws_s3_bucket_server_side_encryption_configuration.access_logs.rule :
+      anytrue([for d in r.apply_server_side_encryption_by_default : d.sse_algorithm == "AES256"])
+    ])
+    error_message = "access-logs bucket must be encrypted (AES256 — S3 log delivery does not assume a customer CMK)"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_s3_bucket_policy.access_logs.policy).Statement :
+      s if try(s.Sid, "") == "AllowLogDelivery"
+      && try(s.Principal.Service, "") == "logging.s3.amazonaws.com"
+      && try(s.Condition.StringEquals["aws:SourceAccount"], "") != ""
+    ]) == 1
+    error_message = "access-logs bucket policy must admit logging.s3.amazonaws.com scoped by aws:SourceAccount"
+  }
+
+  # The eval-reports bucket is not operator-managed, so terraform owns its policy:
+  # deny non-TLS transport, and deny an explicitly-wrong encryption header.
+  # (model-artifacts has no terraform policy — the operator owns it at runtime.)
+  assert {
+    condition = length([
+      for s in jsondecode(aws_s3_bucket_policy.eval_reports.policy).Statement :
+      s if try(s.Sid, "") == "DenyInsecureTransport"
+    ]) == 1
+    error_message = "eval-reports bucket policy must deny insecure (non-TLS) transport"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_s3_bucket_policy.eval_reports.policy).Statement :
+      s if try(s.Sid, "") == "DenyWrongEncryptionHeader"
+    ]) == 1
+    error_message = "eval-reports bucket policy must deny an explicitly non-KMS encryption header"
+  }
+}
+
+# The region-bearing bucket names are the org's tightest cluster-scoped names and
+# set the clusterName length cap, so the <=63 preconditions must actually fire. A
+# 25-char base overflows only the longest name (model-artifacts, +39 fixed chars).
+run "over_long_cluster_name_fails_length_precondition" {
+  command = plan
+
+  variables {
+    cluster_name = "aaaaaaaaaaaaaaaaaaaaaaaaa" # 25 chars -> -<acct 12>-<region 9>-model-artifacts = 64 > 63
+  }
+
+  expect_failures = [
+    aws_s3_bucket.model_artifacts,
+  ]
 }
 
 # The tenant baseline is the real Bedrock GRANT attached to every tenant role (the
