@@ -285,6 +285,23 @@ attribute coverage folds into Target 18's broader suite work.
 
 ## Target 18 — Testing batch (M)
 
+**Findings from Target 17 (PR #136):**
+- `modules/aws/workload-identity`'s `policy_statements` variable type had no `Condition`
+  field at all — meaning any IAM condition passed through this module was silently
+  dropped before Target 17 fixed it (`Condition = optional(map(map(string)))` + a
+  null-strip render). `optional(any)` does NOT work here — heterogeneous condition value
+  shapes can't unify for a `list(object)`. If this batch's tenant-IRSA test work touches
+  a condition whose value isn't a plain string/list, the module's type will need
+  widening again — check this before assuming a condition silently applies.
+- Target 17 added `role_policy_json` output plumbing to `cluster-addons` and the
+  gateway/pipeline/druid tenant modules + roots, following the existing `rag` module's
+  idiom. **Build this batch's tenant-IRSA test suites on those outputs** rather than
+  re-deriving a way to assert on rendered policy JSON from scratch.
+- Target 17 tested every IAM/KMS/bucket deny/condition it introduced directly, but
+  per-component attribute coverage is only representative for: the 4 SNS topics it
+  didn't directly test (cost/observability/service-quotas/backup — all got SSE-KMS, not
+  all got a dedicated assertion) and 3 app-bucket TLS-denies. Close that gap here.
+
 **Finding from Target 16 (PR #134):** `terraform_documented_variables`,
 `terraform_documented_outputs`, `terraform_unused_declarations`, and
 `terraform_required_providers` are all warning-severity tflint rules, but CI runs
