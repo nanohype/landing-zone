@@ -208,7 +208,7 @@ TGW attachment ID) to be non-empty, not just the destination CIDR.
 
 ## Target 2 — IP + auth hygiene on the cluster addon config (S) ✅
 
-**Shipped.** Resolution of the one open evaluation:
+**Shipped (landing-zone#143, squash-merged).** Resolution of the one open evaluation:
 `MINIMUM_IP_TARGET` was deliberately **not** set. AWS's prefix-mode guidance is explicit
 that `WARM_IP_TARGET`/`MINIMUM_IP_TARGET` *override* `WARM_PREFIX_TARGET` and only earn
 their keep when IPv4 space is scarce enough to ration. The create-mode /16 and
