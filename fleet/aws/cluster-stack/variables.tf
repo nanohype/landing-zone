@@ -108,10 +108,58 @@ variable "system_node_disk_size" {
 }
 
 # --- network ----------------------------------------------------------------
+variable "network_mode" {
+  description = "create (default) — the stack owns the VPC. adopt — the stack participates in a VPC it does not own (same-account shared, or cross-account via RAM), referencing it by adopt_* IDs. In adopt mode the cluster's subnet-ownership tags are gated off (the network owner owns tagging)."
+  type        = string
+  default     = "create"
+}
+
 variable "vpc_cidr" {
-  description = "CIDR block for the VPC"
+  description = "CIDR block for the VPC (create mode, literal allocation). Mutually exclusive with ipam_pool_id."
   type        = string
   default     = "10.0.0.0/16"
+}
+
+variable "ipam_pool_id" {
+  description = "IPAM pool the VPC CIDR is drawn from (create mode). Empty (default) = literal allocation from vpc_cidr."
+  type        = string
+  default     = ""
+}
+
+variable "ipam_netmask_length" {
+  description = "Netmask length of the VPC CIDR to allocate from ipam_pool_id (e.g. 16). 0 (default) = literal allocation."
+  type        = number
+  default     = 0
+}
+
+variable "transit_gateway_id" {
+  description = "Transit gateway the VPC attaches to (create mode). Empty (default) = local NAT egress only. Requires an IPAM-allocated CIDR when set."
+  type        = string
+  default     = ""
+}
+
+variable "centralized_egress" {
+  description = "Route private egress through the transit gateway instead of local NAT (create mode). false (default) = local NAT. Requires transit_gateway_id."
+  type        = bool
+  default     = false
+}
+
+variable "adopt_vpc_id" {
+  description = "VPC ID to adopt (adopt mode). Required when network_mode = adopt."
+  type        = string
+  default     = ""
+}
+
+variable "adopt_private_subnet_ids" {
+  description = "Private subnet IDs in the adopted VPC (adopt mode). Required, non-empty, when network_mode = adopt."
+  type        = list(string)
+  default     = []
+}
+
+variable "adopt_public_subnet_ids" {
+  description = "Public subnet IDs in the adopted VPC (adopt mode). Empty is valid for a private-only cluster."
+  type        = list(string)
+  default     = []
 }
 
 variable "max_azs" {

@@ -81,6 +81,18 @@ variable "public_subnet_ids" {
   type        = list(string)
 }
 
+variable "stamp_subnet_tags" {
+  description = <<-EOT
+    Stamp this cluster's kubernetes.io/cluster/<cluster>=shared ownership tag onto the
+    shared subnets (aws_ec2_tag). true (default) when the cluster owns or shares an
+    in-account VPC. Set false when the cluster adopts a VPC it does not own (a
+    cross-account VPC shared over RAM): a participant cannot tag a foreign-owned
+    subnet, so the network owner (shared-network) owns subnet tagging in that topology.
+  EOT
+  type        = bool
+  default     = true
+}
+
 # Cluster access
 variable "cluster_endpoint_public_access" {
   description = "Enable public API endpoint — explicit opt-in; private by default (requires VPC endpoints for eks and eks-auth when false)"

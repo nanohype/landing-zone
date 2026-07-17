@@ -12,9 +12,14 @@
 # would collide (last-write-wins, and the loser's Karpenter finds no subnets). Karpenter's
 # node-SG selection uses karpenter.sh/discovery on the PER-CLUSTER node security group
 # (see cluster/eks.tf) — a per-cluster resource, so no sharing and no collision there.
+#
+# stamp_subnet_tags gates this off in the cross-account adopt topology: a participant
+# cannot write a tag on a subnet owned by another account (a RAM-shared subnet), so the
+# network owner (shared-network) owns subnet tagging there. In create mode (default) the
+# cluster owns or co-shares an in-account VPC and stamps its own ownership tag here.
 
 resource "aws_ec2_tag" "subnet_cluster_ownership" {
-  for_each = toset(concat(var.private_subnet_ids, var.public_subnet_ids))
+  for_each = var.stamp_subnet_tags ? toset(concat(var.private_subnet_ids, var.public_subnet_ids)) : toset([])
 
   resource_id = each.value
   key         = "kubernetes.io/cluster/${local.cluster_name}"
