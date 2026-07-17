@@ -18,7 +18,7 @@ intentionally — never bulk-delete them.
 |---|---|---|
 | 2 | Broken layers + gates | ✅ #132 |
 | 2b | Cluster-secret annotations for velero + external-dns | ✅ #133 |
-| 16 | Naming/tagging cap-clearers | ☐ |
+| 16 | Naming/tagging cap-clearers | ✅ #134 |
 | 17 | Security batch | ☐ |
 | 18 | Testing batch | ☐ |
 | 19 | Docs + agent surface | ☐ |
