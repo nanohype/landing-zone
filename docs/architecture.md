@@ -69,6 +69,7 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
 | Component | Depends On | Receives |
 |-----------|-----------|----------|
 | **network** | -- | -- |
+| **shared-network** | -- (org IPAM pool discovered by tag, cross-account via RAM) | -- |
 | **cluster** | network | vpc_id, private_subnet_ids, public_subnet_ids |
 | **cluster-addons** | cluster | cluster_name, oidc_provider_arn, oidc_issuer |
 | **cluster-bootstrap** | cluster | cluster_name, cluster_endpoint, cluster_certificate_authority_data |
@@ -120,11 +121,35 @@ Components deployed once in the management account to establish cross-account go
 
 Provisions the network foundation for each environment:
 
-- VPC with configurable CIDR
+- VPC with configurable CIDR (literal or IPAM-drawn), `create` or `adopt` mode
 - Subnet tiers: public, private, intra (across AZs)
-- NAT gateways (1/2/3 by environment)
-- VPC endpoints (optional)
+- NAT gateways (1/2/3 by environment), or centralized egress via the transit gateway
+- VPC endpoints (optional, via the shared `eks-vpc-endpoints` module)
 - VPC flow logs (staging + production)
+
+In `adopt` mode the component builds nothing — it resolves an existing VPC and subnet IDs
+(same-account or cross-account via RAM) and re-exports them through the same outputs, with a
+consumer-side preflight that fails at `plan` if the adopted network is missing the S3 gateway
+route or a live default egress route.
+
+### Shared Network Layer
+
+**Component:** `shared-network` (network-owner account)
+
+The owner side of the cross-account `adopt` topology. A central network-owner account runs
+one shared VPC per environment and RAM-shares its subnets to the workload accounts that adopt
+them — the seam that lets a workload cluster participate in a VPC it does not own:
+
+- VPC with an IPAM-drawn CIDR (from the org env sub-pool, discovered by tag)
+- the full private endpoint set (owner-run — a participant cannot endpoint a foreign VPC)
+- owner-run egress (local NAT or a transit gateway to a central egress hub)
+- ELB role tags only, deliberately no per-cluster ownership tag (a shared VPC binds to no
+  single cluster)
+- RAM share of the subnets to `consumer_account_ids`, plus owner-side contract `check` blocks
+
+The workload account then runs `network` in `adopt` mode against the shared subnet IDs and a
+`cluster` with `stamp_subnet_tags = false`. See `components/aws/shared-network/README.md` for
+the full owner↔consumer contract.
 
 ### Cluster Layer
 
