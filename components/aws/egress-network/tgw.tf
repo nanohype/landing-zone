@@ -15,15 +15,20 @@ resource "aws_ec2_transit_gateway_vpc_attachment" "this" {
   vpc_id             = module.vpc.vpc_id
   subnet_ids         = module.vpc.private_subnets
 
-  # Cross-account attachment to the org-owned, RAM-shared TGW. A TGW participant cannot
-  # manage the owner's route-table associations or propagations — AWS blocks it — so these
-  # stay false. The owner's TGW (org-networking: default_route_table_association and
-  # default_route_table_propagation = enable, auto_accept_shared_attachments = enable)
-  # auto-accepts this attachment and associates + propagates it into the default route table
-  # from the owner side. Leaving these at their true defaults would make this participant
-  # apply attempt an association it has no permission for.
-  transit_gateway_default_route_table_association = false
-  transit_gateway_default_route_table_propagation = false
+  # transit_gateway_default_route_table_association / _propagation are deliberately left
+  # unset (Optional + Computed) on this cross-account, RAM-shared TGW attachment. The AWS
+  # provider gates the owner-side association/propagation call behind an owner-ID check: on a
+  # shared TGW it skips that call entirely at Create — a participant has no permission to run
+  # it — and then Read hardcodes both attributes back to true (the provider's own comment
+  # notes drift detection on this field is intentionally impossible for a shared attachment).
+  # So configuring either as false prevents nothing at create time; it instead pins a
+  # permanent true -> false diff on every plan, and applying that diff hits the provider's
+  # unconditioned Update path, which really does call the owner-only
+  # DisassociateTransitGatewayRouteTable / DisableTransitGatewayRouteTablePropagation API from
+  # this participant account and fails. Left unset, the attributes produce no diff. The
+  # owner's TGW (org-networking: default association + propagation + auto_accept_shared_
+  # attachments, all enabled) accepts this attachment and associates + propagates it into the
+  # default route table from the owner side.
 
   # Stateful NAT sits behind this attachment. Appliance mode pins each flow to a single AZ so
   # the return path lands on the same NAT gateway that saw the forward path — without it,

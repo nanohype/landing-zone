@@ -39,6 +39,23 @@ per-environment TGW route tables and associate each environment's spoke attachme
 own table; that is a deliberate future addition, not something this component can do from a
 participant account.
 
+### Shared-hub blast radius
+
+One hub across all environments means development, staging, and production **share this hub's
+NAT gateways** — both their public source IPs and their port capacity:
+
+- **Shared source IPs.** Every environment's outbound traffic leaves from the same NAT gateway
+  Elastic IPs, so a third party cannot allowlist "production only" by egress IP — dev and
+  staging present the same addresses. If per-environment egress-IP allowlisting is a
+  requirement, that needs per-environment egress hubs (the per-env TGW route table addition
+  above), not a shared one.
+- **Shared port capacity.** A NAT gateway has a finite pool of simultaneous connections per
+  destination. A runaway non-production workload (a load test, a retry storm) that saturates
+  the NAT gateways can degrade production egress through the same hub — there is no
+  per-environment isolation of NAT capacity here. Size the hub for the aggregate and keep an
+  eye on the NAT `ErrorPortAllocation` metric; move to per-environment hubs if non-prod noise
+  starts to threaten prod egress.
+
 ## Split responsibility: why the static route is not here
 
 This component builds everything a TGW **participant** is permitted to build:
@@ -61,10 +78,17 @@ route is created by **`org-networking`** (the TGW owner, management account), wh
 `egress_tgw_attachment_id` input for exactly this. This component publishes
 `tgw_attachment_id` for the owner to target.
 
-For the same reason, the attachment sets
-`transit_gateway_default_route_table_association = false` and
-`transit_gateway_default_route_table_propagation = false`: a participant cannot manage the
-owner's route-table associations. The owner's TGW (with default association + propagation and
+For the same reason, the attachment leaves
+`transit_gateway_default_route_table_association` and
+`transit_gateway_default_route_table_propagation` **unset** rather than configuring them.
+The AWS provider gates the owner-side association/propagation call behind an owner-ID check:
+on a shared TGW it skips that call entirely at create (a participant has no permission to run
+it), then reports both attributes as `true` on read. Configuring either as `false` therefore
+prevents nothing — it just pins a permanent `true -> false` diff on every plan, and applying
+that diff hits the provider's unconditioned update path, which does call the owner-only
+disassociate/disable API from this participant account and fails (a recurring, unfixable drift
+finding under this repo's scheduled drift detection). Left unset, the attributes produce no
+diff. The owner's TGW (with default association + propagation and
 `auto_accept_shared_attachments` all enabled) auto-accepts the attachment and associates +
 propagates it into the default route table from the owner side.
 
@@ -91,7 +115,11 @@ The egress VPC uses a **dedicated** CIDR (`egress_vpc_cidr`, default `100.64.0.0
 workload IPAM space. It must sit outside the org workload supernet (`spoke_supernet_cidr`,
 default `10.0.0.0/8`) so it never overlaps a spoke drawn from the org IPAM pools — an overlap
 would break TGW routing. Carrier-grade NAT space (`100.64.0.0/10`, RFC 6598) is the
-recommended home. `checks.tf` fails the plan if the two overlap.
+recommended home. `checks.tf` carries a bidirectional overlap check (it catches either CIDR
+nested inside the other). Like every tofu `check` block it only *warns* at a real `plan` /
+`apply` — it does not hard-fail an operator's apply — but a `tofu test` run treats a failing
+check as a hard failure (the suite gates it via `expect_failures`), so an overlapping change
+cannot merge through CI even though it would not block a live apply.
 
 ## Activation sequence
 
@@ -140,6 +168,8 @@ discipline, not an AWS backstop:
 ## Testing
 
 `tofu test` (`tests/egress-network.tftest.hcl`) covers, against a mocked provider: the default
-hub (VPC + single NAT + cross-account TGW attachment with appliance mode on and owner-managed
-association/propagation off + the spoke return route), per-AZ NAT, the in-between
-`nat_gateways` rejection, and the CIDR-overlaps-supernet contract check.
+hub (VPC + single NAT + cross-account TGW attachment with appliance mode on + the spoke return
+route), per-AZ NAT, the in-between `nat_gateways` rejection, the CIDR-overlaps-supernet
+contract check in both directions (egress inside the supernet, and the reverse — a supernet
+nested inside a wider egress CIDR), and a malformed `spoke_supernet_cidr` rejected by variable
+validation.

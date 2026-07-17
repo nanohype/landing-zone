@@ -2,12 +2,15 @@
 # access), so it gates the hub's owner-side behavior + contract:
 #
 #   default_hub         — VPC + one shared NAT + a cross-account TGW attachment (appliance
-#                         mode on, owner-managed association/propagation off) + a spoke
-#                         return route on the public route table.
+#                         mode on) + a spoke return route on the public route table.
 #   nat_per_az          — nat_gateways = max_azs plans one NAT gateway per zone.
 #   nat_rejects_between  — an explicit nat_gateways between 1 and max_azs is rejected.
 #   cidr_overlaps_supernet — an egress CIDR inside the workload supernet fails the contract
 #                            check (would collide with a spoke and break TGW routing).
+#   supernet_nested_in_egress — the reverse nesting (supernet inside a wider egress CIDR)
+#                            also fails the contract check (bidirectional overlap).
+#   invalid_supernet_cidr — a malformed spoke_supernet_cidr is rejected by variable
+#                            validation with a clear message, before the overlap check runs.
 
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
@@ -40,10 +43,6 @@ run "default_hub" {
   assert {
     condition     = aws_ec2_transit_gateway_vpc_attachment.this.appliance_mode_support == "enable"
     error_message = "appliance mode must be enabled so stateful NAT flows stay pinned to one AZ"
-  }
-  assert {
-    condition     = aws_ec2_transit_gateway_vpc_attachment.this.transit_gateway_default_route_table_association == false && aws_ec2_transit_gateway_vpc_attachment.this.transit_gateway_default_route_table_propagation == false
-    error_message = "a cross-account TGW attachment must leave owner-managed association/propagation to the TGW owner (false here)"
   }
   assert {
     condition     = length(aws_route.spoke_return) >= 1
@@ -94,5 +93,35 @@ run "cidr_overlaps_supernet" {
 
   expect_failures = [
     check.egress_cidr_outside_spoke_supernet,
+  ]
+}
+
+# ── contract: the reverse nesting (supernet inside a wider egress CIDR) must also fail ──
+# The original one-directional check only caught egress-inside-supernet; this fixture pins
+# the bidirectional behavior. Here the /24 supernet sits inside the /16 egress block, which
+# the egress-inside-supernet test alone would have missed.
+run "supernet_nested_in_egress" {
+  command = plan
+
+  variables {
+    egress_vpc_cidr     = "100.64.0.0/16"
+    spoke_supernet_cidr = "100.64.5.0/24"
+  }
+
+  expect_failures = [
+    check.egress_cidr_outside_spoke_supernet,
+  ]
+}
+
+# ── validation: a malformed spoke_supernet_cidr is rejected before the overlap check runs ──
+run "invalid_supernet_cidr" {
+  command = plan
+
+  variables {
+    spoke_supernet_cidr = "not-a-cidr"
+  }
+
+  expect_failures = [
+    var.spoke_supernet_cidr,
   ]
 }
