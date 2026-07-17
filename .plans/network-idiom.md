@@ -18,7 +18,7 @@ comments, or docs (greenfield doctrine).
 | 1-fix | adopt preflight precision + validation gaps + IPAM day-2 replan bug (Fable review) | ✅ |
 | 3 | `shared-network` owner component + RAM share + contract | ✅ |
 | 3-fix | teardown docs + vacuous tag check + IPAM discovery + NAT mapping + intra-subnet cleanup (Fable review) | ✅ |
-| 3b | `egress-network` owner component (central-egress VPC + TGW static default route) | ⬜ |
+| 3b | `egress-network` owner component (central-egress VPC + TGW static default route) | ✅ |
 | 4 | cluster-bootstrap publishes network_mode + adopt subnet IDs (public + private) | ⬜ |
 
 Run these **serialized, in order** (1 → 2 → 1-fix → 3 → 3-fix → 3b → 4) — never two
@@ -769,6 +769,67 @@ item 3.
 ---
 
 ## Target 3b — `egress-network` owner component: central-egress VPC + TGW static default route (M)
+
+**Shipped.** New `components/aws/egress-network` (main/tgw/checks/variables/outputs/versions
++ smoke-test + README + tofu test suite + tracked lock), an additive owner-side static route
+in `components/aws/org-networking` (egress_route.tf + `egress_tgw_attachment_id` var + a new
+tofu test suite), envcommon `live/_envcommon/aws/egress-network.hcl`, and a single hub live
+leaf under a new `hub` env slot in the network account
+(`live/aws/network/us-west-2/hub/{env.hcl, egress-network/terragrunt.hcl}`). Resolution
+decisions worth recording:
+- **KEY FINDING — the static `0.0.0.0/0` TGW route is owner-only, so it moved to
+  `org-networking`, NOT `egress-network`.** AWS's
+  [shared transit gateway docs](https://docs.aws.amazon.com/vpc/latest/tgw/transit-gateway-share.html)
+  are explicit: *"When a transit gateway is shared with you, you cannot create, modify, or
+  delete its transit gateway route tables, or its transit gateway route table propagations
+  and associations."* A participant may only create/describe attachments and describe the
+  TGW; running the route-table APIs is reserved to the owner. `egress-network` runs in the
+  network-owner account (a TGW **participant** — the TGW is owned by `org-networking` in the
+  management account and RAM-shared in), so it physically cannot create the static route the
+  plan assigned to it — the apply would fail cross-account. Building it there anyway would
+  reproduce the exact "documented-but-non-functional knob" this target exists to eliminate.
+  Fix (the closest correct behavior, mirroring Target 3-fix's "exactly-2-NAT is impossible →
+  implement what the module actually supports" precedent): `egress-network` builds everything
+  a participant is permitted to build (VPC + NAT + the cross-account TGW attachment + the
+  spoke return route) and outputs `tgw_attachment_id`; `org-networking` (the TGW owner) gains
+  an additive, default-off `egress_tgw_attachment_id` input and creates the static
+  `0.0.0.0/0` route in its own default route table pointing at that attachment. This touches
+  `org-networking` (which the plan scoped as "unchanged") — the change is minimal, additive,
+  and inert by default (empty attachment id = no route), so `org-networking`'s committed tree
+  stays inert per N3.
+- **Cross-account attachment leaves owner-managed association/propagation to the owner.** For
+  the same reason, the attachment sets `transit_gateway_default_route_table_association =
+  false` and `_propagation = false` — a participant cannot manage the owner's route-table
+  associations. The owner's TGW (default association + propagation + `auto_accept_shared_
+  attachments`, all already enabled in `org-networking`) auto-accepts, associates, and
+  propagates it from the owner side. **Latent-sibling note:** `network` and `shared-network`
+  leave these at their `true` defaults on their own TGW attachments — same participant
+  context, so those would also fail at a first real cross-account apply. Not fixed here (out
+  of scope, one target at a time); recorded as a follow-up in the master plan's open items.
+- **One egress hub per TGW → a single `hub` leaf, not per-env.** The static default route
+  lives in the single org TGW's single default route table, which holds exactly one
+  `0.0.0.0/0` entry. Per-env egress hubs would all attach to that one TGW and collide on the
+  one static-route slot. The org runs a single TGW (`org-networking`, one management-account
+  deployment, RAM-shared org-wide), so there is a single egress hub across all environments.
+  It is instantiated once under a new `hub` env slot (`live/aws/network/us-west-2/hub/`,
+  `environment = "hub"`, mirroring how the management account uses an `org` env for its
+  org-wide singletons) rather than per-env. Per-env egress isolation would require
+  `org-networking` to grow per-env TGW route tables + spoke-attachment associations — a
+  deliberate future addition, noted for Target 4-and-later, not doable from a participant.
+- **Dedicated CIDR, not IPAM (per the 3-fix inheritance note).** `egress_vpc_cidr` defaults
+  to `100.64.0.0/24` (RFC 6598 CGNAT), outside the `10.0.0.0/8` workload supernet so it never
+  overlaps a spoke. No `data.aws_vpc_ipam_pools` tag discovery. `checks.tf` fails the plan if
+  `egress_vpc_cidr` overlaps `spoke_supernet_cidr` (a `cidrhost`-projection overlap test,
+  gated by the `cidr_overlaps_supernet` fixture). Public + NAT-facing private subnets only —
+  no intra tier. NAT count reuses the validated `{1 | max_azs}` idiom (hub leaf uses per-AZ 3
+  for HA). Appliance mode enabled on the attachment so stateful NAT flows stay AZ-pinned.
+- **Return routing.** NAT lives in the public subnets, so the spoke-return route
+  (`spoke_supernet_cidr -> TGW`, default `10.0.0.0/8`) goes on the PUBLIC route tables; the
+  private (TGW-facing) subnets keep the module's default `0.0.0.0/0 -> NAT`. Full path traced
+  in the component README; the `network` `centralized_egress` fixture is the spoke side.
+- **Lock pinned to 6.54.0** (byte-identical to `network`'s tracked lock, same VPC module +
+  provider constraints) rather than the 6.55.0 a fresh `init` resolves — avoids repeating the
+  `shared-network` lock drift.
 
 **Depends on:** Target 1 (network var-naming conventions; no other coupling — this
 is a standalone component, independent of Target 3's `shared-network`).

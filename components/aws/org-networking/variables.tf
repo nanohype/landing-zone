@@ -51,6 +51,24 @@ variable "ram_principals" {
   default     = []
 }
 
+variable "egress_tgw_attachment_id" {
+  description = <<-EOT
+    The TGW VPC attachment of the central-egress hub (the egress-network component in the
+    network-owner account). When set, a static 0.0.0.0/0 route to this attachment is added to
+    the transit gateway's default route table, steering every spoke that runs centralized
+    egress at the hub. Empty (default) = no central-egress route (the additive lever stays
+    off). A TGW participant cannot write the owner's route tables, so this route can only be
+    created here, on the owner side — the egress hub publishes the attachment ID for it.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.egress_tgw_attachment_id == "" || can(regex("^tgw-attach-[0-9a-f]+$", var.egress_tgw_attachment_id))
+    error_message = "egress_tgw_attachment_id must be empty or a transit gateway attachment ID (tgw-attach-...)."
+  }
+}
+
 ################################################################################
 # IPAM
 ################################################################################
