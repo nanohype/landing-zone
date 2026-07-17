@@ -1,3 +1,5 @@
+# Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
+# tflint-ignore: terraform_unused_declarations
 variable "environment" {
   description = "Environment name (development, staging, production)"
   type        = string
@@ -28,12 +30,6 @@ variable "alert_email_endpoints" {
   default     = []
 }
 
-variable "slack_webhook_url" {
-  description = "Slack webhook URL for alerts (stored in SNS -> Lambda or Chatbot)"
-  type        = string
-  default     = ""
-}
-
 variable "enable_cluster_alarms" {
   description = "Enable EKS CloudWatch alarms"
   type        = bool
@@ -62,12 +58,6 @@ variable "alarm_config" {
     api_server_error_threshold   = 5
     api_server_latency_threshold = 3000
   }
-}
-
-variable "log_retention_days" {
-  description = "CloudWatch log group retention in days"
-  type        = number
-  default     = 30
 }
 
 variable "team" {

@@ -3,6 +3,8 @@ variable "environment" {
   type        = string
 }
 
+# Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
+# tflint-ignore: terraform_unused_declarations
 variable "region" {
   description = "AWS region."
   type        = string

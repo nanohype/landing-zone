@@ -43,9 +43,13 @@ tasks:
     desc: Run tflint on components, fleet vend roots, and shared modules
     cmds:
       - tflint --init --config "$PWD/.tflint-aws.hcl"
-      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=components/aws --minimum-failure-severity=error
-      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=fleet/aws --minimum-failure-severity=error
-      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=modules/aws --minimum-failure-severity=error
+      # Gate at `notice` so every enabled rule is a hard failure. tflint severities are
+      # fixed per rule (documented-variables/outputs are `notice`; unused-declaration
+      # and required-version/providers are `warning`); a higher floor would let those
+      # slip through. Uniform envcommon interface variables carry inline tflint-ignore.
+      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=components/aws --minimum-failure-severity=notice
+      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=fleet/aws --minimum-failure-severity=notice
+      - tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=modules/aws --minimum-failure-severity=notice
 
   check:mocks:
     desc: Cross-check dependency mock_outputs keys against real component outputs

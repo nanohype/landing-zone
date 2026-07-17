@@ -6,8 +6,7 @@ locals {
   account_id   = data.aws_caller_identity.current.account_id
   partition    = data.aws_partition.current.partition
 
-  oidc_issuer       = replace(module.eks.cluster_oidc_issuer_url, "https://", "")
-  oidc_provider_arn = module.eks.oidc_provider_arn
+  oidc_issuer = replace(module.eks.cluster_oidc_issuer_url, "https://", "")
 
   # "" (the unset default, same-account) → null so the role-minting modules attach
   # no boundary. Single conversion point — every module input references this local,

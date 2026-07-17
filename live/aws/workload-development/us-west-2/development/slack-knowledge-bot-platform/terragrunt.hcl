@@ -23,6 +23,5 @@ inputs = {
   redis_multi_az           = false
 
   # Audit retention: shorter in development so the bucket doesn't accumulate
-  audit_ttl_days          = 30
   audit_s3_lifecycle_days = 90
 }
