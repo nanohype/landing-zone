@@ -573,19 +573,21 @@ rackctl as the owner of the fragile input.
 
 ## Additional scope discovered mid-campaign (not yet assigned a target)
 
-**`tenants-protohype` namespace default (found by Target 16, PR #134):** the four
-`*-platform` components' `namespace` variable still defaults to `tenants-protohype` — a
-retired incubator codename (see `feedback_codename_full_rename` history: the rest of the
-org's cross-layer codename rename was completed, this default is residue or a deliberate
-leftover, unclear which). Target 16 deliberately left it alone because the namespace
-value is part of the cross-repo Platform-CR/eks-gitops contract (the operator reconciles
-against whatever namespace the chart's Platform CR declares) — changing it here without
-coordinating the consuming side risks a live mismatch, not just a cosmetic rename.
+**`tenants-protohype` namespace default — resolved as unrelated to eks-gitops'
+`protohypd`, still stale on its own merits (found by Target 16, PR #134; cross-repo
+question closed by eks-gitops Target 21, PR #130).** The four `*-platform` components'
+`namespace` variable still defaults to `tenants-protohype`. eks-gitops Target 21
+confirmed this is a **different** retired-codename identity than `protohypd` (which was
+an unrelated example-tenant name on the `ops` Platform, renamed to `platform-ops`) — no
+cross-repo coordination is needed, that question is closed.
 
-**Cross-link:** eks-gitops' Target 21 already renames a related stale reference —
-`addons/ai-platform/agent-platform/base/platform.yaml`'s example tenant `protohypd`
-(a typo'd variant of the same retired name). Whoever picks up either rename should check
-the other repo first: if these are meant to be the same tenant identity, coordinate the
-change; if they're unrelated (one's a namespace default, the other's an example tenant
-id), say so explicitly and proceed independently. Not blocking any other target — flagged
-here so it isn't lost, per the campaign's "fix everything found" doctrine.
+What's still genuinely open: `tenants-protohype` is the shared namespace default for the
+four promoted protohype-team apps (competitive-intelligence, digest-pipeline,
+incident-response, slack-knowledge-bot), but eks-gitops' `apps-tenants` ApplicationSet
+now provisions per-app `tenants-<app>` namespaces, not one shared namespace — so this
+default doesn't match the namespace shape the consuming side actually uses. Low
+urgency: not a cap, not broken CI, and (per Target 2's findings) these four components'
+live wiring has its own open questions independent of this. Worth a small dedicated
+target whenever this repo's queue is revisited — rename the default to match the
+per-app `tenants-<app>` convention, verified against what the operator/Platform CR
+actually reconciles against before changing it.
