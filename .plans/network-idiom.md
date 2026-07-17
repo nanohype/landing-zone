@@ -14,15 +14,107 @@ comments, or docs (greenfield doctrine).
 | # | target | status |
 |---|---|---|
 | 1 | network + cluster mode-aware; create IPAM/TGW levers; shared endpoint module; adopt preflight | ✅ |
-| 2 | IP + auth hygiene on cluster addon config | ⬜ |
+| 2 | IP + auth hygiene on cluster addon config | ✅ |
+| 1-fix | adopt preflight precision + validation gaps (Fable review) | ⬜ |
 | 3 | `shared-network` owner component + RAM share + contract | ⬜ |
 | 4 | cluster-bootstrap publishes network_mode + adopt subnet IDs | ⬜ |
 
-Run these **serialized, in order** (1 → 2 → 3 → 4) — never two agents in this repo
-concurrently. Every target ends in a PR (never a direct push to `main`, even though
-this repo's branch protection allows an admin bypass), CI green (poll `gh pr checks`
-synchronously in the foreground — no backgrounded `--watch`, no ending your turn to
-wait on it), then squash-merge.
+Run these **serialized, in order** (1 → 2 → 1-fix → 3 → 4) — never two agents in this
+repo concurrently. Every target ends in a PR (never a direct push to `main`, even
+though this repo's branch protection allows an admin bypass), CI green (poll
+`gh pr checks` synchronously in the foreground — no backgrounded `--watch`, no ending
+your turn to wait on it), then squash-merge.
+
+---
+
+## Target 1-fix — adopt preflight precision + validation gaps (S)
+
+**Depends on:** Target 2 (serialized after it in this repo — already merged, so this
+is next). **Blocks Target 3** — Target 3's `shared-network` README documents the
+exact contract this preflight checks; that documentation needs to describe accurate
+behavior, not the current looser-than-intended one.
+
+**Context:** an independent post-merge review (Fable, adversarial, ran real probe
+fixtures against a scratchpad copy of the component — repo itself untouched) found
+four confirmed defects in Target 1's adopt-mode preflight and validation logic.
+These are real, execution-verified findings, not style preferences — fix them
+before Target 3 builds on this foundation.
+
+**Findings (confirmed via execution):**
+
+1. **The S3-gateway-route assertion in `adopt.tf` matches too loosely.** It currently
+   accepts *any* route with a non-empty `destination_prefix_list_id` as proof the S3
+   gateway route exists — a probe fixture with only a DynamoDB-shaped prefix-list
+   route (no S3 route at all) passed the preflight. Similarly, the default-egress
+   assertion accepts *any* route with destination `0.0.0.0/0` regardless of its
+   target — a probe fixture with a blackholed default route (empty target, e.g. from
+   a deleted NAT) also passed. Concrete failure: an owner network missing the S3
+   gateway route, or with a dead default route, plans clean in `adopt` mode and only
+   fails later at cluster bootstrap — exactly the silent-until-cluster-Ready failure
+   class this preflight exists to prevent.
+2. **`ipam_netmask_length` validation (`variables.tf`) accepts 16-28, but subnet
+   carving is fixed at `newbits=8`** — anything above 24 passes validation then dies
+   with a raw, unhelpful `cidrsubnet` "insufficient address space" provider error.
+   Cap the validated range at 24 (or lower, since a /24 base yields /32 subnets —
+   pick a floor that leaves room for `max_azs` × 3 subnet tiers).
+3. **`network_mode=adopt` silently ignores create-mode levers instead of rejecting
+   the combination.** Setting `network_mode=adopt` together with `ipam_pool_id`,
+   `transit_gateway_id`, or `centralized_egress=true` plans clean — every lever is
+   silently no-op'd (all gate on `local.create_mode`). Symmetric case (`create` mode
+   with `adopt_*` fields set) is also silently ignored. This contradicts the
+   component's own stated design posture (documented at `variables.tf` near the
+   mode field: reject contradictory input, don't silently ignore one side of it).
+   Add validation blocks rejecting cross-mode field combinations.
+4. **`stamp_subnet_tags` is only auto-derived from `network_mode` on the fleet path**
+   (`fleet/aws/cluster-stack/main.tf`), not on the terragrunt live-tree path
+   (`live/_envcommon/aws/cluster.hcl`). A terragrunt-driven adopt cluster requires an
+   operator to manually set both `network_mode=adopt` on `network` AND
+   `stamp_subnet_tags=false` on `cluster` — miss the second one and a cross-account
+   `apply` fails late with `UnauthorizedOperation` on `CreateTags`, the exact
+   late-failure class the preflight was built to kill. Wire
+   `live/_envcommon/aws/cluster.hcl` to derive `stamp_subnet_tags` from the
+   network dependency's `network_mode` output, matching the fleet path's pattern —
+   don't leave this as a two-knob manual contract.
+5. **Minor:** `outputs.tf`'s comment claiming private route tables are "one per
+   private subnet" is false in create mode with `nat_gateways=1` (one shared table)
+   and can return duplicates in adopt mode. Fix the comment; note for whoever
+   implements Targets 4/5 status plumbing that it shouldn't assume a 1:1 subnet-to-
+   route-table relationship.
+6. **Also fix the temporal-framing doctrine nit** flagged in the same review:
+   `network/variables.tf`'s `network_mode` description parenthetical "(the default;
+   today's only behavior)" reads as accreted, not designed — reword to describe the
+   end state plainly (e.g. just "the default" or similar, no "today's only" framing).
+
+**Not required in this target, but read Target 3's spec for it:** the review's
+finding that `data.aws_route_table` (keyed on `subnet_id`) only matches explicit
+route-table associations, not a subnet riding the VPC's implicit main route table —
+producing a generic provider error instead of a contract-violation message for a
+hand-built (non-terraform-aws-modules) owner network. This is being handled as a
+Target 3 contract requirement (mandate explicit associations in the `shared-network`
+README) rather than a Target 1 code change, since the module-built owner network
+Target 3 ships is already compliant.
+
+**Approach:** fix items 1-6 directly in `components/aws/network/adopt.tf`,
+`variables.tf`, `outputs.tf`, and `live/_envcommon/aws/cluster.hcl`. For item 1, use
+`data.aws_ec2_managed_prefix_list` (filtered on the AWS-managed S3 prefix list name
+for the target region, `com.amazonaws.<region>.s3`) to assert the *exact* prefix
+list ID is routed, and require the default-egress route's target (NAT gateway ID or
+TGW attachment ID) to be non-empty, not just the destination CIDR.
+
+**Acceptance:**
+- Re-run the review's three probe scenarios (or equivalent new test cases added to
+  `components/aws/network/tests/network.tftest.hcl`) and confirm each now fails at
+  `plan` with a clear message: (a) owner route table missing the S3 gateway route
+  entirely, (b) owner default route present but with an empty/blackholed target,
+  (c) `adopt` mode with a create-mode lever set (and the symmetric `create` +
+  `adopt_*` case).
+- `ipam_netmask_length=26` (or any value >24) fails at `tofu validate`/plan with the
+  variable's own validation message, not a raw `cidrsubnet` provider error.
+- A terragrunt render/plan against a `cluster` live leaf shows `stamp_subnet_tags`
+  correctly derived from the paired `network` leaf's `network_mode` — no manual
+  second knob required.
+- `task fmt:check`, `task validate`, `task lint`, `tofu test` all green (full
+  existing suite plus the new fixtures).
 
 ---
 
@@ -114,7 +206,17 @@ wait on it), then squash-merge.
 
 ---
 
-## Target 2 — IP + auth hygiene on the cluster addon config (S)
+## Target 2 — IP + auth hygiene on the cluster addon config (S) ✅
+
+**Shipped.** Resolution of the one open evaluation:
+`MINIMUM_IP_TARGET` was deliberately **not** set. AWS's prefix-mode guidance is explicit
+that `WARM_IP_TARGET`/`MINIMUM_IP_TARGET` *override* `WARM_PREFIX_TARGET` and only earn
+their keep when IPv4 space is scarce enough to ration. The create-mode /16 and
+owner-sized adopt subnets aren't scarce, and one warm `/28` already covers the system
+node group's steady pod set — so a floor would only turn `WARM_PREFIX_TARGET` into dead
+config. Final vpc-cni `configuration_values`: `ENABLE_PREFIX_DELEGATION=true` (unchanged)
++ `WARM_PREFIX_TARGET=1`. The STS/Pod-Identity note is a comment on the
+`eks-pod-identity-agent` addon block. No downstream-target impact.
 
 **Depends on:** Target 1 (serialized after it in this repo; no functional dependency).
 

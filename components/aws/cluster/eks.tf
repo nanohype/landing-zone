@@ -59,8 +59,24 @@ module "eks" {
       most_recent                 = lookup(var.eks_addon_versions, "vpc-cni", null) == null
       before_compute              = true
       resolve_conflicts_on_create = "OVERWRITE"
+      # Prefix delegation packs a /28 (16 IPs) onto each ENI slot instead of a single
+      # secondary IP, so pod density stops being bounded by the instance's secondary-IP
+      # count. WARM_PREFIX_TARGET=1 is the AWS-recommended balance: keep exactly one
+      # spare /28 warm per node, so a fresh node can place pods immediately instead of
+      # serial-attaching IPs under burst scheduling — without hoarding a nodeful of
+      # unused addresses.
+      #
+      # MINIMUM_IP_TARGET is deliberately unset. It (with WARM_IP_TARGET) overrides
+      # WARM_PREFIX_TARGET and only earns its keep when IPv4 space is scarce enough to
+      # ration; the create-mode /16 and owner-sized adopt subnets are not, and one warm
+      # /28 already covers the system node group's steady pod set. Setting a floor here
+      # would turn WARM_PREFIX_TARGET into dead config. Mode-independent — cheap
+      # insurance against IP exhaustion whether the VPC is owned (create) or adopted.
       configuration_values = jsonencode({
-        env = { ENABLE_PREFIX_DELEGATION = "true" }
+        env = {
+          ENABLE_PREFIX_DELEGATION = "true"
+          WARM_PREFIX_TARGET       = "1"
+        }
       })
     }
     coredns = {
@@ -83,6 +99,16 @@ module "eks" {
       # IRSA/web-identity, which a Pod-Identity-only role can't satisfy and the
       # controller crashloops on.
     }
+    # Pod Identity is the platform-wide identity path: pods obtain role credentials from
+    # the agent's local endpoint, not via AssumeRoleWithWebIdentity against STS. The
+    # network also carries an eks-auth interface VPC endpoint, so credential vending
+    # never leaves the VPC — the global-STS-endpoint hang (a slow us-east-1 STS call
+    # stalling pod startup) does not apply to platform-managed identity, which is why no
+    # AWS_STS_REGIONAL_ENDPOINTS mutation is imposed cluster-wide here.
+    #
+    # It surfaces only for tenant workloads still on IRSA web-identity. Those wanting the
+    # regional-STS guarantee set AWS_STS_REGIONAL_ENDPOINTS=regional in their own pod
+    # spec — a per-workload opt-in the tenant owns, not a blanket cluster policy.
     eks-pod-identity-agent = {
       addon_version               = lookup(var.eks_addon_versions, "eks-pod-identity-agent", null)
       most_recent                 = lookup(var.eks_addon_versions, "eks-pod-identity-agent", null) == null
