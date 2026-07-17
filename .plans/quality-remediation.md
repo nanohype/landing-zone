@@ -16,7 +16,7 @@ intentionally — never bulk-delete them.
 
 | # | target | status |
 |---|---|---|
-| 2 | Broken layers + gates | ☐ |
+| 2 | Broken layers + gates | ✅ #132 |
 | 2b | Cluster-secret annotations for velero + external-dns | ☐ |
 | 16 | Naming/tagging cap-clearers | ☐ |
 | 17 | Security batch | ☐ |
