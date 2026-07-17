@@ -21,7 +21,7 @@ intentionally — never bulk-delete them.
 | 16 | Naming/tagging cap-clearers | ✅ #134 |
 | 17 | Security batch | ✅ #136 |
 | 18 | Testing batch | ✅ #137 |
-| 18b | tflint severity gate hardening | ☐ |
+| 18b | tflint severity gate hardening | ✅ #138 |
 | 19 | Docs + agent surface | ☐ |
 | 19b | Cluster-bootstrap `monitoring/managed` label | ☐ |
 | 24 | Endpoint posture flip (after rackctl target 23) | ☐ |
@@ -418,6 +418,38 @@ Acceptance: `task lint`/CI's tflint step at `--minimum-failure-severity=error` p
 clean; a deliberately unused, non-interface variable introduced in a test component
 fails the gate (prove the rule is live, not just suppressed into silence); every
 suppression in the config or inline has a one-line rationale.
+
+Outcome (✅ #138): **shipped; mechanism and dead-code inventory both differed from
+the plan's model.** Resolutions + scope discovered:
+
+- **"Raise to error" isn't achievable — tflint rule severities are fixed per rule,
+  not configurable.** Confirmed empirically and against tflint's config docs (a rule
+  block accepts only `enabled`/`ignorable`, no `severity`). The documented-*/naming
+  rules emit at `notice`, unused-declaration and required-version/providers at
+  `warning`; the only lever is the runner's `--minimum-failure-severity`. Lowered it
+  to `notice` (not `error`, not `warning`) in `ci.yml` + `Taskfile.yaml` so the
+  `notice`-level documented-* rules — the exact class that let Target 16's undescribed
+  variables through — also hard-fail. Verified at `notice` the whole tree's only
+  findings are the three in-scope rules (no aws-plugin/naming surprises).
+- **The dead-code half was ~4× the plan's estimate.** Beyond the ~31 uniform-interface
+  findings, `terraform_unused_declarations` flagged 18 genuinely-dead declarations, not
+  ~4: seven non-interface variables (`cost/cur_report_prefix`,
+  `observability/{slack_webhook_url,log_retention_days}`, two
+  `incident-response-platform` TTL vars, `slack-knowledge-bot-platform/audit_ttl_days`
+  — three of them set with real per-env values in `live/` yet never consumed) plus
+  eleven unused locals and the `aws_caller_identity`/`aws_region`/`aws_partition` data
+  sources that only fed them. All removed (with their inert `live/` inputs), not
+  suppressed — the acceptance test mandates non-interface unused vars fail the gate.
+- **`cluster_name` is a fifth uniform-interface variable.** The plan named four
+  (`region`/`environment`/`vpc_id`/`cluster_sg_id`); `secrets/cluster_name` is wired
+  identically by 17 `_envcommon` files, so it got the same documented ignore rather
+  than removal (removing it would make `secrets` the odd component out — the "gets
+  worse the interface" outcome the decision warned against).
+- **`github-oidc`'s test broke on the data-source removal.** Its suite `override_data`'d
+  the `aws_caller_identity` read that `local.account_id` (unused) fed; the override was
+  vestigial (the trust-policy account-qualified ARN comes from the OIDC-provider
+  override, not caller-identity). Dropped the override + fixed its comment; the five
+  security assertions are unchanged and pass.
 
 ## Target 19b — Cluster-bootstrap `monitoring/managed` label (S)
 
