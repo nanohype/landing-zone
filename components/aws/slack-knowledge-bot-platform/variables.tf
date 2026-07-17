@@ -97,12 +97,6 @@ variable "redis_multi_az" {
   default     = false
 }
 
-variable "audit_ttl_days" {
-  description = "DDB TTL window for the audit table. 90d hot, then S3 lifecycle takes over to long-term."
-  type        = number
-  default     = 90
-}
-
 variable "audit_s3_lifecycle_days" {
   description = "S3 audit bucket expiration window."
   type        = number

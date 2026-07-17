@@ -12,6 +12,8 @@ variable "environment" {
   }
 }
 
+# Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
+# tflint-ignore: terraform_unused_declarations
 variable "region" {
   description = "AWS region"
   type        = string
@@ -50,12 +52,6 @@ variable "enable_cur_report" {
   description = "Enable Cost & Usage Report (typically only one per account)"
   type        = bool
   default     = false
-}
-
-variable "cur_report_prefix" {
-  description = "S3 prefix for CUR reports"
-  type        = string
-  default     = "cur"
 }
 
 variable "team" {

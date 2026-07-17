@@ -11,9 +11,9 @@
 # data.aws_iam_policy_document.trust. A mock_provider would mangle that data source
 # into a non-JSON placeholder, so we use a REAL credential-less AWS provider (no
 # account, no network — all skip_* flags on) so aws_iam_policy_document renders
-# locally for real, and override_data ONLY the two API-backed reads
-# (aws_caller_identity + aws_iam_openid_connect_provider) so the account-qualified
-# ARNs resolve without STS. create_oidc_provider = false routes the provider ARN
+# locally for real, and override_data ONLY the API-backed OIDC-provider read
+# (aws_iam_openid_connect_provider) so the account-qualified provider ARN
+# resolves without STS. create_oidc_provider = false routes the provider ARN
 # through the overridable data source (the create=true path yields an unknown ARN
 # at plan time). Every assertion below decodes aws_iam_role.deploy.assume_role_policy
 # — the actual rendered, wired-up trust JSON — never an override'd stub value.
@@ -28,18 +28,9 @@ provider "aws" {
   skip_region_validation      = true
 }
 
-# API-backed reads, replaced so no STS/IAM call happens at plan. These are inputs
-# to the trust doc, not the thing under assertion — the component's routing of them
+# API-backed read, replaced so no STS/IAM call happens at plan. This is an input
+# to the trust doc, not the thing under assertion — the component's routing of it
 # into the policy is what we test.
-override_data {
-  target = data.aws_caller_identity.current
-  values = {
-    account_id = "123456789012"
-    arn        = "arn:aws:iam::123456789012:user/test"
-    user_id    = "AIDTEST"
-  }
-}
-
 override_data {
   target = data.aws_iam_openid_connect_provider.github
   values = {

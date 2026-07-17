@@ -1,9 +1,4 @@
-data "aws_caller_identity" "current" {}
-data "aws_partition" "current" {}
-
 locals {
-  account_id = data.aws_caller_identity.current.account_id
-  partition  = data.aws_partition.current.partition
   # Key on the full cluster name (<environment>-<clusterName>) so the IRSA roles match
   # this cluster's AMP/AMG resources (which already key on var.cluster_name) and don't
   # collide with a co-located sibling cluster in the same account and environment.

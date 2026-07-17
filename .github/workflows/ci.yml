@@ -150,9 +150,15 @@ jobs:
         with:
           tflint_version: v0.63.1
       - run: tflint --init --config .tflint-aws.hcl
-      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=components/aws --minimum-failure-severity=error
-      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=fleet/aws --minimum-failure-severity=error
-      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=modules/aws --minimum-failure-severity=error
+      # tflint rule severities are fixed per rule, not configurable: the documented-
+      # variables/outputs rules emit at `notice`, the unused-declaration and
+      # required-version/providers rules at `warning`. Gating at `notice` is what makes
+      # every enabled rule a hard failure — anything lower lets an undocumented or
+      # unused declaration merge silently. The tree is clean at this bar; the uniform
+      # envcommon interface variables carry inline tflint-ignore rationale.
+      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=components/aws --minimum-failure-severity=notice
+      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=fleet/aws --minimum-failure-severity=notice
+      - run: tflint --recursive --config "$PWD/.tflint-aws.hcl" --chdir=modules/aws --minimum-failure-severity=notice
 
   checkov:
     name: Security Scan

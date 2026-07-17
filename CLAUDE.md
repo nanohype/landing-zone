@@ -34,6 +34,7 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 - Default tags (Environment, ManagedBy, Project) are injected by the root config (`live/root.hcl`) — do not duplicate in components
 - Every component lives in `components/aws/{name}/` with its own `versions.tf`
 - Dependency wiring lives in `live/_envcommon/aws/{name}.hcl`, not in the component itself
+- Because of that, every component declares the same interface inputs (`region`, `environment`, `vpc_id`, `cluster_sg_id`, `cluster_name`) so envcommon can wire them uniformly. A component that doesn't consume one still declares it, tagged with an inline `# tflint-ignore: terraform_unused_declarations` + rationale. Any *other* unused variable/local/data source is dead code — remove it, don't suppress it (`task lint` gates this at `notice`)
 - Environment-specific overrides go in `live/aws/{account}/{region}/{env}/{component}/terragrunt.hcl`
 - State path: `s3://{account_id}-{region}-tfstate/{env}/{component}/terraform.tfstate` (native S3 locking)
 

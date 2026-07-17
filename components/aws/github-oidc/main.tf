@@ -1,8 +1,4 @@
-data "aws_caller_identity" "current" {}
-
 locals {
-  account_id = data.aws_caller_identity.current.account_id
-
   # Subject claims the deploy role trusts: the cartesian product of the configured
   # repos and the allowed claim suffixes (repo:<org>/<repo>:<claim>). The default
   # claim set is environment-gated deploys + tag pushes — NOT a bare :*, which would
