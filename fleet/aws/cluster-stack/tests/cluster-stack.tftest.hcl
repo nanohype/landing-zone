@@ -175,3 +175,20 @@ run "bootstrap_access_entry_grants_cluster_admin" {
     error_message = "no portal_access_role_arn means no portal read access entry"
   }
 }
+
+# ── no-doubled-env guard: a cluster_name prefixed with the environment token is
+#    rejected at variable validation, before it composes into a doubled
+#    "<env>-<env>-..." cluster name ─────────────────────────────────────────────
+run "cluster_name_rejects_doubled_env" {
+  command = plan
+
+  variables {
+    # environment is "development"; "development-platform" would compose into
+    # "development-development-platform".
+    cluster_name = "development-platform"
+  }
+
+  expect_failures = [
+    var.cluster_name,
+  ]
+}

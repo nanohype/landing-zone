@@ -19,6 +19,19 @@ mock_provider "aws" {
       zone_ids = ["usw2-az1", "usw2-az2", "usw2-az3", "usw2-az4"]
     }
   }
+  # aws_flow_log ARN-validates iam_role_arn + log_destination at plan, and the
+  # mock's random default is not ARN-shaped — pin real ARNs for the flow-log role
+  # and log group so the enable_flow_logs run plans.
+  mock_resource "aws_iam_role" {
+    defaults = {
+      arn = "arn:aws:iam::123456789012:role/flow-logs-mock"
+    }
+  }
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:us-west-2:123456789012:log-group:flow-logs-mock"
+    }
+  }
 }
 
 variables {
@@ -51,6 +64,38 @@ run "default_hub" {
   assert {
     condition     = aws_route.spoke_return[0].destination_cidr_block == "10.0.0.0/8"
     error_message = "the spoke return route must target the workload supernet (default 10.0.0.0/8)"
+  }
+}
+
+# ── flow logs: the egress hub logs egress traffic for visibility ──
+run "flow_logs_enabled" {
+  command = plan
+
+  variables {
+    enable_flow_logs = true
+  }
+
+  assert {
+    condition     = length(module.vpc_flow_logs) == 1
+    error_message = "enable_flow_logs = true must instantiate the egress vpc-flow-logs module"
+  }
+  assert {
+    condition     = module.vpc_flow_logs[0].log_group_name == "/aws/vpc-flow-logs/hub-egress"
+    error_message = "the egress hub's flow log must write to /aws/vpc-flow-logs/<environment>-egress"
+  }
+  assert {
+    condition     = module.vpc_flow_logs[0].iam_role_name == "hub-egress-flow-logs"
+    error_message = "the flow-log IAM role must be named <environment>-egress-flow-logs"
+  }
+}
+
+# ── flow logs off by default: no flow-log module instance ──
+run "flow_logs_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(module.vpc_flow_logs) == 0
+    error_message = "flow logs are off by default (enable_flow_logs = false) — no flow-log module instance"
   }
 }
 

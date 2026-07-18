@@ -62,6 +62,13 @@ mock_provider "aws" {
       arn = "arn:aws:kms:us-west-2:123456789012:key/break-glass"
     }
   }
+  # The EventBridge topic policy scopes aws:SourceArn to this rule's ARN; pin it so
+  # the jsonencode'd policy is fully known at plan and the SourceArn assertion is real.
+  mock_resource "aws_cloudwatch_event_rule" {
+    defaults = {
+      arn = "arn:aws:events:us-west-2:123456789012:rule/development-break-glass-detection"
+    }
+  }
 }
 
 variables {
@@ -165,6 +172,28 @@ run "alert_topic_encrypted_with_publisher_grant" {
       && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
     ]) == 1
     error_message = "break-glass alert CMK policy must grant cloudwatch + events kms:GenerateDataKey*/Decrypt scoped by SourceAccount"
+  }
+}
+
+# INVARIANT 6 — the assumption-alert topic's resource policy scopes the EventBridge
+# publish grant by aws:SourceAccount AND aws:SourceArn (the specific detection rule).
+# Those are the confused-deputy guards: without them the events service principal
+# acting for any account/rule could publish to (or forge alerts on) the break-glass
+# topic. Located by Sid, so statement reordering can't mask a regression.
+run "eventbridge_publish_scoped_by_source" {
+  command = plan
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_sns_topic_policy.break_glass_eventbridge.policy).Statement :
+      s if try(s.Sid, "") == "AllowEventBridge"
+      && try(s.Effect, "") == "Allow"
+      && try(s.Principal.Service, "") == "events.amazonaws.com"
+      && try(s.Action, "") == "SNS:Publish"
+      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+      && try(s.Condition.ArnEquals["aws:SourceArn"], "") == "arn:aws:events:us-west-2:123456789012:rule/development-break-glass-detection"
+    ]) == 1
+    error_message = "break-glass EventBridge topic policy must grant SNS:Publish to events.amazonaws.com scoped by both aws:SourceAccount and aws:SourceArn (the detection rule ARN)"
   }
 }
 

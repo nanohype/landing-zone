@@ -57,6 +57,17 @@ variable "cluster_name" {
   description = "EKS cluster base name; the component prefixes it with environment"
   type        = string
   default     = "platform"
+
+  # no-doubled-env: reject a base name that repeats the environment token. The
+  # cluster component composes local.cluster_name = "<environment>-<cluster_name>",
+  # so a value equal to or prefixed with "<environment>-" (e.g. cluster_name =
+  # "development-platform") produces a doubled "development-development-platform"
+  # cluster name and every cluster-scoped IAM/KMS/S3 name derived from it. Mirrors
+  # the guard the multi-tenant components carry on their base-name inputs.
+  validation {
+    condition     = var.cluster_name != var.environment && !startswith(var.cluster_name, "${var.environment}-")
+    error_message = "cluster_name must not equal or be prefixed with the environment token '${var.environment}-': it composes into a doubled '<env>-<env>-...' cluster name."
+  }
 }
 
 variable "cluster_version" {

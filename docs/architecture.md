@@ -225,10 +225,10 @@ role via **EKS Pod Identity** (not raw IRSA).
 | Component | What it provisions | Team |
 |-----------|--------------------|------|
 | **agent-iam** | Operator IRSA role (mints tenant roles under `/eks-agent-platform/tenants/`, boundary-gated), tenant permissions boundary + baseline policy, model-artifacts + eval-reports S3 buckets, operator SSM parameters | platform |
-| **competitive-intelligence-platform** | Aurora Serverless v2 (Postgres + pgvector), app-secrets, app-access policy bound via Pod Identity | protohype |
-| **digest-pipeline-platform** | Aurora Serverless v2, voice-baseline + raw-aggregations S3 buckets, SESv2 sending identity + config set, app-access policy | protohype |
-| **incident-response-platform** | DynamoDB (incidents/audit/identity-cache), SQS FIFO queues + DLQs, S3 audit archive, EventBridge Scheduler group + role, app-access policy | protohype |
-| **slack-knowledge-bot-platform** | KMS (token envelope), DynamoDB (tokens/audit/identity-cache), ElastiCache Redis, Aurora Serverless v2 (pgvector), SQS FIFO + DLQ, S3 audit archive, app-access policy | protohype |
+| **competitive-intelligence-platform** | Aurora Serverless v2 (Postgres + pgvector), app-secrets, app-access policy bound via Pod Identity | strategy |
+| **digest-pipeline-platform** | Aurora Serverless v2, voice-baseline + raw-aggregations S3 buckets, SESv2 sending identity + config set, app-access policy | growth |
+| **incident-response-platform** | DynamoDB (incidents/audit/identity-cache), SQS FIFO queues + DLQs, S3 audit archive, EventBridge Scheduler group + role, app-access policy | reliability |
+| **slack-knowledge-bot-platform** | KMS (token envelope), DynamoDB (tokens/audit/identity-cache), ElastiCache Redis, Aurora Serverless v2 (pgvector), SQS FIFO + DLQ, S3 audit archive, app-access policy | workplace |
 
 ### Fleet & Portal Layer
 
@@ -346,7 +346,10 @@ path, so the bare prefix breaks nothing; normalizing it is a low-priority cleanu
 
 ## Team Ownership
 
-Based on `team` tags set in `_envcommon/aws/` files:
+Owning team per component. Most components take their `team` value from the
+`_envcommon/aws/` wiring; the four `*-platform` components are the exception —
+their `team` is a per-component `variables.tf` default (each app is owned by a
+different product team), not set in `_envcommon`.
 
 | Team | Components |
 |------|-----------|
@@ -355,6 +358,9 @@ Based on `team` tags set in `_envcommon/aws/` files:
 | **security** | governance, secrets, break-glass |
 | **data-platform** | druid, pipeline |
 | **ml-platform** | llm, mlops, rag |
-| **protohype** | competitive-intelligence-platform, digest-pipeline-platform, incident-response-platform, slack-knowledge-bot-platform |
+| **strategy** | competitive-intelligence-platform |
+| **growth** | digest-pipeline-platform |
+| **reliability** | incident-response-platform |
+| **workplace** | slack-knowledge-bot-platform |
 | **finops** | cost |
 | *(required input)* | managed-monitoring — no `team` default; the caller must supply one |

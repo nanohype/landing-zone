@@ -10,6 +10,7 @@ locals {
 ################################################################################
 
 resource "aws_ec2_transit_gateway" "this" {
+  #checkov:skip=CKV_AWS_331:auto-accept is intentional — attachments arrive only from RAM-shared org accounts (the TGW is shared over RAM to the org), so there is no cross-org attachment surface to gate.
   count = var.enable_transit_gateway ? 1 : 0
 
   amazon_side_asn                 = var.tgw_asn

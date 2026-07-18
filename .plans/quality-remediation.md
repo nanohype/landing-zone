@@ -27,6 +27,7 @@ intentionally — never bulk-delete them.
 | 24 | Endpoint posture flip (after rackctl target 23) | ✅ #141 |
 | 31 | Network-campaign punch list (2026-07-18 re-audit) | ✅ #153 |
 | 32 | Doc inventory refresh + state-bucket hardening (2026-07-18 re-audit) | ✅ #154 |
+| 35 | Phase 11 polish: flow-log module, SNS conditions, checkov narrowing, cluster/module test coverage, protohype residue, guards | ✅ #156 |
 
 ---
 
@@ -852,3 +853,108 @@ target is sequentially dependent on #153, the four dead `mock_provider` blocks
 were removed (the author's own comment already noted they were ineffective),
 verified green on both 1.11.5 and 1.12.0 with the sibling cluster-stack and
 modules suites unaffected, and #153 was merged before this target branched.
+
+## Target 35 — Phase 11 polish (M)
+
+**Optional low-priority follow-on from the Target 34 final exit-verification
+re-audit** (campaign exit condition already MET; none of these cap or block).
+Seven verified findings, one PR.
+
+Findings + resolutions (all verified against current source, all shipped):
+
+1. **Triplicated flow-log wiring → shared module.** `network`, `shared-network`,
+   and `egress-network` each carried ~50 byte-identical lines (aws_flow_log +
+   log group + IAM role + inline policy) differing only in count guard, log-group
+   suffix, and role name. Extracted to `modules/aws/vpc-flow-logs/`
+   (`vpc_id`/`log_group_name`/`role_name`/`retention_in_days`/`traffic_type`/`tags`;
+   outputs surface flow_log_id, log_group_name/arn, iam_role_arn/name, traffic_type
+   for test assertions). Instantiation stays caller-gated: each component sets
+   `count` on the module block (create-mode + enable_flow_logs for `network`;
+   enable_flow_logs alone for the two always-owned VPCs), so the module carries no
+   `enabled` flag. Log-group + role names passed explicitly because they are not
+   derivable from one another (the shared VPC logs to `<env>-shared` but names its
+   role `<env>-shared-net-flow-logs`). Each of the three suites got a flow-log
+   assertion (previously none asserted flow logs are provisioned): an
+   enable_flow_logs=true run proving `length(module.vpc_flow_logs) == 1` + the exact
+   log-group/role name, plus an off-by-default run; `network` also proves adopt mode
+   builds none even with the flag on. Needed `aws_iam_role`/`aws_cloudwatch_log_group`
+   ARN mocks in each suite — `aws_flow_log` ARN-validates iam_role_arn/log_destination
+   at plan and the mock's default isn't ARN-shaped.
+
+2. **SNS topic-policy confused-deputy conditions.** `break-glass`, `observability`,
+   and `org-security` granted SNS publish to service principals with no
+   `aws:SourceAccount`/`SourceArn` — while their sibling CMK policies already carry
+   `aws:SourceAccount`. Added the matching condition to each: observability's three
+   tier topics (cloudwatch, SourceAccount), org-security's three publishers
+   (events/guardduty/securityhub, SourceAccount), and break-glass's EventBridge
+   grant (SourceAccount **and** SourceArn = the specific detection rule, since
+   there's exactly one known source). Tests: extended org-security's whole-policy
+   sweep to require SourceAccount on every statement; added a new observability run
+   asserting the condition on all three topic policies; added a break-glass run
+   asserting both SourceAccount + SourceArn (needed an `aws_cloudwatch_event_rule`
+   ARN mock so the jsonencode'd policy is fully known at plan).
+
+3. **checkov global-skip narrowing.** Four global skips whose rationale named a
+   single resource moved to inline `#checkov:skip=` comments: CKV_AWS_21 (S3
+   versioning), CKV_AWS_42 (EFS encryption false positive → llm tenant EFS),
+   CKV_AWS_331 (TGW auto-accept → org-networking), CKV_AWS_252 (CloudTrail SNS →
+   org-compliance trail). **Scope discovered: the global CKV_AWS_21 skip was
+   silently covering FOUR buckets, not the one its rationale named** — digest
+   raw_aggregations (deliberate suspension) PLUS three access-log sink buckets
+   (agent-iam, fleet-hub, portal-hub) that legitimately don't version. Each got its
+   own inline skip with its own accurate rationale, surfacing the previously-hidden
+   justification. Verified with checkov 3.3.8 against all three trees
+   (components/fleet/modules): 0 failed before and after (865/94/13 passed;
+   7/1/0 skipped) — the narrowing is complete, not lossy. Added a `.checkov.yaml`
+   preamble note explaining the inline-vs-global split rule.
+
+4. **Test coverage for the untested root + two untested modules.** New suites:
+   `components/aws/cluster` (was the largest gap — root of the whole chain; mocks
+   aws/time/tls with valid computed defaults per the cluster-stack precedent and
+   asserts the component's OWN logic: env-first cluster name, the subnet-ownership
+   tag handoff on/off by stamp_subnet_tags, the ""→null boundary conversion, the
+   oidc-issuer scheme strip, and the four secure-by-default variable guards via
+   expect_failures — public-endpoint-needs-allowlist, name length budget,
+   version shape, disk floor); `modules/aws/platform-app` (real env-first grammar,
+   faithful statement wrapping, association identity binding, no-doubled-env guard
+   via expect_failures — mock provider + aws_iam_role data mock);
+   `modules/aws/eks-vpc-endpoints` (the conditional EKS interface endpoint on/off,
+   always-on set present — mock provider).
+
+5. **protohype team-ownership residue.** `docs/architecture.md`: fixed the
+   per-component Team column (strategy/growth/reliability/workplace, verified against
+   each component's `variables.tf` default), split the single `protohype` Team
+   Ownership row into the four real team rows, and corrected the intro sentence —
+   the four `*-platform` components take `team` from a per-component `variables.tf`
+   default (confirmed: no `team` key in any of the four `_envcommon` files), not
+   from `_envcommon/aws/` like every other component. Fixed the two `main.tf`
+   header comments (competitive-intelligence-platform "of the protohype team" →
+   "owned by the strategy team" + dropped the `protohype/` CR-path prefix;
+   incident-response-platform "other protohype-team apps" → "other single-tenant
+   platform apps").
+
+6. **no-doubled-env guard on the fleet cluster_name path.** Added a validation
+   block to `fleet/aws/cluster-stack/variables.tf`'s `cluster_name` rejecting a
+   value equal to or prefixed with `<environment>-` (mirrors the multi-tenant
+   components' guard; references var.environment). cluster-stack composed
+   cluster_name into the cluster component's `<env>-<cluster_name>` with no such
+   guard, so `cluster_name = "development-platform"` would have produced a doubled
+   name. Added an expect_failures run to the cluster-stack suite proving it fires.
+
+7. **fleet-hub state-bucket account-id — documented exception (design call).**
+   Decided AGAINST adding an account-id element. Reasoning: the fleet state bucket
+   is a singleton in exactly one always-hub (management) account — no per-account
+   collision exists — AND its name is a cross-repo bootstrap contract (the eks-fleet
+   provider-opentofu backend and rackctl's preflight resolve state against it before
+   any in-cluster SSM lookup is possible), so an account-qualified name would break
+   discovery-free bootstrap; global S3 uniqueness rides the `nanohype-` org prefix
+   (a fork rebrands the prefix). Documented the exception in the variable's
+   description + the component's bucket-section header, and added a
+   `state_bucket_name` length validation (leaves room for the `-logs` sibling within
+   S3's 63-char limit). Not a code change to the name — a deliberate, documented
+   divergence from the repo convention.
+
+Verified from a clean tree: `task fmt:check` clean; `task validate` (targeted at
+the ~20 changed roots — all valid); `task lint` (notice) exit 0; `task test` (every
+suite incl. all new ones); checkov 3.3.8 across all three trees (0 failed);
+`task evaluate` (all live leaves render).

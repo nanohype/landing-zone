@@ -97,6 +97,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "voice_baseline" {
 }
 
 resource "aws_s3_bucket" "raw_aggregations" {
+  #checkov:skip=CKV_AWS_21:versioning is deliberately Suspended on this bucket — it holds debug aggregation snapshots that are regenerable, so prior versions add cost with no recovery value (see aws_s3_bucket_versioning.raw_aggregations below).
   bucket = local.raw_aggregations_bucket
 
   tags = local.tags

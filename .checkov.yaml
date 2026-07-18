@@ -8,6 +8,15 @@
 # for regulated-cluster hardening; a fork going to a regulated estate should
 # delete the "posture" skips and remediate. If a skip loses its rationale,
 # delete the skip and let CI fail until the finding is fixed.
+#
+# Skips here are genuinely repo-wide (a posture that spans many resources, or a
+# check checkov evaluates in isolation across the whole tree). A skip whose
+# rationale points at ONE resource lives inline on that resource instead
+# (#checkov:skip=<id>:<reason>), so removing the resource removes the skip with
+# it. Currently inline: CKV_AWS_21 (S3 versioning — digest raw_aggregations plus the
+# agent-iam / fleet-hub / portal-hub access-log sink buckets, each with its own
+# rationale), CKV_AWS_42 (llm tenant EFS encryption false positive), CKV_AWS_331
+# (org-networking TGW auto-accept), CKV_AWS_252 (org-compliance CloudTrail SNS).
 
 skip-check:
   # ── AWS: provider-managed encryption at rest (SSE-S3 / AWS-managed keys) ──
@@ -48,16 +57,13 @@ skip-check:
   - CKV2_AWS_62 # S3 event notifications — no consumer; nothing to notify
   - CKV2_AWS_61 # S3 lifecycle on every bucket — lifecycle set where data volume warrants it
   - CKV_AWS_300 # abort-incomplete-multipart lifecycle — same selective-lifecycle posture
-  - CKV_AWS_21 # S3 versioning — flagged bucket (digest raw_aggregations) suspends versioning deliberately: debug snapshots
   - CKV_AWS_28 # DynamoDB PITR — caches/idempotency tables are rebuildable
   - CKV2_AWS_57 # Secrets Manager rotation — no rotation lambdas; rotation is a runbook, not automation, in this template
   - CKV_AWS_338 # 1-year log retention — retention tuned per environment for cost
-  - CKV_AWS_252 # CloudTrail SNS topic — trail archives to S3; no push consumer
   - CKV2_AWS_10 # CloudTrail → CW Logs — S3 archive is the query surface (Athena)
   - CKV2_AWS_3 # GuardDuty org/region — detector enablement is an org-security decision documented there
   - CKV2_AWS_45 # AWS Config all-resources recorder — scoped recording is the accepted cost posture
   - CKV2_AWS_18 # EFS in AWS Backup plan — model cache is re-hydratable from S3
-  - CKV_AWS_42 # EFS encryption — FALSE POSITIVE: var-driven (tenant_config.efs_encryption, default true)
   - CKV2_AWS_50 # ElastiCache Multi-AZ — single-node rate-limit cache; loss = cold cache
   - CKV_AWS_31 # ElastiCache transit encryption/auth — in-VPC rate-limit cache on private subnets only
   - CKV_AWS_51 # ECR immutable tags — mutable tags are the model-image retag flow
@@ -65,7 +71,6 @@ skip-check:
   - CKV2_AWS_5 # SG not attached — SGs are consumed by sibling components/tenants at deploy time
   - CKV2_AWS_39 # Route53 query logging — DNS log volume/cost accepted trade-off
   - CKV2_AWS_38 # Route53 DNSSEC — registrar/DS coordination out of template scope
-  - CKV_AWS_331 # TGW auto-accept attachments — attachments arrive only from RAM-shared org accounts
 
   # ── AWS: API Gateway tenant surface (public endpoint + IP allowlist posture) ──
   - CKV2_AWS_77 # WAFv2 Log4j AMR — WAF rule curation out of template scope

@@ -76,6 +76,10 @@ resource "aws_sns_topic" "info" {
   tags              = local.tags
 }
 
+# The topic policies scope the CloudWatch publish grant to this account
+# (aws:SourceAccount) — the same confused-deputy guard the alerts CMK policy
+# carries. Without it, a service principal acting for any account could publish to
+# these topics; SourceAccount pins the grant to alarms in this account only.
 resource "aws_sns_topic_policy" "critical" {
   arn = aws_sns_topic.critical.arn
 
@@ -87,6 +91,11 @@ resource "aws_sns_topic_policy" "critical" {
       Principal = { Service = "cloudwatch.amazonaws.com" }
       Action    = "SNS:Publish"
       Resource  = aws_sns_topic.critical.arn
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = local.account_id
+        }
+      }
     }]
   })
 }
@@ -102,6 +111,11 @@ resource "aws_sns_topic_policy" "warning" {
       Principal = { Service = "cloudwatch.amazonaws.com" }
       Action    = "SNS:Publish"
       Resource  = aws_sns_topic.warning.arn
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = local.account_id
+        }
+      }
     }]
   })
 }
@@ -117,6 +131,11 @@ resource "aws_sns_topic_policy" "info" {
       Principal = { Service = "cloudwatch.amazonaws.com" }
       Action    = "SNS:Publish"
       Resource  = aws_sns_topic.info.arn
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = local.account_id
+        }
+      }
     }]
   })
 }
