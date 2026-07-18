@@ -96,6 +96,13 @@ run "cluster_name_is_env_first" {
 }
 
 # ── Invariant 2: create-mode subnet-ownership tags stamped on every subnet ──
+#
+# The resource is count-indexed, NOT for_each-keyed: in the create-mode vend the
+# subnet IDs are module.network outputs unknown until apply, and for_each would
+# fail such a from-scratch plan (its keys must be known at plan) while count needs
+# only the list LENGTH (known — it derives from max_azs). Asserting index [0]
+# addressing here locks that in: a revert to for_each keys the instances by subnet
+# ID string, and [0] would no longer resolve.
 run "subnet_ownership_tags_stamped_in_create_mode" {
   command = plan
 
@@ -104,12 +111,19 @@ run "subnet_ownership_tags_stamped_in_create_mode" {
     error_message = "stamp_subnet_tags = true (default) must stamp one ownership tag per subnet (3 private + 3 public = 6)"
   }
   assert {
-    condition     = aws_ec2_tag.subnet_cluster_ownership["subnet-a"].key == "kubernetes.io/cluster/development-platform"
+    condition     = aws_ec2_tag.subnet_cluster_ownership[0].key == "kubernetes.io/cluster/development-platform"
     error_message = "the ownership tag key must be kubernetes.io/cluster/<cluster> (cluster in the KEY, so siblings coexist)"
   }
   assert {
-    condition     = aws_ec2_tag.subnet_cluster_ownership["subnet-a"].value == "shared"
+    condition     = aws_ec2_tag.subnet_cluster_ownership[0].value == "shared"
     error_message = "the ownership tag value must be 'shared'"
+  }
+  # The private set is tagged first, then the public set (concat order); index 3 is
+  # the first public subnet. Guards the resource_id wiring against a count.index
+  # off-by-one that a keyless count could otherwise hide.
+  assert {
+    condition     = aws_ec2_tag.subnet_cluster_ownership[0].resource_id == "subnet-a" && aws_ec2_tag.subnet_cluster_ownership[3].resource_id == "subnet-x"
+    error_message = "ownership tags must cover the private subnets then the public subnets, in concat order"
   }
 }
 
