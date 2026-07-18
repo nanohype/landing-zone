@@ -20,13 +20,17 @@
 #      app-of-apps points every spoke at this URL; a non-git value or a bad mode
 #      must fail at plan, never at apply against a live cluster.
 #
-# PROVIDER STRATEGY: mock the aws provider (valid mock_data so agent-iam's IAM
-# policy documents + the cluster-auth token render), and mock k8s/helm/kubectl/
-# github/tls. The cluster-bootstrap COMPONENT self-declares its k8s/helm/kubectl
-# providers (a legacy module OpenTofu can't override with mock_provider), so they
-# configure with the real plugins — hence cluster_certificate_authority_data is a
-# real (throwaway, self-signed, key-less) CA the providers parse offline. No
-# network or credentials are used: helm_release/k8s resources plan as creates.
+# PROVIDER STRATEGY: mock the aws and tls providers (valid mock_data so
+# agent-iam's IAM policy documents + the cluster-auth token render). The
+# cluster-bootstrap COMPONENT self-declares its kubernetes/helm/kubectl/github
+# providers inline — a legacy module OpenTofu cannot override with mock_provider,
+# so those must NOT be given mock_provider blocks: declaring a mock for a provider
+# that is actually configured inside a legacy child module makes tofu test resolve
+# the child's provider config against the mock's empty schema, so every real
+# argument (host, token, …) reports as unexpected. Leaving them un-mocked lets the
+# real plugins load their schemas and plan offline — cluster_certificate_authority_data
+# is a real (throwaway, self-signed, key-less) CA the providers parse without
+# network or credentials, so helm_release/k8s resources plan as creates.
 
 mock_provider "aws" {
   mock_data "aws_iam_policy_document" {
@@ -42,10 +46,6 @@ mock_provider "aws" {
     defaults = { name = "us-west-2", id = "us-west-2" }
   }
 }
-mock_provider "kubernetes" {}
-mock_provider "helm" {}
-mock_provider "kubectl" {}
-mock_provider "github" {}
 mock_provider "tls" {}
 
 variables {
