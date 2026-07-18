@@ -20,7 +20,7 @@ comments, or docs (greenfield doctrine).
 | 3-fix | teardown docs + vacuous tag check + IPAM discovery + NAT mapping + intra-subnet cleanup (Fable review) | ✅ |
 | 3b | `egress-network` owner component (central-egress VPC + TGW static default route) | ✅ |
 | 3b-fix | remove the broken TGW association/propagation override + doc/test corrections (Fable review) | ✅ |
-| 4 | cluster-bootstrap publishes network_mode + adopt subnet IDs (public + private) | ⬜ |
+| 4 | cluster-bootstrap publishes network_mode + adopt subnet IDs (public + private) | ✅ |
 
 Run these **serialized, in order** (1 → 2 → 1-fix → 3 → 3-fix → 3b → 3b-fix → 4) —
 never two agents in this repo concurrently. Every target ends in a PR (never a
@@ -1083,6 +1083,37 @@ attachment and found the reverse is true:
 - A new bidirectional-overlap fixture (supernet CIDR nested inside a larger egress
   CIDR) fails the `tofu test` overlap check.
 - `task fmt:check`, `task validate`, `task lint`, `tofu test` all green.
+
+**Shipped (landing-zone, squash-merged).** Closes out landing-zone's queue for this
+campaign. Exact field/key names Targets 5/6/7 must match:
+- **`network_mode` label** (always set) on the `in-cluster` ArgoCD cluster Secret —
+  values `create` | `adopt`. The eks-gitops ApplicationSet generators (Target 6) key
+  on it unconditionally.
+- **`network/private-subnet-ids` + `network/public-subnet-ids` Secret annotations** —
+  present only when `network_mode == adopt`, each a comma-joined subnet-ID CSV. Absent
+  in create mode.
+- **`kube-system/network-config` ConfigMap** (name `network-config`) — written in
+  BOTH modes, `data` keys `network_mode`, `private_subnet_ids`, `public_subnet_ids`.
+  This is the Kyverno context source Target 6 reads; CSVs are empty strings in create
+  mode, populated in adopt. Always present so a create-mode cluster's Kyverno context
+  lookup never misses.
+- **Variables `network_mode` (default `create`), `private_subnet_ids` /
+  `public_subnet_ids` (default `[]`)** on both `components/aws/cluster-bootstrap` and
+  `fleet/aws/cluster-bootstrap`. Target 5's eks-fleet composition patches the fleet
+  Workspace's `network_mode` + subnet vars from the Cluster network stanza/status.
+- **Component owns the mode gate.** Both the annotations and the ConfigMap CSVs are
+  gated on `network_mode == "adopt"` inside the component, so a caller may pass
+  create-mode subnet IDs through unconditionally and they're correctly dropped (empty
+  CSVs, absent annotations) — no second knob. The live envcommon
+  (`live/_envcommon/aws/cluster-bootstrap.hcl`) derives `network_mode` + subnet IDs
+  from the `network` dependency's outputs, mirroring how `cluster.hcl` derives
+  `stamp_subnet_tags` from the same source (no manually-kept-in-sync second knob).
+- Tests: `create_mode_publishes_empty_network_config` (passes populated subnet IDs
+  under create mode and proves the gate drops them — CSVs empty, annotations absent)
+  and `adopt_mode_publishes_both_subnet_csvs` (both annotations + both ConfigMap CSVs
+  populated). smoke-test asserts the `network-config` ConfigMap exists with a valid
+  `network_mode`. All four gates green (fmt/validate/lint/test); the staging
+  cluster-bootstrap live leaf renders cleanly through the rewired envcommon.
 
 **Depends on:** Target 1.
 

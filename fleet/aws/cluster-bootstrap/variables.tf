@@ -73,6 +73,29 @@ variable "vpc_id" {
   type        = string
 }
 
+variable "network_mode" {
+  description = "How the cluster's VPC was provisioned: create (self-owned) or adopt (participated, same- or cross-account via RAM). Threaded to cluster-bootstrap, which publishes it as the ArgoCD cluster-Secret network_mode label and onto the kube-system/network-config ConfigMap the scheme-aware Kyverno load-balancer subnet injection reads. The eks-fleet Cluster composition patches it from the network stanza; default create keeps a self-owned VPC's behavior unchanged."
+  type        = string
+  default     = "create"
+
+  validation {
+    condition     = can(regex("^(create|adopt)$", var.network_mode))
+    error_message = "network_mode must be either create or adopt."
+  }
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs of the cluster's VPC. Threaded to cluster-bootstrap, which publishes them (Secret annotation + ConfigMap CSV) only in adopt mode — a participant can't discover subnets by tag because RAM hides owner subnet tags. Empty in create mode (auto-discovery by the ELB role tags the cluster stamps)."
+  type        = list(string)
+  default     = []
+}
+
+variable "public_subnet_ids" {
+  description = "Public subnet IDs of the cluster's VPC. Threaded to cluster-bootstrap, which publishes them (Secret annotation + ConfigMap CSV) only in adopt mode so scheme-aware injection can place internet-facing load balancers on public subnets. Empty in create mode."
+  type        = list(string)
+  default     = []
+}
+
 # --- spoke substrate ---------------------------------------------------------
 variable "data_kms_key_arn" {
   description = "KMS key ARN (the spoke's secrets-component data CMK) that encrypts agent-iam's model-artifacts + eval-reports buckets at rest. The eks-fleet Cluster composition patches it from the spoke's secrets output — the tofu-native equivalent of the env-tree's dependency.secrets.outputs.kms_key_arn wiring."

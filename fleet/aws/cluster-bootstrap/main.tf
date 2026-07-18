@@ -39,6 +39,10 @@ module "cluster_bootstrap" {
   cluster_certificate_authority_data = var.cluster_certificate_authority_data
   vpc_id                             = var.vpc_id
 
+  network_mode       = var.network_mode
+  private_subnet_ids = var.private_subnet_ids
+  public_subnet_ids  = var.public_subnet_ids
+
   enable_agent_platform = var.enable_agent_platform
   tenants_repo_url      = var.tenants_repo_url
   gitops_repo_url       = var.gitops_repo_url
