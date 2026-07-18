@@ -15,13 +15,21 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 
 ## Architecture
 
-- **AWS components** under `components/aws/`
-- **Environments:** development, staging, production, org (management account)
-- **Multi-account isolation:** workload-development, workload-staging, workload-production, management
+- **AWS components** under `components/aws/`, grouped by layer:
+  - **Network** — `network` (mode-aware VPC: `create` owns a VPC, `adopt` participates in a shared one), `shared-network` (owner side of the cross-account adopt topology, RAM-shares subnets), `egress-network` (central egress hub behind the org transit gateway)
+  - **Cluster** — `cluster`, `cluster-bootstrap`, `cluster-addons`
+  - **Workload (multi-tenant, `var.tenants`)** — `druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`
+  - **Operational** — `observability`, `secrets`, `backup`, `break-glass`, `service-quotas`, `cost`, `dns`, `github-oidc`, `managed-monitoring`
+  - **Agent-platform** — `agent-iam` (operator role + tenant permissions boundary + model-artifacts/eval-reports buckets) and the four per-app single-tenant substrates `competitive-intelligence-platform`, `digest-pipeline-platform`, `incident-response-platform`, `slack-knowledge-bot-platform`
+  - **Fleet & portal (cross-account, hub-side)** — `fleet-hub`, `fleet-vend`, `fleet-unwedge`, `portal-hub`, `portal-spoke`
+  - **Organization (management account)** — `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`, `org-scp`
+- **Shared modules** under `modules/aws/` — `workload-identity` (EKS Pod Identity role factory), `platform-app` (shared Pod-Identity association + `<env>-<app>-app-access` policy shell), `eks-vpc-endpoints` (the private endpoint set both create-mode `network` and `shared-network` build)
+- **Environments:** development, staging, production; `hub` (fleet/portal control plane); `org` (management account)
+- **Accounts:** workload-development, workload-staging, workload-production, management, `fleet` (hub control plane), `network` (network-owner account for the shared-network/egress-network adopt topology)
 - **Multi-region support:** us-west-2
-- **Dependency chain:** `network → cluster → {druid, pipeline, llm, gateway, rag, mlops, governance, observability, secrets, cluster-addons, cluster-bootstrap}`
-- `cost`, `dns`, `backup`, `break-glass`, and `service-quotas` are standalone (no dependencies)
-- `org-*` components deploy to the management account only
+- **Dependency chain:** `network → cluster → {cluster-addons, cluster-bootstrap, druid, pipeline, llm, gateway, rag, mlops, governance, observability, secrets, agent-iam → *-platform}`
+- Standalone (no dependencies): `cost`, `dns`, `backup`, `break-glass`, `service-quotas`, `github-oidc`
+- `shared-network` and `egress-network` run in the network-owner account; `managed-monitoring`, `fleet-hub`, and the portal/fleet roles run on the hub; `org-*` components deploy to the management account only
 - **GitOps boundary:** OpenTofu deploys cloud resources + Cilium + ArgoCD. ArgoCD manages in-cluster workloads via [eks-gitops](https://github.com/nanohype/eks-gitops)
 
 ## Conventions
@@ -58,7 +66,10 @@ components/
       versions.tf
       modules/tenant/      # sub-module for multi-tenant components
 modules/
-  aws/workload-identity/   # EKS Pod Identity role factory
+  aws/
+    workload-identity/     # EKS Pod Identity role factory
+    platform-app/          # shared Pod-Identity association + app-access policy shell
+    eks-vpc-endpoints/     # private endpoint set (create-mode network + shared-network)
 live/
   root.hcl                 # root config (AWS provider + S3 state backend)
   _envcommon/

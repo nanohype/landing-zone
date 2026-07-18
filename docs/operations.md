@@ -47,27 +47,40 @@ Order within the org layer is flexible -- these components have no inter-depende
 ### Per Environment (development -> staging -> production)
 
 ```
-1. network
+1. network                    (create mode by default; adopt mode participates in a shared VPC)
 2. cluster
 3. cluster-bootstrap          (depends on cluster)
 4. cluster-addons             (depends on cluster)
 5. secrets                    (depends on cluster)
 6. observability              (depends on cluster)
-7. druid                      (depends on network + cluster)
-8. pipeline                   (depends on network + cluster)
-9. llm                        (depends on network + cluster)
-10. gateway                   (depends on cluster)
-11. rag                       (depends on cluster)
-12. mlops                     (depends on cluster)
-13. governance                (depends on cluster)
-14. cost                      (standalone)
-15. dns                       (standalone)
-16. backup                    (standalone)
-17. break-glass               (standalone)
-18. service-quotas            (standalone)
+7. agent-iam                  (depends on cluster; mints the operator role + tenant boundary)
+8. druid                      (depends on network + cluster)
+9. pipeline                   (depends on network + cluster)
+10. llm                       (depends on network + cluster)
+11. gateway                   (depends on cluster)
+12. rag                       (depends on cluster)
+13. mlops                     (depends on cluster)
+14. governance                (depends on cluster)
+15. competitive-intelligence-platform  (depends on network + cluster + agent-iam)
+16. digest-pipeline-platform           (depends on network + cluster + agent-iam)
+17. incident-response-platform         (depends on cluster + agent-iam)
+18. slack-knowledge-bot-platform       (depends on network + cluster + agent-iam)
+19. cost                      (standalone)
+20. dns                       (standalone)
+21. backup                    (standalone)
+22. break-glass               (standalone)
+23. service-quotas            (standalone)
+24. github-oidc               (standalone)
 ```
 
-Steps 3-13 can run in parallel within their dependency tier. Steps 14-18 can run at any time.
+Steps 3-14 can run in parallel within their dependency tier; the four `*-platform` tenants
+(15-18) need `agent-iam` first (and their `Platform` CR `Ready` before the Pod Identity
+association applies — see [First-time AWS Deploy](first-deploy-aws.md)). Steps 19-24 can run at
+any time.
+
+The cross-account **network-owner** components (`shared-network`, `egress-network`) and the
+**hub** control plane (`managed-monitoring`, `fleet-*`, `portal-*`) deploy from their own
+`live/aws/network/` and `live/aws/fleet/` trees, not the per-environment workload accounts.
 
 Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run --all -- apply`, which handles ordering automatically.
 

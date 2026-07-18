@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # Creates the S3 bucket for Terraform state.
-# Usage: ./scripts/init-backend.sh <account_id> <region>
+# Usage: ./scripts/init-backend-aws.sh <account_id> <region>
 
-ACCOUNT_ID="${1:?Usage: init-backend.sh <account_id> <region>}"
-REGION="${2:?Usage: init-backend.sh <account_id> <region>}"
+ACCOUNT_ID="${1:?Usage: init-backend-aws.sh <account_id> <region>}"
+REGION="${2:?Usage: init-backend-aws.sh <account_id> <region>}"
 BUCKET="${ACCOUNT_ID}-${REGION}-tfstate"
 
 echo "Creating S3 bucket: ${BUCKET}"
