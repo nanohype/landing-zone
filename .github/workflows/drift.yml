@@ -91,6 +91,18 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ matrix.region }}
 
+      # `terragrunt plan -detailed-exitcode` returns three distinct codes, and they
+      # mean three different things — conflating them is how drift detection goes
+      # dark on the failure mode most likely to actually occur:
+      #   0 — no changes (in sync). Nothing to report.
+      #   1 — the plan ERRORED (expired auth, a broken/renamed provider, an
+      #       unresolvable dependency). This is NOT "no drift" — it means we never
+      #       got a real answer. Alert distinctly and fail the job so it goes red.
+      #   2 — real drift (the live resources differ from the committed config).
+      #       Open/update the drift issue; the job stays green (drift is tracked,
+      #       not a CI failure).
+      # `set +e` keeps the step from aborting on code 1 before we can branch on it;
+      # PIPESTATUS[0] captures terragrunt's code through the `tee` pipe.
       - name: Plan
         id: plan
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
@@ -136,3 +148,51 @@ jobs:
                 labels: ['drift'],
               });
             }
+
+      # A plan ERROR (exit 1) is its own alert — a distinct title + label so it
+      # never reads as "no drift". Uses the same open/update idiom as the drift
+      # report so a persistently-broken component doesn't spawn an issue per run.
+      - name: Report plan error
+        if: steps.plan.outputs.exitcode == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}/plan.txt', 'utf8');
+            const truncated = plan.length > 60000 ? plan.substring(0, 60000) + '\n... truncated' : plan;
+
+            const title = `Drift check error: ${{ matrix.env }}/${{ matrix.component }}`;
+            const body = `## Drift Check ERROR\n\nThe drift plan for this component failed to run — this is **not** "no drift", it means the check could not determine drift (expired auth, a broken provider, an unresolvable dependency). Resolve this before trusting the drift status of this component.\n\n**Account:** ${{ matrix.account }}\n**Region:** ${{ matrix.region }}\n**Environment:** ${{ matrix.env }}\n**Component:** ${{ matrix.component }}\n**Detected:** ${new Date().toISOString()}\n\n<details><summary>Plan error output</summary>\n\n\`\`\`\n${truncated}\n\`\`\`\n\n</details>`;
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'drift-error',
+            });
+
+            const existing = issues.data.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['drift-error'],
+              });
+            }
+
+      # Fail the job on a plan error so the run goes red, not green-with-no-drift.
+      # Real drift (exit 2) is reported above and intentionally leaves the job green.
+      - name: Fail on plan error
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          echo "::error::Drift plan for ${{ matrix.env }}/${{ matrix.component }} errored (exit 1) — see the 'Drift check error' issue."
+          exit 1

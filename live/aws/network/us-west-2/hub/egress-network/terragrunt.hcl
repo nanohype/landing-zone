@@ -23,4 +23,8 @@ inputs = {
   # setting org-networking's egress_tgw_attachment_id to this component's tgw_attachment_id
   # output (see the component README).
   transit_gateway_id = "tgw-0a1b2c3d4e5f60789"
+
+  # Flow logs on: this hub is the single egress chokepoint for every environment's
+  # spoke traffic, so its flow logs are the highest-value network visibility in the org.
+  enable_flow_logs = true
 }
