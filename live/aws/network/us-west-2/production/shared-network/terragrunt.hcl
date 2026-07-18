@@ -18,4 +18,8 @@ inputs = {
   share_public_subnets = true
 
   enable_vpc_endpoints = true
+
+  # Flow logs on: this shared VPC carries every adopting account's traffic, so it is
+  # the owner's job to log it (an adopting spoke can't log a VPC it doesn't own).
+  enable_flow_logs = true
 }

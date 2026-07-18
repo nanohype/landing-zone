@@ -56,6 +56,13 @@ resource "aws_kms_key" "portal_state" {
   deletion_window_in_days = 30
   enable_key_rotation     = true
   tags                    = local.tags
+
+  # Crown-jewel: this CMK decrypts the portal's tofu state. A tofu destroy of
+  # portal-hub must never schedule it for deletion (which would render the state
+  # bucket unreadable) — deliberate teardown removes this guard first.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_kms_alias" "portal_state" {
@@ -66,12 +73,42 @@ resource "aws_kms_alias" "portal_state" {
 resource "aws_s3_bucket" "portal_state" {
   bucket = var.state_bucket_name
   tags   = local.tags
+
+  # Crown-jewel: this bucket holds the portal's tofu state. A tofu destroy of
+  # portal-hub must never delete it — a deliberate teardown removes this guard first.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "portal_state" {
   bucket = aws_s3_bucket.portal_state.id
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+# Versioning keeps every prior state as a noncurrent object; without expiry they
+# accumulate forever. Keep the 10 most recent noncurrent versions unconditionally
+# (recent-rollback safety), and expire the rest after 90 days. Aborted multipart
+# uploads (interrupted state writes) are swept after 7 days.
+resource "aws_s3_bucket_lifecycle_configuration" "portal_state" {
+  bucket     = aws_s3_bucket.portal_state.id
+  depends_on = [aws_s3_bucket_versioning.portal_state]
+
+  rule {
+    id     = "expire-noncurrent-state"
+    status = "Enabled"
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days           = 90
+      newer_noncurrent_versions = 10
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 

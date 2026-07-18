@@ -64,7 +64,7 @@ tasks:
       - python3 scripts/check-mock-outputs.py
 
   test:
-    desc: Run the tofu test unit suites (security-contract tests) across modules and components
+    desc: Run the tofu test unit suites (security-contract tests) across modules, components, and fleet vend roots
     cmds:
       - |
         set -euo pipefail
@@ -73,9 +73,9 @@ tasks:
           found=1
           echo "── tofu test — $dir"
           ( cd "$dir" && tofu init -backend=false -input=false > /dev/null && tofu test )
-        done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
+        done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' 'fleet/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
         if [ "$found" -eq 0 ]; then
-          echo "no tofu test suites found under modules/**/tests/ or components/**/tests/" >&2
+          echo "no tofu test suites found under modules/**/tests/, components/**/tests/, or fleet/**/tests/" >&2
           exit 1
         fi
         echo "All tofu test suites passed."

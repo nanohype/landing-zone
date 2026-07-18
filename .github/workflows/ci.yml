@@ -109,8 +109,8 @@ jobs:
   # providers (no AWS access), so this is a hard gate on security contracts —
   # the workload-identity trust policy staying Pod-Identity-only, and the
   # agent-iam operator's tenant-role writes staying boundary-gated. Auto-discovers
-  # every module AND component that has a tests/ dir so new tests run without a
-  # workflow edit.
+  # every module, component, AND fleet vend root that has a tests/ dir so new
+  # tests run without a workflow edit.
   test:
     name: Unit Tests (tofu test)
     runs-on: ubuntu-latest
@@ -128,9 +128,9 @@ jobs:
             echo "::group::tofu test — $dir"
             ( cd "$dir" && tofu init -backend=false -input=false && tofu test )
             echo "::endgroup::"
-          done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
+          done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' 'fleet/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
           if [ "$found" -eq 0 ]; then
-            echo "::error::no unit tests discovered under modules/**/tests/ or components/**/tests/"
+            echo "::error::no unit tests discovered under modules/**/tests/, components/**/tests/, or fleet/**/tests/"
             exit 1
           fi
 
