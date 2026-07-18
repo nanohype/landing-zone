@@ -102,3 +102,87 @@ run "no_managed_monitoring_omits_opencost_label" {
     error_message = "without managed monitoring the amp-workspace-id annotation must also be absent"
   }
 }
+
+# ── network mode create: the cluster Secret carries the network_mode label so ──
+# eks-gitops generators can select on it unconditionally, publishes no subnet
+# annotations (a create cluster's load balancers auto-discover subnets by the ELB
+# role tags it stamps), and the network-config ConfigMap the eks-gitops Kyverno
+# subnet-injection policy reads exists with empty CSVs. Subnet IDs are set here
+# even though the mode is create — the live envcommon passes network's outputs
+# through unconditionally, so this proves the component's own mode gate is
+# load-bearing: create-mode subnets are dropped, not just absent by default.
+run "create_mode_publishes_empty_network_config" {
+  command = plan
+
+  variables {
+    network_mode       = "create"
+    private_subnet_ids = ["subnet-1", "subnet-2", "subnet-3"]
+    public_subnet_ids  = ["subnet-4", "subnet-5", "subnet-6"]
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].labels["network_mode"] == "create"
+    error_message = "in create mode the cluster Secret must carry network_mode=create (always set, so a generator can select on it unconditionally)"
+  }
+
+  assert {
+    condition     = !contains(keys(kubernetes_secret_v1.argocd_cluster.metadata[0].annotations), "network/private-subnet-ids")
+    error_message = "in create mode no network/private-subnet-ids annotation must be published — a create cluster discovers subnets by tag"
+  }
+
+  assert {
+    condition     = !contains(keys(kubernetes_secret_v1.argocd_cluster.metadata[0].annotations), "network/public-subnet-ids")
+    error_message = "in create mode no network/public-subnet-ids annotation must be published"
+  }
+
+  assert {
+    condition     = kubernetes_config_map_v1.network_config.data["network_mode"] == "create"
+    error_message = "the kube-system/network-config ConfigMap must record network_mode=create"
+  }
+
+  assert {
+    condition     = kubernetes_config_map_v1.network_config.data["private_subnet_ids"] == "" && kubernetes_config_map_v1.network_config.data["public_subnet_ids"] == ""
+    error_message = "in create mode both network-config subnet CSVs must be empty — the Kyverno policy needs no explicit injection, but the ConfigMap must still exist so its context lookup never misses"
+  }
+}
+
+# ── network mode adopt: the Secret carries network_mode=adopt plus both subnet-ID ──
+# annotations, and the network-config ConfigMap carries both populated CSVs — the
+# explicit subnet IDs an adopt cluster's load balancer controller can't discover by
+# tag, because RAM hides owner subnet tags from participant accounts. Both CSVs
+# because scheme-aware injection needs private (internal LB) and public
+# (internet-facing LB) subnets.
+run "adopt_mode_publishes_both_subnet_csvs" {
+  command = plan
+
+  variables {
+    network_mode       = "adopt"
+    private_subnet_ids = ["subnet-0aaa", "subnet-0bbb", "subnet-0ccc"]
+    public_subnet_ids  = ["subnet-0ddd", "subnet-0eee", "subnet-0fff"]
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].labels["network_mode"] == "adopt"
+    error_message = "in adopt mode the cluster Secret must carry network_mode=adopt"
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].annotations["network/private-subnet-ids"] == "subnet-0aaa,subnet-0bbb,subnet-0ccc"
+    error_message = "adopt mode must publish the private subnet IDs as a comma-joined annotation"
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].annotations["network/public-subnet-ids"] == "subnet-0ddd,subnet-0eee,subnet-0fff"
+    error_message = "adopt mode must publish the public subnet IDs as a comma-joined annotation"
+  }
+
+  assert {
+    condition     = kubernetes_config_map_v1.network_config.data["private_subnet_ids"] == "subnet-0aaa,subnet-0bbb,subnet-0ccc"
+    error_message = "the network-config ConfigMap must carry the populated private subnet CSV in adopt mode"
+  }
+
+  assert {
+    condition     = kubernetes_config_map_v1.network_config.data["public_subnet_ids"] == "subnet-0ddd,subnet-0eee,subnet-0fff"
+    error_message = "the network-config ConfigMap must carry the populated public subnet CSV in adopt mode"
+  }
+}

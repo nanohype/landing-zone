@@ -37,6 +37,29 @@ variable "vpc_id" {
   type        = string
 }
 
+variable "network_mode" {
+  description = "How the cluster's VPC was provisioned: create (the cluster owns a VPC it built) or adopt (the cluster participates in a VPC owned elsewhere, same- or cross-account via AWS RAM). Published as the network_mode label on the ArgoCD cluster Secret so eks-gitops ApplicationSet generators can select on it unconditionally, and onto the kube-system/network-config ConfigMap the scheme-aware Kyverno load-balancer subnet injection reads. A create cluster carries the ELB role tags load balancer controllers auto-discover, so it publishes no explicit subnet IDs; an adopt cluster must, because RAM hides owner subnet tags from participant accounts."
+  type        = string
+  default     = "create"
+
+  validation {
+    condition     = can(regex("^(create|adopt)$", var.network_mode))
+    error_message = "network_mode must be either create or adopt."
+  }
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs of the cluster's VPC. Published (as a Secret annotation + a ConfigMap CSV) only in adopt mode, where a load balancer controller can't auto-discover subnets by tag because RAM hides owner subnet tags from participants. Left empty in create mode, where subnets are discovered by the kubernetes.io/role/internal-elb tag the cluster stamps."
+  type        = list(string)
+  default     = []
+}
+
+variable "public_subnet_ids" {
+  description = "Public subnet IDs of the cluster's VPC. Published (as a Secret annotation + a ConfigMap CSV) only in adopt mode so scheme-aware subnet injection can place internet-facing load balancers on public subnets. Left empty in create mode, where subnets are discovered by the kubernetes.io/role/elb tag the cluster stamps."
+  type        = list(string)
+  default     = []
+}
+
 variable "cilium_version" {
   description = "Cilium Helm chart version"
   type        = string

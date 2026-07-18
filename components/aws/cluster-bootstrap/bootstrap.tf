@@ -349,6 +349,10 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       "region"                         = var.region
       "cluster_name"                   = var.cluster_name
       "vpc_id"                         = var.vpc_id
+      # Always set, so an eks-gitops ApplicationSet generator can select on the
+      # network mode unconditionally (a generator can't branch on an annotation's
+      # presence). create for a self-owned VPC, adopt for a participated one.
+      "network_mode" = var.network_mode
       }, var.enable_agent_platform ? {
       # Opts this cluster into the eks-agent-platform operator ApplicationSet.
       # Disable to install the operator out of band (see enable_agent_platform).
@@ -409,6 +413,16 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # external-dns's domainFilter, confining the controller to this cluster's
       # Route53 zone. Absent on the hub, which runs no external-dns.
       "external-dns/domain-filter" = data.aws_ssm_parameter.external_dns_domain_filter[0].value
+      } : {}, var.network_mode == "adopt" ? {
+      # Explicit subnet IDs for scheme-aware load balancer subnet injection on an
+      # adopt cluster. RAM hides the owner's subnet tags from participant accounts,
+      # so a load balancer controller here can't auto-discover subnets by the
+      # kubernetes.io/role/{elb,internal-elb} tags a create cluster relies on — the
+      # eks-gitops Kyverno policy reads these annotations to inject the subnets
+      # instead. Absent in create mode (auto-discovery works there). Annotations, not
+      # labels, because a comma-joined subnet-ID list exceeds label-value char rules.
+      "network/private-subnet-ids" = join(",", var.private_subnet_ids)
+      "network/public-subnet-ids"  = join(",", var.public_subnet_ids)
     } : {})
   }
 
@@ -418,6 +432,37 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
   }
 
   depends_on = [helm_release.argocd]
+}
+
+################################################################################
+# Network config ConfigMap (Kyverno context source for LB subnet injection)
+#
+# A cluster-local, always-present record of how this cluster's VPC was
+# provisioned and which subnets it uses. The eks-gitops scheme-aware Kyverno
+# policy that injects load balancer subnet annotations reads this at admission
+# time — an ApplicationSet generator can only see the cluster-registry Secret,
+# but Kyverno needs an in-cluster resource. Written in BOTH modes so the policy's
+# context lookup never misses (an absent ConfigMap fails the mutation): a create
+# cluster carries empty subnet CSVs (its load balancer controllers auto-discover
+# subnets by the ELB role tags the cluster stamps), an adopt cluster carries the
+# explicit private/public subnet IDs a participant can't discover by tag, and the
+# mutation is scheme-aware — internal load balancers land on the private subnets,
+# internet-facing ones on the public subnets.
+################################################################################
+
+resource "kubernetes_config_map_v1" "network_config" {
+  metadata {
+    name      = "network-config"
+    namespace = "kube-system"
+  }
+
+  data = {
+    network_mode       = var.network_mode
+    private_subnet_ids = var.network_mode == "adopt" ? join(",", var.private_subnet_ids) : ""
+    public_subnet_ids  = var.network_mode == "adopt" ? join(",", var.public_subnet_ids) : ""
+  }
+
+  depends_on = [helm_release.cilium]
 }
 
 ################################################################################

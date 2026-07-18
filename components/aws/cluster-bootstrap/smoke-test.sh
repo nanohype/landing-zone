@@ -82,4 +82,16 @@ if [[ "$CTRL_READY" -eq 0 ]]; then
 fi
 echo "  ArgoCD application controller ready (${CTRL_READY} replicas)"
 
+# --- Network config ConfigMap ---
+# The eks-gitops scheme-aware Kyverno load-balancer subnet-injection policy reads
+# this at admission time; it must exist on every cluster (both modes) or that
+# mutation fails its context lookup.
+echo "Checking kube-system/network-config ConfigMap..."
+NET_MODE=$(kubectl get configmap network-config -n kube-system -o jsonpath='{.data.network_mode}' 2>/dev/null || echo "NOT_FOUND")
+if [[ "$NET_MODE" != "create" && "$NET_MODE" != "adopt" ]]; then
+  echo "FAIL: network-config ConfigMap missing or network_mode is '${NET_MODE}' (expected create or adopt)"
+  exit 1
+fi
+echo "  network-config present (network_mode=${NET_MODE})"
+
 echo "PASS: all cluster-bootstrap checks passed"
