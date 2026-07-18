@@ -27,7 +27,7 @@ intentionally — never bulk-delete them.
 | 24 | Endpoint posture flip (after rackctl target 23) | ✅ #141 |
 | 31 | Network-campaign punch list (2026-07-18 re-audit) | ✅ #153 |
 | 32 | Doc inventory refresh + state-bucket hardening (2026-07-18 re-audit) | ✅ #154 |
-| 35 | Phase 11 polish: flow-log module, SNS conditions, checkov narrowing, cluster/module test coverage, protohype residue, guards | ✅ #PR |
+| 35 | Phase 11 polish: flow-log module, SNS conditions, checkov narrowing, cluster/module test coverage, protohype residue, guards | ✅ #156 |
 
 ---
 
