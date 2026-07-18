@@ -1159,3 +1159,58 @@ label, plus a `network-config` ConfigMap with empty subnet-ID data for both CSVs
 render/plan with `network_mode=adopt` shows both populated
 `network/private-subnet-ids` + `network/public-subnet-ids` Secret annotations and
 both populated ConfigMap CSVs.
+
+---
+
+## Post-campaign follow-up — worked adopt-mode consumer example
+
+The 12-target campaign above is closed; this section records one follow-up wired
+after it, and does not reopen any target row.
+
+**Gap it closed.** The campaign built the full create/adopt schema and the owner side
+of the cross-account topology — every network-related live leaf defaulted to `create`
+mode, and `shared-network` leaves RAM-share to placeholder consumer accounts — but no
+committed live leaf actually *consumed* a `shared-network` leaf in `adopt` mode. The
+owner side had a worked example; the consumer side did not, so anyone flipping a spoke
+into adopt mode (a real engagement, or rackctl's future adopt-mode support) had to
+invent the wiring shape from scratch.
+
+**What was wired.** `live/aws/workload-development/us-west-2/development/network/
+terragrunt.hcl` now runs `network_mode = "adopt"`, consuming its sibling
+`live/aws/network/us-west-2/development/shared-network` leaf via a
+`dependency "shared_network"` block (`config_path =
+"../../../../network/us-west-2/development/shared-network"`, verified with
+`realpath --relative-to`). `adopt_vpc_id` / `adopt_private_subnet_ids` /
+`adopt_public_subnet_ids` read straight from that dependency's
+`vpc_id` / `private_subnet_ids` / `public_subnet_ids` outputs — a consumer never
+hand-copies subnet IDs. The dependency block mirrors the `cluster.hcl` pattern:
+`mock_outputs` + `mock_outputs_allowed_terraform_commands = ["validate", "plan"]` so
+the credential-less CI evaluate job resolves it. The three create-mode levers the leaf
+used to set (`nat_gateways`, `enable_flow_logs`, `enable_vpc_endpoints`) were stripped
+— they're all gated on `local.create_mode` in the component and are owner-side concerns
+`shared-network` runs; `ipam_pool_id` / `transit_gateway_id` / `centralized_egress`
+additionally hard-reject `network_mode = adopt` in their validations. Same-account by
+design (both leaves are illustrative placeholders); a real cross-account engagement
+copies the wiring verbatim and changes only the owner account id + `consumer_account_ids`.
+
+This is intentionally the org's canonical adopt-mode reference, marked as such in a
+comment at the top of the leaf, so future engagements copy a concrete, CI-verified
+pattern rather than inventing one.
+
+**CI safety — confirmed, not assumed.** Two mechanics matter for merging an adopt leaf
+whose adopt subnet IDs are mocks:
+- The `evaluate` job (`terragrunt render`, credential-less) is the real HCL-layer gate.
+  Reproduced locally: the leaf renders at exit 0, the dependency falls back to its mocks
+  ("no outputs, but mock outputs provided"), and `network_mode = adopt` + the `adopt_*`
+  inputs resolve correctly.
+- The `Plan` job (`terragrunt plan` per leaf) would run the component's real
+  `data "aws_subnet"` / `aws_route_table` / `aws_vpc` lookups in `adopt.tf` against the
+  supplied IDs — genuine AWS API calls the terragrunt `dependency` mocks do NOT
+  intercept (mocks cover the dependency's outputs, not data sources inside the consuming
+  component). A real plan against the mock IDs would fail at that lookup. It does not run:
+  the job green-skips when `AWS_ROLE_ARN` is unset in repo Variables. Verified directly
+  on merged PR #149 — `Configure AWS credentials: skipped`, `Plan: skipped`, job
+  conclusion `success`. This whole repo is unapplied and no AWS credentials are
+  configured, so the leaf is safe to merge. If credentials are ever configured, an adopt
+  leaf backed by mock subnet IDs would fail its real plan — that's the tradeoff of a
+  worked example against placeholder infra, and the leaf's comment says so.
