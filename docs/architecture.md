@@ -62,6 +62,10 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
   Fleet / portal subsystem (cross-account, hub-side):
   fleet-hub -> fleet-vend; portal-hub -> portal-spoke,
   fleet-unwedge; managed-monitoring (AMP/AMG on the hub)
+
+  Network-owner account (cross-account adopt topology):
+  shared-network -> workload network (adopt mode, via RAM);
+  egress-network (central egress hub behind the org TGW)
 ```
 
 ### Dependency Details
@@ -70,6 +74,7 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
 |-----------|-----------|----------|
 | **network** | -- | -- |
 | **shared-network** | -- (org IPAM pool discovered by tag, cross-account via RAM) | -- |
+| **egress-network** | -- (org TGW RAM-shared in; `org-networking` owns the static default route) | -- |
 | **cluster** | network | vpc_id, private_subnet_ids, public_subnet_ids |
 | **cluster-addons** | cluster | cluster_name, oidc_provider_arn, oidc_issuer |
 | **cluster-bootstrap** | cluster | cluster_name, cluster_endpoint, cluster_certificate_authority_data |
@@ -150,6 +155,24 @@ them — the seam that lets a workload cluster participate in a VPC it does not 
 The workload account then runs `network` in `adopt` mode against the shared subnet IDs and a
 `cluster` with `stamp_subnet_tags = false`. See `components/aws/shared-network/README.md` for
 the full owner↔consumer contract.
+
+### Egress Network Layer
+
+**Component:** `egress-network` (network-owner account, hub slot)
+
+The central-egress hub — the far side of `centralized_egress`. When a spoke VPC (a create-mode
+`network` or a `shared-network` owner VPC) sets `centralized_egress = true`, it drops local NAT
+and points its private default route (`0.0.0.0/0`) at the org transit gateway. This hub
+terminates that traffic and carries it to the internet: a small dedicated-CIDR VPC with NAT
+gateways, a cross-account TGW attachment, and the return route (`spoke_supernet_cidr → TGW`).
+
+Responsibility is split: this participant-side component builds the VPC, NAT, and attachment
+and publishes `tgw_attachment_id`; the static `0.0.0.0/0` route in the TGW's route table is
+owned by `org-networking` (a TGW participant cannot write the shared TGW's route tables). There
+is exactly one egress hub per transit gateway — the org runs a single TGW, so a single hub
+serves every environment, which means development/staging/production share its NAT source IPs
+and port capacity. See `components/aws/egress-network/README.md` for the full path trace and
+the shared-hub blast-radius discussion.
 
 ### Cluster Layer
 
@@ -296,6 +319,30 @@ The `org-identity` component manages IAM Identity Center -- 5 permission sets (A
 State lives in S3 (versioned, AES-256 encrypted) with native conditional-write locking (`use_lockfile`). Buckets are named `{account_id}-{region}-tfstate` and created by `scripts/init-backend-aws.sh`; state keys follow `{environment}/{component}/terraform.tfstate`.
 
 Each component in each environment has independent state, enabling parallel operations and isolated blast radius.
+
+## SSM Parameter Namespaces
+
+Components publish discovery facts (IDs, ARNs, bucket names — never secrets) to SSM Parameter
+Store. Four prefix families coexist, and the prefix records **who reads the parameter**, not
+which component wrote it:
+
+| Prefix | Purpose | Writers |
+|--------|---------|---------|
+| `/platform/<env>/<component>/*` | owner-account metadata and audit — same-account reads by that account's own automation, not a cross-account hand-off | `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`, `org-scp`, `cost`, `secrets`, `shared-network` |
+| `/eks-agent-platform/<cluster-or-env>/<component>/*` | the cluster-consumer contract surface — `cluster-bootstrap` reads these and stamps them onto the ArgoCD cluster registration Secret's annotations, where the `eks-agent-platform` operator and the `eks-gitops` addons consume them | `managed-monitoring`, `dns`, `cluster-addons`, `agent-iam`/eval-runtime |
+| `/<env>/<component>/*` | standalone operational components that predate the `/platform/` convention | `break-glass`, `backup`, `service-quotas` |
+| `/aws/*` | AWS-reserved paths the repo names within or reads — CloudWatch log-group names (flow logs, CloudTrail, API Gateway) and the public Ubuntu AMI parameter — following AWS's own conventions, not a landing-zone namespace | (log groups; AMI data lookups) |
+
+The split is intentional for three of the four. `/eks-agent-platform/*` is named for the
+**consumer** (the operator's API group / domain) precisely so it forms a stable contract the
+cluster reads regardless of which landing-zone component produced the value — decoupling the
+producer from the reader is the point. `/platform/*` is the generic owner/org metadata
+namespace, read only inside the producing account. `/aws/*` is not ours to name.
+
+The one genuine inconsistency is the bare `/<env>/*` family (`break-glass`, `backup`,
+`service-quotas`): those three could sit under `/platform/<env>/<component>/*` like their
+siblings. It is cosmetic, not a defect — nothing reads them through a hardcoded `/platform/`
+path, so the bare prefix breaks nothing; normalizing it is a low-priority cleanup, not a fix.
 
 ## Team Ownership
 

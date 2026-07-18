@@ -6,7 +6,7 @@ You're an AI client (or the author of one) about to provision cloud substrate. T
 
 OpenTofu + Terragrunt monorepo for the AWS substrate every nanohype-stack app lands on:
 
-- **`components/aws/`** — VPC, base IAM, KMS keys, EKS cluster, cluster bootstrap, observability, secrets, gateway, governance, plus per-app `<app>-platform` single-tenant components (incident-response-platform, slack-knowledge-bot-platform, digest-pipeline-platform). Shared multi-tenant components: `rag`, `pipeline`, `llm`, `governance`.
+- **`components/aws/`** — VPC (`network`/`shared-network`/`egress-network`), base IAM, KMS keys, EKS cluster, cluster bootstrap, observability, secrets, gateway, governance, `agent-iam`, plus per-app `<app>-platform` single-tenant components (competitive-intelligence-platform, digest-pipeline-platform, incident-response-platform, slack-knowledge-bot-platform). Shared multi-tenant components (`var.tenants`): `druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`.
 
 Plus:
 
@@ -23,7 +23,7 @@ Every component:
 - Tags every resource with `Environment`, `ManagedBy`, `Project`, `CostCenter`, `BusinessUnit`, `DataClassification`, `Compliance`, `Repository` (default tags emitted by `live/root.hcl`).
 - Uses EKS Pod Identity via the shared `modules/aws/workload-identity` module. Trust policies target `pods.eks.amazonaws.com` (not an OIDC provider), and each role is bound to a specific ServiceAccount in a specific namespace through an EKS Pod Identity association.
 
-The per-app `<app>-platform` pattern: when an app's resource shape doesn't generalize into existing multi-tenant components, ship a single-tenant component named `<app>-platform`. Examples: `incident-response-platform`, `slack-knowledge-bot-platform`, `digest-pipeline-platform`. Each provisions the app's bespoke DDB tables, SQS queues, S3 buckets, RDS clusters, KMS keys, plus a consolidated `<app>-app-access` managed policy and the EKS Pod Identity association binding the app's ServiceAccount to the operator-reconciled `<env>-<app>-tenant` role. Bedrock model access is NOT granted here — it comes from the agent-iam tenant baseline, clamped by the operator to `Platform.spec.identity.allowedModels`; the app-access policy reaches the role through `Platform.spec.identity.extraPolicyArns`. Emits `app_access_policy_arn` for that spec entry.
+The per-app `<app>-platform` pattern: when an app's resource shape doesn't generalize into existing multi-tenant components, ship a single-tenant component named `<app>-platform`. Examples: `competitive-intelligence-platform`, `digest-pipeline-platform`, `incident-response-platform`, `slack-knowledge-bot-platform`. Each provisions the app's bespoke DDB tables, SQS queues, S3 buckets, RDS clusters, KMS keys, plus a consolidated `<app>-app-access` managed policy and the EKS Pod Identity association binding the app's ServiceAccount to the operator-reconciled `<env>-<app>-tenant` role. Bedrock model access is NOT granted here — it comes from the agent-iam tenant baseline, clamped by the operator to `Platform.spec.identity.allowedModels`; the app-access policy reaches the role through `Platform.spec.identity.extraPolicyArns`. Emits `app_access_policy_arn` for that spec entry.
 
 ## Add a new component
 

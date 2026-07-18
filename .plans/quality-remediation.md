@@ -26,7 +26,7 @@ intentionally — never bulk-delete them.
 | 19b | Cluster-bootstrap `monitoring/managed` label | ✅ #140 |
 | 24 | Endpoint posture flip (after rackctl target 23) | ✅ #141 |
 | 31 | Network-campaign punch list (2026-07-18 re-audit) | ✅ #153 |
-| 32 | Doc inventory refresh + state-bucket hardening (2026-07-18 re-audit) | ☐ |
+| 32 | Doc inventory refresh + state-bucket hardening (2026-07-18 re-audit) | ✅ #154 |
 
 ---
 
@@ -792,3 +792,63 @@ the repo is listed; AGENTS.md's multi-tenant/platform inventory matches
 `docs/operations.md` and the tree; `network/` has a README; architecture.md's
 graph includes all three new components; docs read atemporally (no "recently
 added" framing — describe the current state).
+
+Outcome (✅ #154): **docs-only pass; the state-bucket half was already fully
+covered by Target 31, so this target was purely the doc inventory.** Resolutions
+and scope discovered:
+
+- **The tree is 38 components** (verified by `ls components/aws/`), not a fixed
+  count trusted from the finding. CLAUDE.md's architecture section was rewritten
+  to list all 38 grouped by layer (network create/adopt · cluster · workload ·
+  operational · agent-platform · fleet & portal · organization) plus the three
+  `modules/aws/` modules, the `hub`/`network` accounts, and the dependency chain
+  through `agent-iam → *-platform`. Verified **two-way**: every component on disk
+  appears in CLAUDE.md, and every component-shaped token in CLAUDE.md resolves to
+  a real dir/module (the only non-dir token is `fleet`, the account name used in
+  prose). `docs/architecture.md` also lists all 38.
+- **AGENTS.md** listed 4 of 7 multi-tenant components and omitted
+  `competitive-intelligence-platform`; both fixed. The multi-tenant list is now
+  identical across AGENTS.md, `docs/operations.md:130`, and the tree
+  (druid/pipeline/gateway/llm/mlops/rag/governance), and all four `*-platform`
+  substrates are listed. AGENTS.md stays an entry-point summary (it deliberately
+  does not enumerate the operational/org/fleet/portal components) — only its
+  multi-tenant/platform inventory was in scope.
+- **`components/aws/network/README.md`** written to match the shared-network /
+  egress-network sibling depth: the create | adopt contract, create-mode
+  VPC/IPAM/TGW/centralized-egress levers, the IPAM carving pin, the full
+  adopt-mode consumer preflight (subnet placement, exact S3 gateway prefix-list
+  route, live default egress, AZ coverage) and what it deliberately cannot assert,
+  and selected inputs/outputs.
+- **`docs/architecture.md`** gains `egress-network` in the dependency graph and
+  table, an Egress Network Layer section, and a new **SSM Parameter Namespaces**
+  section. `README.md`'s diagram adds the agent-platform, hub, and network-owner
+  layers; its repo tree adds `fleet/`, the `fleet`/`network` live accounts, and
+  the `platform-app`/`eks-vpc-endpoints` modules, and drops the root `.tflint.hcl`
+  Target 16 removed. `docs/inputs.md` gains a `network_mode`/`adopt_*` section.
+  `docs/operations.md`'s deploy order now includes `agent-iam` + the four tenant
+  substrates and points at the separate owner/hub trees. The
+  `init-backend-aws.sh` usage string names the real script.
+- **The 4-family SSM split is a documentable design choice, not a bug** (checked,
+  not assumed). `/eks-agent-platform/*` is deliberately named for the *consumer*
+  (the operator's domain) so it forms a stable contract `cluster-bootstrap` reads
+  regardless of producer; `/platform/*` is owner/org metadata read same-account;
+  `/aws/*` is AWS-reserved. The one real inconsistency is the bare `/<env>/*`
+  family (`break-glass`, `backup`, `service-quotas`) — cosmetic, breaks nothing
+  (nothing reads them by a hardcoded prefix), documented as a low-priority cleanup
+  rather than refactored. No SSM path was changed.
+- **State-bucket hardening: nothing to do.** Target 31 (#153) already added
+  `prevent_destroy` on the state bucket + KMS CMK and a noncurrent-version
+  lifecycle to both state-bucket components (fleet-hub and portal-hub), so this
+  target touched no `.tf`/`.hcl`. Verified docs-only: `task fmt:check` clean.
+
+Scope discovered — **#153 (Target 31) had not actually merged and its Unit Tests
+gate was red.** The new `fleet/aws/cluster-bootstrap` tftest passed on OpenTofu
+1.12 (the author's local version) but failed on CI's pinned 1.11.5: the suite
+declared `mock_provider` blocks for the kubernetes/helm/kubectl/github providers
+the wrapped legacy module self-declares, and on 1.11.5 mocking a provider that is
+configured inside a legacy child module makes `tofu test` resolve the child's
+config against the mock's empty schema, rejecting every real argument. Since this
+target is sequentially dependent on #153, the four dead `mock_provider` blocks
+were removed (the author's own comment already noted they were ineffective),
+verified green on both 1.11.5 and 1.12.0 with the sibling cluster-stack and
+modules suites unaffected, and #153 was merged before this target branched.
