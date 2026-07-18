@@ -18,10 +18,18 @@
 # network owner (shared-network) owns subnet tagging there. In create mode (default) the
 # cluster owns or co-shares an in-account VPC and stamps its own ownership tag here.
 
+# count, not for_each: the subnet IDs are module.network outputs created in the SAME
+# apply as this cluster (the create-mode vend path), so they are unknown until apply.
+# for_each requires its set keys to be known at plan and would fail a from-scratch plan
+# ("the for_each set includes values derived from resource attributes that cannot be
+# determined until apply"). count needs only the LENGTH of the list, which IS known at
+# plan (it derives from max_azs, not from the unknown IDs), while the per-element
+# resource_id may resolve at apply. length is 0 when stamp_subnet_tags is false, so the
+# adopt topology stamps nothing.
 resource "aws_ec2_tag" "subnet_cluster_ownership" {
-  for_each = var.stamp_subnet_tags ? toset(concat(var.private_subnet_ids, var.public_subnet_ids)) : toset([])
+  count = var.stamp_subnet_tags ? length(concat(var.private_subnet_ids, var.public_subnet_ids)) : 0
 
-  resource_id = each.value
+  resource_id = concat(var.private_subnet_ids, var.public_subnet_ids)[count.index]
   key         = "kubernetes.io/cluster/${local.cluster_name}"
   value       = "shared"
 }
