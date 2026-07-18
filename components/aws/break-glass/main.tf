@@ -223,6 +223,10 @@ resource "aws_cloudwatch_event_target" "break_glass_sns" {
 resource "aws_sns_topic_policy" "break_glass_eventbridge" {
   arn = aws_sns_topic.break_glass.arn
 
+  # Scope the EventBridge publish grant to this account (aws:SourceAccount) and to
+  # the specific break-glass detection rule (aws:SourceArn) — the same
+  # confused-deputy guard the alert CMK policy carries. Without it, the events
+  # service principal acting for any account/rule could publish to this topic.
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -233,6 +237,14 @@ resource "aws_sns_topic_policy" "break_glass_eventbridge" {
       }
       Action   = "SNS:Publish"
       Resource = aws_sns_topic.break_glass.arn
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = local.account_id
+        }
+        ArnEquals = {
+          "aws:SourceArn" = aws_cloudwatch_event_rule.break_glass.arn
+        }
+      }
     }]
   })
 }

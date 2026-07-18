@@ -68,6 +68,19 @@ mock_provider "aws" {
       arn = "arn:aws:ec2:us-west-2:444444444444:subnet/subnet-mock"
     }
   }
+  # aws_flow_log ARN-validates iam_role_arn + log_destination at plan, and the
+  # mock's random default is not ARN-shaped — pin real ARNs for the flow-log role
+  # and log group so the enable_flow_logs run plans.
+  mock_resource "aws_iam_role" {
+    defaults = {
+      arn = "arn:aws:iam::444444444444:role/flow-logs-mock"
+    }
+  }
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:us-west-2:444444444444:log-group:flow-logs-mock"
+    }
+  }
 }
 
 variables {
@@ -118,6 +131,43 @@ run "nat_egress" {
   assert {
     condition     = alltrue([for k in concat(keys(output.subnet_role_tags.public), keys(output.subnet_role_tags.private)) : !startswith(k, "kubernetes.io/cluster/")])
     error_message = "shared subnets must carry NO kubernetes.io/cluster/<cluster> ownership tag"
+  }
+}
+
+# ── flow logs: the owner logs the shared VPC on behalf of every adopting account ──
+run "flow_logs_enabled" {
+  command = plan
+
+  variables {
+    enable_flow_logs     = true
+    consumer_account_ids = ["111111111111"]
+  }
+
+  assert {
+    condition     = length(module.vpc_flow_logs) == 1
+    error_message = "enable_flow_logs = true must instantiate the shared vpc-flow-logs module"
+  }
+  assert {
+    condition     = module.vpc_flow_logs[0].log_group_name == "/aws/vpc-flow-logs/development-shared"
+    error_message = "the shared VPC's flow log must write to /aws/vpc-flow-logs/<environment>-shared"
+  }
+  assert {
+    condition     = module.vpc_flow_logs[0].iam_role_name == "development-shared-net-flow-logs"
+    error_message = "the flow-log IAM role must be named <environment>-shared-net-flow-logs"
+  }
+}
+
+# ── flow logs off by default: no flow-log module instance ──
+run "flow_logs_off_by_default" {
+  command = plan
+
+  variables {
+    consumer_account_ids = ["111111111111"]
+  }
+
+  assert {
+    condition     = length(module.vpc_flow_logs) == 0
+    error_message = "flow logs are off by default (enable_flow_logs = false) — no flow-log module instance"
   }
 }
 

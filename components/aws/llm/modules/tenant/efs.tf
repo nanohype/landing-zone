@@ -1,4 +1,5 @@
 resource "aws_efs_file_system" "models" {
+  #checkov:skip=CKV_AWS_42:false positive — encryption is var-driven (tenant_config.efs_encryption, default true); checkov cannot see the variable default and flags the dynamic value.
   creation_token   = "${local.prefix}-models"
   encrypted        = var.tenant_config.efs_encryption
   performance_mode = var.tenant_config.efs_performance_mode

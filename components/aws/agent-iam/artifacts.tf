@@ -40,6 +40,7 @@ locals {
 ################################################################################
 
 resource "aws_s3_bucket" "access_logs" {
+  #checkov:skip=CKV_AWS_21:versioning is intentionally off — this is a server-access-log sink; log records are write-once and regenerable, so versioning adds cost with no recovery value.
   bucket = local.access_logs_bucket
   tags   = local.tags
 

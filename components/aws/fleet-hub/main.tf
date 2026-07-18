@@ -90,6 +90,12 @@ locals {
 # radius. Hardened accordingly — versioned, SSE-KMS with a dedicated CMK,
 # in-transit TLS enforced by bucket policy, server access logs to a private
 # sibling bucket, public access blocked; S3 native locking (use_lockfile).
+#
+# Naming exception: var.state_bucket_name carries no account-id element (the
+# convention every other bucket in this repo follows). It is a singleton in one
+# always-hub account and a cross-repo bootstrap contract, so global uniqueness
+# rides the org prefix instead — see the variable's own docs for the full
+# rationale.
 ################################################################################
 
 resource "aws_kms_key" "fleet_state" {
@@ -203,6 +209,7 @@ resource "aws_s3_bucket_logging" "fleet_state" {
 # Access-log sink for the state bucket. Private, its own TLS deny, and grants
 # only the S3 logging service principal PutObject for this source bucket.
 resource "aws_s3_bucket" "fleet_state_logs" {
+  #checkov:skip=CKV_AWS_21:versioning is intentionally off — this is a server-access-log sink; log records are write-once and regenerable, so versioning adds cost with no recovery value.
   bucket = "${var.state_bucket_name}-logs"
   tags   = local.tags
 

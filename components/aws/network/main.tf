@@ -171,63 +171,13 @@ resource "aws_security_group" "vpc_endpoints" {
 # VPC Flow Logs (create mode)
 ################################################################################
 
-resource "aws_flow_log" "this" {
+module "vpc_flow_logs" {
+  source = "../../../modules/aws/vpc-flow-logs"
+
   count = local.create_mode && var.enable_flow_logs ? 1 : 0
 
-  iam_role_arn    = aws_iam_role.flow_logs[0].arn
-  log_destination = aws_cloudwatch_log_group.flow_logs[0].arn
-  traffic_type    = "ALL"
-  vpc_id          = module.vpc[0].vpc_id
-
-  tags = local.tags
-}
-
-resource "aws_cloudwatch_log_group" "flow_logs" {
-  count = local.create_mode && var.enable_flow_logs ? 1 : 0
-
-  name              = "/aws/vpc-flow-logs/${var.environment}"
-  retention_in_days = 30
-
-  tags = local.tags
-}
-
-resource "aws_iam_role" "flow_logs" {
-  count = local.create_mode && var.enable_flow_logs ? 1 : 0
-
-  name = "${var.environment}-vpc-flow-logs"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "vpc-flow-logs.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-
-  tags = local.tags
-}
-
-resource "aws_iam_role_policy" "flow_logs" {
-  count = local.create_mode && var.enable_flow_logs ? 1 : 0
-
-  name = "${var.environment}-vpc-flow-logs"
-  role = aws_iam_role.flow_logs[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents",
-        "logs:DescribeLogGroups",
-        "logs:DescribeLogStreams",
-      ]
-      Resource = "*"
-    }]
-  })
+  vpc_id         = module.vpc[0].vpc_id
+  log_group_name = "/aws/vpc-flow-logs/${var.environment}"
+  role_name      = "${var.environment}-vpc-flow-logs"
+  tags           = local.tags
 }

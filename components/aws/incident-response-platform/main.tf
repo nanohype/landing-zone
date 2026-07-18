@@ -9,8 +9,8 @@
  * Single-tenant on purpose: incident-response's resource shapes (DDB GSI on
  * slack-channel-index, three FIFO queues with specific dedup semantics,
  * EventBridge Scheduler group, etc.) don't generalize cleanly to the
- * other protohype-team apps. Each app gets its own dedicated `<app>-platform`
- * component.
+ * other single-tenant platform apps. Each app gets its own dedicated
+ * `<app>-platform` component.
  *
  * Wired by live/_envcommon/aws/incident-response-platform.hcl. Output ARNs flow
  * back into the incident-response Platform CR's spec.irsa.policies via

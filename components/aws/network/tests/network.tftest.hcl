@@ -102,6 +102,19 @@ mock_provider "aws" {
       ]
     }
   }
+  # aws_flow_log ARN-validates iam_role_arn + log_destination at plan, and the
+  # mock's random default is not ARN-shaped — pin real ARNs for the flow-log role
+  # and log group so the enable_flow_logs run plans.
+  mock_resource "aws_iam_role" {
+    defaults = {
+      arn = "arn:aws:iam::123456789012:role/flow-logs-mock"
+    }
+  }
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:us-west-2:123456789012:log-group:flow-logs-mock"
+    }
+  }
 }
 
 variables {
@@ -137,6 +150,55 @@ run "create_default" {
   assert {
     condition     = length(output.nat_gateway_ids) == 1
     error_message = "nat_gateways = 1 (default) must plan exactly one shared NAT gateway"
+  }
+  assert {
+    condition     = length(module.vpc_flow_logs) == 0
+    error_message = "flow logs are off by default (enable_flow_logs = false) — no flow-log module instance"
+  }
+}
+
+# ── create + flow logs: the shared vpc-flow-logs module is instantiated and wired ──
+run "create_flow_logs_enabled" {
+  command = plan
+
+  variables {
+    enable_flow_logs = true
+  }
+
+  assert {
+    condition     = length(module.vpc_flow_logs) == 1
+    error_message = "enable_flow_logs = true (create mode) must instantiate the vpc-flow-logs module"
+  }
+  assert {
+    condition     = module.vpc_flow_logs[0].log_group_name == "/aws/vpc-flow-logs/development"
+    error_message = "the flow log must write to /aws/vpc-flow-logs/<environment>"
+  }
+  assert {
+    condition     = module.vpc_flow_logs[0].iam_role_name == "development-vpc-flow-logs"
+    error_message = "the flow-log IAM role must be named <environment>-vpc-flow-logs"
+  }
+  assert {
+    condition     = module.vpc_flow_logs[0].traffic_type == "ALL"
+    error_message = "the flow log must capture ALL traffic"
+  }
+}
+
+# ── adopt + flow logs: create-mode flow logs stay off in adopt mode (the owner logs) ──
+run "adopt_builds_no_flow_logs" {
+  command = plan
+
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+    enable_flow_logs         = true
+  }
+
+  assert {
+    condition     = length(module.vpc_flow_logs) == 0
+    error_message = "adopt mode must not build flow logs even with enable_flow_logs = true — the network owner logs the shared VPC"
   }
 }
 

@@ -1,6 +1,6 @@
 /**
  * competitive-intelligence-platform — AWS substrate for the
- * competitive-intelligence Platform tenant of the protohype team.
+ * competitive-intelligence Platform tenant, owned by the strategy team.
  * Single-tenant by design (same rationale as slack-knowledge-bot-platform).
  *
  * Resources:
@@ -12,9 +12,8 @@
  *     CloudWatch into one policy attached to the tenant ServiceAccount
  *
  * Wired by live/_envcommon/aws/competitive-intelligence-platform.hcl.
- * Output ARNs flow into the protohype/competitive-intelligence Platform
- * CR's spec.irsa.policies via the operator-side identity propagation
- * layer.
+ * Output ARNs flow into the competitive-intelligence Platform CR's
+ * spec.irsa.policies via the operator-side identity propagation layer.
  */
 
 locals {

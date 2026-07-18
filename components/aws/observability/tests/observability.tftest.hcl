@@ -77,3 +77,26 @@ run "alerts_key_admits_cloudwatch_publisher" {
     error_message = "alerts CMK policy must admit cloudwatch.amazonaws.com for kms:GenerateDataKey*, scoped by aws:SourceAccount"
   }
 }
+
+# Each severity topic's resource policy grants CloudWatch publish scoped by
+# aws:SourceAccount — the confused-deputy guard the sibling CMK policy already
+# carries. Without it a service principal acting for any account could publish.
+run "topic_policies_scope_publish_by_source_account" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for p in [
+        aws_sns_topic_policy.critical.policy,
+        aws_sns_topic_policy.warning.policy,
+        aws_sns_topic_policy.info.policy,
+        ] : alltrue([
+          for s in jsondecode(p).Statement :
+          try(s.Principal.Service, "") == "cloudwatch.amazonaws.com"
+          && s.Action == "SNS:Publish"
+          && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+      ])
+    ])
+    error_message = "each of the critical/warning/info topic policies must grant SNS:Publish to cloudwatch.amazonaws.com scoped by aws:SourceAccount"
+  }
+}

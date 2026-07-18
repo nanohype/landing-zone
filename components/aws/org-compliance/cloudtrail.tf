@@ -142,6 +142,7 @@ resource "aws_iam_role_policy" "cloudtrail_cloudwatch" {
 ################################################################################
 
 resource "aws_cloudtrail" "org" {
+  #checkov:skip=CKV_AWS_252:no SNS topic by design — the trail archives to S3 and is queried via Athena; there is no push consumer to notify.
   count = var.enable_cloudtrail ? 1 : 0
 
   name                          = "org-trail"

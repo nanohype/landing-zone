@@ -97,15 +97,19 @@ run "sns_publish_scoped_to_named_services" {
   # Whole-policy sweep: EVERY statement must publish only (Action=sns:Publish, never
   # sns:* / *) from a KNOWN service principal (try(...) falls back to "*" if Principal
   # was widened to the "*" string, which then fails the allow-list check), scoped to
-  # the topic ARN. This is what catches a wildcard-principal or widened-action mutation.
+  # the topic ARN, AND locked to this account by aws:SourceAccount. The SourceAccount
+  # condition is the confused-deputy guard: without it a security service principal
+  # acting for any account could inject spoofed findings into the alert channel. This
+  # sweep catches a wildcard-principal, a widened action, OR a dropped condition.
   assert {
     condition = alltrue([
       for s in jsondecode(aws_sns_topic_policy.security_alerts.policy).Statement :
       s.Action == "sns:Publish"
       && contains(["events.amazonaws.com", "guardduty.amazonaws.com", "securityhub.amazonaws.com"], try(s.Principal.Service, "*"))
       && s.Resource == aws_sns_topic.security_alerts.arn
+      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
     ])
-    error_message = "every alerts-topic statement must be sns:Publish from a named service principal scoped to the topic — no wildcard principal, no widened action"
+    error_message = "every alerts-topic statement must be sns:Publish from a named service principal scoped to the topic AND locked to this account by aws:SourceAccount — no wildcard principal, no widened action, no missing condition"
   }
 }
 

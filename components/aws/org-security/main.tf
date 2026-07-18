@@ -70,6 +70,10 @@ resource "aws_sns_topic" "security_alerts" {
   tags              = merge(local.tags, { Name = "org-security-alerts" })
 }
 
+# Each publish grant is scoped to this account (aws:SourceAccount) — the same
+# confused-deputy guard the alerts CMK policy carries. Without it, a security
+# service principal acting for any account could inject findings into the alert
+# channel operators trust.
 resource "aws_sns_topic_policy" "security_alerts" {
   arn = aws_sns_topic.security_alerts.arn
 
@@ -82,6 +86,11 @@ resource "aws_sns_topic_policy" "security_alerts" {
         Principal = { Service = "events.amazonaws.com" }
         Action    = "sns:Publish"
         Resource  = aws_sns_topic.security_alerts.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
       },
       {
         Sid       = "AllowGuardDutyPublish"
@@ -89,6 +98,11 @@ resource "aws_sns_topic_policy" "security_alerts" {
         Principal = { Service = "guardduty.amazonaws.com" }
         Action    = "sns:Publish"
         Resource  = aws_sns_topic.security_alerts.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
       },
       {
         Sid       = "AllowSecurityHubPublish"
@@ -96,6 +110,11 @@ resource "aws_sns_topic_policy" "security_alerts" {
         Principal = { Service = "securityhub.amazonaws.com" }
         Action    = "sns:Publish"
         Resource  = aws_sns_topic.security_alerts.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
       },
     ]
   })

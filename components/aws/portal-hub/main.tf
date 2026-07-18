@@ -161,6 +161,7 @@ resource "aws_s3_bucket_logging" "portal_state" {
 # Access-log sink for the state bucket. Private, its own TLS deny, and grants
 # only the S3 logging service principal PutObject for this source bucket.
 resource "aws_s3_bucket" "portal_state_logs" {
+  #checkov:skip=CKV_AWS_21:versioning is intentionally off — this is a server-access-log sink; log records are write-once and regenerable, so versioning adds cost with no recovery value.
   bucket = "${var.state_bucket_name}-logs"
   tags   = local.tags
 
