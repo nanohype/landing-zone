@@ -25,8 +25,25 @@ intentionally — never bulk-delete them.
 | 19 | Docs + agent surface | ✅ #139 |
 | 19b | Cluster-bootstrap `monitoring/managed` label | ✅ #140 |
 | 24 | Endpoint posture flip (after rackctl target 23) | ✅ #141 |
+| 31 | Network-campaign punch list (2026-07-18 re-audit) | ✅ #153 |
+| 32 | Doc inventory refresh + state-bucket hardening (2026-07-18 re-audit) | ☐ |
 
 ---
+
+## 2026-07-18 re-audit — Target 25 exit-verification result
+
+**Exit passes.** Both D-caps (code_quality, consistency) genuinely cleared at
+`9243a18`; every dimension held or improved (architecture A-, patterns A-,
+systems B+, testing B+, security B+, code_quality D→A-, documentation B-→B,
+consistency D→B, ai_systems B-→B). All ~35 findings behind PRs #132-#141
+re-verified against current source, not the PR ledger — all landed genuinely.
+The `tenants-protohype` item noted below is confirmed fixed.
+
+But the tree has moved **past** the remediation's exit point: a same-day
+network-idiom campaign (mode-aware `network` create|adopt, `shared-network`
+RAM-sharing, `egress-network` central-egress hub, PR #151, +10.9k lines) shipped
+after Target 24 and is the strongest engineering in the repo — but it introduced
+a fresh, small punch list (Targets 31/32 below).
 
 ## Target 2 — Broken layers + the gates that let them merge (L)
 
@@ -593,26 +610,185 @@ leaves render clean (`task evaluate`), `tofu validate` on `cluster` valid, `task
 plan time, public+CIDRs passes. A full resource plan (the actual EKS endpoint wiring)
 needs live AWS credentials and was not run. Documented the ownership split in
 `docs/inputs.md` (new "EKS API endpoint posture" section) and repointed the first-deploy
-walkthrough at it. **This closes landing-zone's queue for the campaign** — only the
-cross-repo re-audit (Target 25) remains, owned elsewhere.
+walkthrough at it. This closed landing-zone's queue for the original campaign; the
+2026-07-18 re-audit (Target 25) reopened it with Targets 31/32 below, driven by the
+post-exit network-idiom campaign.
 
-## Additional scope discovered mid-campaign (not yet assigned a target)
+## Resolved: tenants-protohype namespace default (was "additional scope discovered")
 
-**`tenants-protohype` namespace default — resolved as unrelated to eks-gitops'
-`protohypd`, still stale on its own merits (found by Target 16, PR #134; cross-repo
-question closed by eks-gitops Target 21, PR #130).** The four `*-platform` components'
-`namespace` variable still defaults to `tenants-protohype`. eks-gitops Target 21
-confirmed this is a **different** retired-codename identity than `protohypd` (which was
-an unrelated example-tenant name on the `ops` Platform, renamed to `platform-ops`) — no
-cross-repo coordination is needed, that question is closed.
+**Fixed — confirmed by the 2026-07-18 re-audit.** The four `*-platform` components'
+`namespace` variable now defaults to per-app `tenants-<app>` (e.g.
+`components/aws/competitive-intelligence-platform/variables.tf:43` =
+`"tenants-competitive-intelligence"`); no `tenants-protohype` string remains
+anywhere in the repo. This matches what eks-gitops' `apps-tenants` ApplicationSet
+actually provisions. No further action needed.
 
-What's still genuinely open: `tenants-protohype` is the shared namespace default for the
-four promoted protohype-team apps (competitive-intelligence, digest-pipeline,
-incident-response, slack-knowledge-bot), but eks-gitops' `apps-tenants` ApplicationSet
-now provisions per-app `tenants-<app>` namespaces, not one shared namespace — so this
-default doesn't match the namespace shape the consuming side actually uses. Low
-urgency: not a cap, not broken CI, and (per Target 2's findings) these four components'
-live wiring has its own open questions independent of this. Worth a small dedicated
-target whenever this repo's queue is revisited — rename the default to match the
-per-app `tenants-<app>` convention, verified against what the operator/Platform CR
-actually reconciles against before changing it.
+## Target 31 — Network-campaign punch list (M)
+
+**Found by the 2026-07-18 exit-verification re-audit** — all introduced by the
+post-Target-24 network-idiom campaign (a same-day, +10.9k-line addition, PR #151).
+
+Findings (verified):
+- `drift.yml:94-100` runs plan under `set +e` and only acts on `exitcode == '2'`
+  — a plan **error** (exit 1: auth expiry, broken provider) produces a green job
+  and no issue. Drift detection goes dark silently on the failure mode most
+  likely to actually occur.
+- Flow logs default `false` in all three new network components and are **not
+  enabled on the two highest-blast-radius VPCs** — the shared-network leaves
+  (e.g. `live/aws/network/us-west-2/development/shared-network/terragrunt.hcl`,
+  no `enable_flow_logs`) and the central-egress hub
+  (`live/aws/network/us-west-2/hub/egress-network/terragrunt.hcl`) — while
+  single-account spoke leaves do enable them. The resources are authored; the
+  leaves just don't turn them on.
+- Relocated placeholder-account collision (same class Target 16 already fixed):
+  `live/aws/fleet/account.hcl:2` and `live/aws/network/account.hcl:2` both use
+  `444444444444` for conceptually distinct accounts — with placeholders
+  unreplaced these two trees would collide on the same
+  `{account_id}-{region}-tfstate` state bucket.
+- `components/aws/shared-network/.terraform.lock.hcl` exists on disk but is
+  untracked — 37 of 38 other components commit theirs (this repo's own CLAUDE.md
+  gotcha: lockfiles are tracked intentionally, never bulk-delete or leave
+  untracked).
+- The fleet vend roots (`fleet/aws/cluster-stack`, `fleet/aws/cluster-bootstrap`)
+  have zero `tofu test` coverage, and both the CI glob (`ci.yml:131`) and
+  `Taskfile.yaml:76` discover only `modules/**/tests` + `components/**/tests` —
+  a future `fleet/**/tests` suite would silently not run. Same gap class that
+  drove the original systems C+ (fleet sitting outside every enforced gate).
+- `fleet-hub/main.tf:112-117` enables state-bucket versioning with no
+  noncurrent-version lifecycle, and no `prevent_destroy` exists anywhere on the
+  crown-jewel state buckets/KMS keys (a `terragrunt destroy` of fleet-hub
+  deletes the fleet state bucket).
+
+Approach:
+1. Fix `drift.yml` to distinguish exit 0 (clean)/1 (error)/2 (changes) and alert
+   distinctly on error vs drift — don't let a broken provider read as "no drift."
+2. Enable flow logs on the shared-network and egress-network leaves specifically
+   (the highest-blast-radius VPCs); audit whether the single-account default
+   should also just flip to `true`.
+3. Replace one of the two colliding `444444444444` placeholders (fleet or
+   network) with a distinct placeholder account id.
+4. `git add` the shared-network lockfile.
+5. Add a `fleet/**/tests` glob to both the CI matrix and Taskfile discovery;
+   write `tofu test` suites for the two fleet roots mirroring the invariants
+   Target 18's fleet-hub suite already established (web-identity trust,
+   boundary conditions).
+6. Add noncurrent-version lifecycle rules to the state buckets that lack them;
+   add `prevent_destroy = true` to the state buckets and their KMS keys.
+
+Acceptance: a deliberately-broken drift-plan (e.g. malformed provider config)
+produces a distinct alert from a real-drift plan; the component's own outputs
+prove flow logs on for shared-network + egress-network; the two `account.hcl`
+files no longer share a placeholder; `git status` shows the lockfile tracked;
+`fleet/**/tests` suites run in CI and fail on a deliberately broken fleet root;
+`terragrunt destroy` on a state bucket component is rejected by `prevent_destroy`
+(test in a scratch/dev context, don't actually destroy anything real).
+
+Outcome (✅ #153): **all six items shipped.** Resolutions + scope discovered:
+
+- **drift.yml now branches on all three exit codes.** The plan step still runs
+  under `set +e` and captures `PIPESTATUS[0]`, but three steps gate on it: exit 2
+  → the existing "Drift detected" issue, job green (drift is tracked, not a CI
+  failure); exit 1 → a distinct "Drift check error" issue (its own `drift-error`
+  label) AND a "Fail on plan error" step that `exit 1`s so the run goes red; exit
+  0 → nothing. Traced the gating locally for 0/1/2 (a broken read can no longer
+  read as "no drift").
+- **Flow logs on at the four leaves, defaults left `false`.** Set
+  `enable_flow_logs = true` on the three shared-network leaves + the
+  egress-network hub. On the audit question ("should the single-account default
+  flip?"): **no** — the repo idiom is explicit-at-leaf (the single-account
+  `network` create leaves already state it: staging/production = true, hub =
+  false), so flipping the default would only make those explicit settings
+  redundant and bury the security decision inside the component. Kept all three
+  network components' defaults `false` and stated the choice at each leaf, which
+  keeps the trio consistent. (Verification note: no component exposes a flow-log
+  *output*, so "outputs prove flow logs on" was verified via the resource gating
+  — `aws_flow_log` counts on `var.enable_flow_logs` — plus `terragrunt render` on
+  each leaf, not a literal output read.)
+- **Placeholder collision resolved by moving fleet, not network.** fleet's
+  `account.hcl` → `555555555555` (was unused anywhere in the repo);
+  `network/account.hcl` keeps `444444444444` because the shared-network
+  `tofu test` suite already pins that id as the network-owner account context
+  (moving network would have meant editing the tests too, for no gain).
+- **shared-network lockfile tracked** — 37 → 38 committed `.terraform.lock.hcl`
+  files, one per component.
+- **Fleet-root test coverage + the glob gap.** Added `fleet/**/tests/*.tftest.hcl`
+  to the CI unit-test discovery and the Taskfile `test` target. Wrote suites for
+  both roots. **Scope discovered — `override_module` is non-functional here:** the
+  clean way to test a thin composition root is to override the heavy wrapped
+  modules and assert the root's own logic, but `override_module` (file- and
+  run-level, empty and explicit outputs, OpenTofu 1.12) did **not** skip planning
+  `module.network`/`module.cluster` — their internal `components/aws/...`
+  resources still errored. So both suites plan the full graph offline under mock
+  providers with valid computed defaults (IAM/KMS/SQS/SG ARNs, AZ lists, the EKS
+  cluster's nested OIDC issuer + CA, a stable `time_static`, a `tls_certificate`
+  fingerprint). cluster-stack then asserts the ROOT locals (break-glass `Cluster`
+  discovery tag; ephemeral/persistent + `Expiry` contract; portal access entry
+  read-only — portal-reader group, **no** `policy_associations`; hub bootstrap
+  entry = cluster-admin only when the hub role is set). cluster-bootstrap wraps
+  the legacy k8s/helm/kubectl component whose providers OpenTofu can't mock
+  (module-embedded), so its CA input is a real throwaway self-signed EC cert the
+  providers parse offline; it asserts end-to-end wiring (the operator IRSA role
+  surfaces — the Target-2 regression class) + the not-Ready endpoint, git-URL, and
+  `network_mode` guards via `expect_failures`. Both suites were mutation-tested
+  (breaking the discovery tag / dropping agent-iam's `data_kms_key_arn` each fails
+  the right run) and pass after revert. The cluster-stack mock scaffold is
+  necessarily coupled to the community EKS/Karpenter/VPC modules' computed
+  attributes (a module bump may need a mock tweak); the assertions themselves read
+  only the root's own locals, so they test this root's logic, not the wrapped
+  modules'.
+- **State-bucket protection on fleet-hub + portal-hub** (the only two components
+  holding tofu state buckets; agent-iam's artifacts bucket and the platform app
+  buckets are not state). Both got `prevent_destroy = true` on the state bucket
+  AND its KMS CMK, plus an `aws_s3_bucket_lifecycle_configuration` keeping the 10
+  most recent noncurrent versions and expiring the rest at 90 days (+ a 7-day
+  abort for interrupted multipart writes). `prevent_destroy` rejection proven in a
+  scratch `terraform_data` config (destroy plan errors "Resource instance cannot
+  be destroyed"); the fleet-hub suite still passes (create-plan doesn't trip
+  prevent_destroy).
+
+Verified from a clean tree: `task fmt:check`, `task lint` (notice), `task test`
+(every suite incl. the two new fleet suites), and `task evaluate` (all live leaves
+render) all green.
+
+## Target 32 — Doc inventory refresh + state-bucket hardening (S)
+
+**Found by the 2026-07-18 exit-verification re-audit.**
+
+Findings (verified):
+- `CLAUDE.md` is missing 14 of 38 components from its architecture description
+  — the entire agent-platform layer, fleet/portal, `github-oidc`,
+  `managed-monitoring`, and all three new network components — it describes the
+  pre-network-campaign tree.
+- `AGENTS.md:9` omits `competitive-intelligence-platform` (wired in all three
+  envs) and lists 4 of 7 multi-tenant components, contradicting
+  `docs/operations.md:130` and the actual tree.
+- `components/aws/network/` is the only one of the three new network components
+  with no README (`shared-network/README.md` and `egress-network/README.md` are
+  184 and 176 lines respectively, with real owner↔consumer contracts).
+- `docs/architecture.md:28-101` omits `egress-network` from its own dependency
+  graph and table; `README.md:26-37`'s architecture diagram is stale;
+  `docs/operations.md:47-68`'s deployment order predates the campaign;
+  `docs/inputs.md` never mentions `network_mode`/`adopt_*`.
+- SSM namespace drift: the new `shared-network` publishes under
+  `/platform/${var.environment}/shared-network/*`
+  (`components/aws/shared-network/ssm.tf:9-37`) while the cluster-consumed
+  idiom used by dns/managed-monitoring/agent-iam is `/eks-agent-platform/...`
+  — the repo now has four SSM prefix families with no documented rationale for
+  the split.
+- Cosmetic: `scripts/init-backend-aws.sh:5-8`'s usage string says
+  `init-backend.sh` (wrong filename).
+
+Approach: refresh CLAUDE.md's component inventory and dependency description to
+include all 38 components; fix AGENTS.md's multi-tenant list and add
+competitive-intelligence-platform; write a `network/` README matching the
+shared-network/egress-network structure; update `architecture.md`'s graph/table
+and `README.md`'s diagram; add a network_mode/adopt_* section to
+`docs/inputs.md`; document (or reconcile) the SSM prefix-family split — a short
+section in architecture.md is enough, this doesn't need a design change, just an
+honest explanation; fix the usage-string typo.
+
+Acceptance: every component listed in `CLAUDE.md` exists, and every component in
+the repo is listed; AGENTS.md's multi-tenant/platform inventory matches
+`docs/operations.md` and the tree; `network/` has a README; architecture.md's
+graph includes all three new components; docs read atemporally (no "recently
+added" framing — describe the current state).
