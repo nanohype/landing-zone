@@ -407,6 +407,13 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # backup + snapshot storage location. Absent where Velero isn't run
       # (development/hub) — the addons-velero generator excludes those clusters.
       "velero/backup-bucket" = data.aws_ssm_parameter.velero_bucket[0].value
+      } : {}, var.enable_argo_workflows ? {
+      # Argo Workflows artifact bucket, read from the SSM parameter the cluster-addons
+      # component publishes. The argo-workflows ApplicationSet injects it as the S3
+      # artifact repository (credentials resolve from the ambient chain via Argo's
+      # Pod Identity association — no static-key Secret). Absent where Argo Workflows
+      # isn't run — the argo-workflows generator excludes those clusters.
+      "argo-workflows/artifact-bucket" = data.aws_ssm_parameter.argo_workflows_bucket[0].value
       } : {}, var.enable_external_dns ? {
       # This environment's primary domain, read from the SSM parameter the dns
       # component publishes. The addons-external-dns ApplicationSet uses it as

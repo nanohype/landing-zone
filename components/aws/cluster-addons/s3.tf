@@ -163,6 +163,27 @@ module "argo_workflows_bucket" {
   tags = local.tags
 }
 
+# Publish the Argo Workflows artifact bucket name to SSM so cluster-bootstrap can
+# stamp it onto the ArgoCD cluster Secret as the `argo-workflows/artifact-bucket`
+# annotation, where the argo-workflows ApplicationSet reads it as the S3 artifact
+# repository. Argo Workflows resolves its S3 credentials from the ambient chain via
+# its Pod Identity association (see irsa.tf), so only the bucket name is published —
+# no static-key Secret. Same seam Velero uses (SSM rather than a terragrunt output,
+# because cluster-bootstrap also runs under the fleet-vend provider-opentofu path,
+# which has no terragrunt dependency graph and resolves cross-component values
+# through SSM). Gated on argo_workflows_enabled: a cluster without the bucket
+# publishes nothing, and cluster-bootstrap leaves the annotation off (see its
+# enable_argo_workflows).
+resource "aws_ssm_parameter" "argo_workflows_bucket" {
+  count = var.argo_workflows_enabled ? 1 : 0
+
+  name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/argo_workflows_bucket"
+  type  = "String"
+  value = module.argo_workflows_bucket[0].s3_bucket_id
+
+  tags = local.tags
+}
+
 ################################################################################
 # Bucket-name guard
 #
