@@ -72,15 +72,15 @@ resource "aws_ssm_parameter" "usage_plan_id" {
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_admin_role" {
-  name  = "${local.ssm_prefix}/irsa-gateway-admin-role-arn"
+resource "aws_ssm_parameter" "gateway_admin_role_arn" {
+  name  = "${local.ssm_prefix}/gateway-admin-role-arn"
   type  = "String"
   value = module.gateway_admin_irsa.iam_role_arn
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_auth_role" {
-  name  = "${local.ssm_prefix}/irsa-gateway-auth-role-arn"
+resource "aws_ssm_parameter" "gateway_auth_role_arn" {
+  name  = "${local.ssm_prefix}/gateway-auth-role-arn"
   type  = "String"
   value = module.gateway_auth_irsa.iam_role_arn
   tags  = local.tenant_tags

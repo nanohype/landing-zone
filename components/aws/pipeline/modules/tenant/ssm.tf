@@ -81,23 +81,23 @@ resource "aws_ssm_parameter" "glue_registry_name" {
   tags  = local.tenant_tags
 }
 
-# IRSA Roles
-resource "aws_ssm_parameter" "irsa_worker_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-worker-role-arn"
+# Workload Roles
+resource "aws_ssm_parameter" "worker_role_arn" {
+  name  = "${local.ssm_prefix}/worker-role-arn"
   type  = "String"
   value = module.worker_irsa.iam_role_arn
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_orchestrator_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-orchestrator-role-arn"
+resource "aws_ssm_parameter" "orchestrator_role_arn" {
+  name  = "${local.ssm_prefix}/orchestrator-role-arn"
   type  = "String"
   value = module.orchestrator_irsa.iam_role_arn
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_connector_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-connector-role-arn"
+resource "aws_ssm_parameter" "connector_role_arn" {
+  name  = "${local.ssm_prefix}/connector-role-arn"
   type  = "String"
   value = module.connector_irsa.iam_role_arn
   tags  = local.tenant_tags

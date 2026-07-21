@@ -3,8 +3,6 @@
 ################################################################################
 
 locals {
-  irsa_prefix = "${var.environment}-pipeline-${var.tenant_id}"
-
   all_bucket_arns = [
     module.raw_bucket.s3_bucket_arn,
     module.staging_bucket.s3_bucket_arn,
@@ -28,16 +26,16 @@ locals {
   ]
 
   # MSK Serverless IAM auth is scoped to THIS tenant's own cluster. The serverless
-  # cluster is named local.irsa_prefix (see msk.tf: cluster_name = local.prefix,
-  # the same tenant-qualified string). kafka-cluster verbs authorize against
+  # cluster is named local.prefix (see msk.tf: cluster_name = local.prefix), the
+  # same tenant-qualified string used here. kafka-cluster verbs authorize against
   # cluster / topic / group resource ARNs under that name; the cluster UUID is
   # assigned by MSK at create time, so it is wildcarded. Every ARN carries the
   # tenant's account, region, and cluster name, so a connector can only reach its
   # own tenant's brokers, topics, and consumer groups — never another tenant's.
   msk_resource_arns = [
-    "arn:aws:kafka:${var.region}:${var.account_id}:cluster/${local.irsa_prefix}/*",
-    "arn:aws:kafka:${var.region}:${var.account_id}:topic/${local.irsa_prefix}/*",
-    "arn:aws:kafka:${var.region}:${var.account_id}:group/${local.irsa_prefix}/*",
+    "arn:aws:kafka:${var.region}:${var.account_id}:cluster/${local.prefix}/*",
+    "arn:aws:kafka:${var.region}:${var.account_id}:topic/${local.prefix}/*",
+    "arn:aws:kafka:${var.region}:${var.account_id}:group/${local.prefix}/*",
   ]
 }
 
@@ -48,7 +46,7 @@ locals {
 module "worker_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-worker"
+  role_name       = "${local.prefix}-worker"
   cluster_name    = var.cluster_name
   namespace       = local.namespace
   service_account = "pipeline-worker"
@@ -115,7 +113,7 @@ module "worker_irsa" {
 module "orchestrator_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-orchestrator"
+  role_name       = "${local.prefix}-orchestrator"
   cluster_name    = var.cluster_name
   namespace       = local.namespace
   service_account = "pipeline-orchestrator"
@@ -156,7 +154,7 @@ module "orchestrator_irsa" {
 module "connector_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-connector"
+  role_name       = "${local.prefix}-connector"
   cluster_name    = var.cluster_name
   namespace       = local.namespace
   service_account = "pipeline-connector"

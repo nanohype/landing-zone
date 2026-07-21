@@ -74,17 +74,17 @@ output "ecr_repository_arn" {
 }
 
 output "training_worker_role_arn" {
-  description = "IRSA role ARN for training-worker service account"
+  description = "Pod Identity role ARN for the training-worker service account"
   value       = module.training_worker_irsa.iam_role_arn
 }
 
 output "model_registry_role_arn" {
-  description = "IRSA role ARN for model-registry service account"
+  description = "Pod Identity role ARN for the model-registry service account"
   value       = module.model_registry_irsa.iam_role_arn
 }
 
 output "mlops_api_role_arn" {
-  description = "IRSA role ARN for mlops-api service account"
+  description = "Pod Identity role ARN for the mlops-api service account"
   value       = module.mlops_api_irsa.iam_role_arn
 }
 

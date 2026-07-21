@@ -2,24 +2,24 @@
 set -euo pipefail
 
 # Parse outputs
-IRSA_ROLES=$(jq -r '.irsa_role_arns.value | to_entries[] | select(.value != null) | "\(.key) \(.value)"' outputs.json)
+ADDON_ROLES=$(jq -r '.pod_identity_role_arns.value | to_entries[] | select(.value != null) | "\(.key) \(.value)"' outputs.json)
 S3_BUCKETS=$(jq -r '.s3_bucket_names.value | to_entries[] | select(.value != null) | "\(.key) \(.value)"' outputs.json)
 
 # =============================================================================
 # AWS Resources (provisioned by this component)
 # =============================================================================
 
-# --- IRSA Roles ---
-echo "Checking IRSA roles..."
+# --- Pod Identity Roles ---
+echo "Checking addon Pod Identity roles..."
 while IFS=' ' read -r ADDON ROLE_ARN; do
   ROLE_NAME=$(echo "$ROLE_ARN" | awk -F'/' '{print $NF}')
   ROLE_STATUS=$(aws iam get-role --role-name "$ROLE_NAME" --query 'Role.RoleName' --output text 2>/dev/null || echo "NOT_FOUND")
   if [[ "$ROLE_STATUS" == "NOT_FOUND" ]]; then
-    echo "FAIL: IRSA role for '${ADDON}' not found (${ROLE_ARN})"
+    echo "FAIL: role for '${ADDON}' not found (${ROLE_ARN})"
     exit 1
   fi
   echo "  ${ADDON}: role exists (${ROLE_NAME})"
-done <<< "$IRSA_ROLES"
+done <<< "$ADDON_ROLES"
 
 # --- S3 Buckets ---
 echo "Checking S3 buckets..."

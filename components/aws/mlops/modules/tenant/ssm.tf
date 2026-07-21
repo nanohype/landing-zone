@@ -97,22 +97,22 @@ resource "aws_ssm_parameter" "ecr_repository_arn" {
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_training_worker_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-training-worker-role-arn"
+resource "aws_ssm_parameter" "training_worker_role_arn" {
+  name  = "${local.ssm_prefix}/training-worker-role-arn"
   type  = "String"
   value = module.training_worker_irsa.iam_role_arn
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_model_registry_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-model-registry-role-arn"
+resource "aws_ssm_parameter" "model_registry_role_arn" {
+  name  = "${local.ssm_prefix}/model-registry-role-arn"
   type  = "String"
   value = module.model_registry_irsa.iam_role_arn
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_mlops_api_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-mlops-api-role-arn"
+resource "aws_ssm_parameter" "mlops_api_role_arn" {
+  name  = "${local.ssm_prefix}/mlops-api-role-arn"
   type  = "String"
   value = module.mlops_api_irsa.iam_role_arn
   tags  = local.tenant_tags

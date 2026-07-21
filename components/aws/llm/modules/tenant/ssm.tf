@@ -79,15 +79,15 @@ resource "aws_ssm_parameter" "secrets_hf_token_arn" {
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_inference_server_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-inference-server-role-arn"
+resource "aws_ssm_parameter" "inference_server_role_arn" {
+  name  = "${local.ssm_prefix}/inference-server-role-arn"
   type  = "String"
   value = module.inference_server_irsa.iam_role_arn
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_api_gateway_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-api-gateway-role-arn"
+resource "aws_ssm_parameter" "api_gateway_role_arn" {
+  name  = "${local.ssm_prefix}/api-gateway-role-arn"
   type  = "String"
   value = module.api_gateway_irsa.iam_role_arn
   tags  = local.tenant_tags

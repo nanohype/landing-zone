@@ -42,14 +42,14 @@ for TENANT in $TENANTS; do
     fi
   done
 
-  # --- IRSA Roles ---
-  for ROLE_KEY in irsa_historical irsa_ingestion irsa_query; do
+  # --- Pod Identity Roles ---
+  for ROLE_KEY in historical_role_arn ingestion_role_arn query_role_arn; do
     ROLE_ARN=$(jq -r ".tenant_outputs.value[\"${TENANT}\"].${ROLE_KEY}" outputs.json)
     if [[ -n "$ROLE_ARN" && "$ROLE_ARN" != "null" ]]; then
       ROLE_NAME=$(echo "$ROLE_ARN" | awk -F'/' '{print $NF}')
       echo "Checking ${ROLE_KEY}..."
       aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1 || {
-        echo "FAIL: IRSA role '${ROLE_NAME}' not found"
+        echo "FAIL: role '${ROLE_NAME}' not found"
         exit 1
       }
       echo "  ${ROLE_KEY}: exists"

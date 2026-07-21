@@ -1,5 +1,5 @@
-output "irsa_role_arns" {
-  description = "Map of addon IRSA role ARNs"
+output "pod_identity_role_arns" {
+  description = "Map of addon Pod Identity role ARNs"
   value = {
     cert_manager     = module.cert_manager_irsa.iam_role_arn
     external_secrets = module.external_secrets_irsa.iam_role_arn
