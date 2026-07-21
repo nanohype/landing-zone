@@ -45,9 +45,9 @@ inputs = {
       boundary_policy  = null
     }
 
-    # Tenant-facing human SSO personas (distinct from per-tenant pod IRSA, which
-    # the eks-agent-platform operator mints). Scoped on the nanohype tenant tag
-    # key PlatformId — claudium's Workspace tag is never used in this org.
+    # Tenant-facing human SSO personas (distinct from the per-tenant Pod Identity
+    # roles the eks-agent-platform operator mints). Scoped on the tenant tag key
+    # PlatformId, which is the only tenant-identity tag this org recognizes.
     PlatformAdmin = {
       description      = "Full platform admin on the management account"
       session_duration = "PT1H"

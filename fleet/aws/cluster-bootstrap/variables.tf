@@ -44,9 +44,8 @@ variable "cluster_endpoint" {
   # immediately (function-patch-and-transform can't gate on another resource), so
   # early reconciles run with an empty endpoint — this turns that into a clear
   # "waiting for the cluster" message instead of a cryptic k8s provider error.
-  # The clean gate (conditional render) rides the planned function-go-templating
-  # migration. All status-sourced vars populate together, so guarding the endpoint
-  # alone is enough.
+  # All status-sourced vars populate together, so guarding the endpoint alone is
+  # enough.
   validation {
     condition     = var.cluster_endpoint != ""
     error_message = "cluster_endpoint is empty — the cluster is not Ready yet. This Workspace runs after cluster-stack populates Cluster.status; it converges automatically once the cluster's API endpoint is published."

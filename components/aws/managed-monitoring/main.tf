@@ -251,11 +251,10 @@ resource "aws_ssm_parameter" "amp_workspace_id" {
 #
 # grafana-operator pushes every dashboard, data source and alert rule into the
 # AMG workspace using a bearer token it reads from a Secret. The catalog's
-# ExternalSecret has always sourced that token from a Secrets Manager secret
-# named `<cluster_name>-grafana-token` (cluster-scoped) — but nothing else creates it. It was populated by
-# hand, which meant `rackctl init` could not produce a green cluster without a
-# human in the loop, and the dashboards app shipped broken on every fresh
-# install.
+# ExternalSecret sources that token from a Secrets Manager secret named
+# `<cluster_name>-grafana-token` (cluster-scoped), and nothing else creates it —
+# so terraform seeds it here. Without the seed, day 0 needs a human in the loop
+# and the dashboards app ships broken on every fresh install.
 #
 # There is no long-lived credential to reach for. AMG caps a service-account
 # token at 30 days (CreateWorkspaceServiceAccountToken rejects secondsToLive >

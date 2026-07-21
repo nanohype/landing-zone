@@ -1,5 +1,6 @@
-# Unit tests for cluster-addons IRSA — the platform addon identities. Two grants
-# in this component were previously over-broad; these runs pin the tightened shape:
+# Unit tests for cluster-addons Pod Identity — the platform addon identities.
+# These runs pin the least-privilege shape of the two grants most prone to
+# over-broadening:
 #
 #   1. AWS Load Balancer Controller — the mutating EC2/ELB verbs must carry the
 #      upstream reference policy's elbv2.k8s.aws/cluster tag conditions, so the
@@ -11,7 +12,7 @@
 #      account/region and narrowed to the receive/subscribe verbs. The regression:
 #      sqs:* / sns:* on Resource=["*"] (account-wide admin over every queue/topic).
 #
-# Runs at command = plan against a mocked AWS provider. The IRSA inline policies
+# Runs at command = plan against a mocked AWS provider. The inline policies
 # are jsonencode()'d inside the workload-identity child module and surfaced through
 # the *_policy_json outputs, so their content renders for real at plan time. The
 # s3-bucket modules' data.aws_iam_policy_document is handed a valid empty JSON stub

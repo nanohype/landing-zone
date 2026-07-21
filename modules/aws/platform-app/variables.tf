@@ -38,7 +38,7 @@ variable "namespace" {
 }
 
 variable "service_account" {
-  description = "Kubernetes ServiceAccount name the app's chart binds to. Matches the chart's serviceaccount.yaml and the Platform CR's spec.irsa.serviceAccount."
+  description = "Kubernetes ServiceAccount name the app's chart binds to. Matches the chart's serviceaccount.yaml and the ServiceAccount the eks-agent-platform operator binds the tenant role to (tenant-runtime, by operator convention — the Platform CR has no field for it)."
   type        = string
 }
 

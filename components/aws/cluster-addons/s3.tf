@@ -167,7 +167,7 @@ module "argo_workflows_bucket" {
 # stamp it onto the ArgoCD cluster Secret as the `argo-workflows/artifact-bucket`
 # annotation, where the argo-workflows ApplicationSet reads it as the S3 artifact
 # repository. Argo Workflows resolves its S3 credentials from the ambient chain via
-# its Pod Identity association (see irsa.tf), so only the bucket name is published —
+# its Pod Identity association (see pod-identity.tf), so only the bucket name is published —
 # no static-key Secret. Same seam Velero uses (SSM rather than a terragrunt output,
 # because cluster-bootstrap also runs under the fleet-vend provider-opentofu path,
 # which has no terragrunt dependency graph and resolves cross-component values

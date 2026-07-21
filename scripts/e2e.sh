@@ -25,9 +25,10 @@ ACCOUNT_DIR="${E2E_ACCOUNT_DIR:-workload-development}"
 CLUSTER="${E2E_CLUSTER:-development-platform}"
 TENANT="${E2E_TENANT:-e2e-smoke}"
 TENANTS_REPO="${E2E_TENANTS_REPO:-git@github.com:nanohype/tenants.git}"
-# Default to the stxkxs profile only when AWS_PROFILE is UNSET (local runs); in
-# CI it's set empty so the OIDC env credentials are used instead of a profile.
-AWS_PROFILE="${AWS_PROFILE-stxkxs}"
+# Only when AWS_PROFILE is UNSET (local runs), fall back to the documented
+# workload-<env> SSO profile name — which is what ACCOUNT_DIR already holds. In CI
+# it's set empty so the OIDC env credentials are used instead of a named profile.
+AWS_PROFILE="${AWS_PROFILE-$ACCOUNT_DIR}"
 if [ -n "$AWS_PROFILE" ]; then export AWS_PROFILE; else unset AWS_PROFILE; fi
 export AWS_REGION="$REGION"
 LZ_DIR="$(cd "$(dirname "$0")/.." && pwd)"

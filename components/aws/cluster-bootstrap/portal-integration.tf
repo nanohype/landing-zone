@@ -53,19 +53,18 @@ resource "kubernetes_cluster_role_v1" "portal_reader" {
 # the same binding — a ClusterRoleBinding's subjects are a single list, so sharing one
 # name means two writers fighting over that list.
 #
-# They used to share the name `portal-reader`. ArgoCD applied its Group subject, then
-# terraform tried to update the same object to a ServiceAccount subject, and the API
-# server rejected the result:
+# Hence the distinct `-sa` suffix. Collapsing the two onto one name puts ArgoCD's Group
+# subject and terraform's ServiceAccount subject in a write fight, and the API server
+# rejects the merged subject list:
 #
 #	Error: Failed to update ClusterRoleBinding: ClusterRoleBinding.rbac.authorization.k8s.io
 #	"portal-reader" is invalid: subjects[0].apiGroup: Unsupported value:
 #	"rbac.authorization.k8s.io": supported values: ""
 #
-# That halted cluster-bootstrap partway on EVERY re-apply — after the ArgoCD cluster
-# Secret had been updated, before the component finished — while a FIRST apply passed
-# clean, because ArgoCD had not synced its copy yet. An earlier attempt to fix this by
-# setting `api_group = ""` on the subject treated the symptom: the conflict is the two
-# owners, not the field.
+# That failure is re-apply-only and lands mid-component — after the ArgoCD cluster
+# Secret is updated, before cluster-bootstrap finishes — because a first apply runs
+# before ArgoCD has synced its copy. Tuning `api_group` on the subject only treats the
+# symptom: the conflict is the two owners, not the field.
 resource "kubernetes_cluster_role_binding_v1" "portal_reader" {
   count = var.enable_portal_reader ? 1 : 0
   metadata {
