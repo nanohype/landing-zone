@@ -63,6 +63,11 @@ tasks:
     cmds:
       - python3 scripts/check-mock-outputs.py
 
+  check:smoke:
+    desc: Cross-check smoke-test jq output reads against real component outputs
+    cmds:
+      - python3 scripts/check-smoke-outputs.py
+
   test:
     desc: Run the tofu test unit suites (security-contract tests) across modules, components, and fleet vend roots
     cmds:

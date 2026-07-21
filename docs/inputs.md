@@ -59,7 +59,7 @@ most often sets:
 | `cluster_version` | `cluster` | Kubernetes `major.minor`, e.g. `"1.36"` (regex-validated) |
 | `eks_addon_versions` | `cluster` | pinned addon versions; re-pin when `cluster_version` moves |
 | `cluster_endpoint_public_access` + `..._cidrs` | `cluster` | **not set in the committed tree** — private by default; posture is supplied by rackctl at apply time (see [EKS API endpoint posture](#eks-api-endpoint-posture)) |
-| `tenants` | `druid`, `pipeline`, `llm`, `mlops`, `rag` | per-tenant maps (one IRSA/Pod-Identity role each) |
+| `tenants` | `druid`, `pipeline`, `llm`, `mlops`, `rag` | per-tenant maps (one Pod Identity role each) |
 | `cluster_iam_role_path` + `cluster_permissions_boundary_arn` | `cluster` | set for cross-account fleet-vend gating; defaults `/` + empty = same-account |
 | `network_mode` + `adopt_*` | `network` | whether the VPC is built here or adopted from a shared owner (see [Network mode](#network-mode-create--adopt)) |
 

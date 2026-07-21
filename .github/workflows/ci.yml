@@ -248,6 +248,20 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-mock-outputs.py
 
+  # Guards the component smoke tests: every output key a smoke test reads out of
+  # outputs.json must be a real output of the component it belongs to. `jq` returns the
+  # string "null" for a key that does not exist rather than failing, so without this a
+  # smoke test asserts against nothing and reports it as a result.
+  smoke-outputs:
+    name: Smoke Test Outputs Cross-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-smoke-outputs.py
+
   plan:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]
@@ -260,7 +274,7 @@ jobs:
     #   - set: continue-on-error is false, so a real `terragrunt plan` failure blocks
     #     the build — an honest gate, not an advisory that swallows regressions.
     # The always-hard gates are the placeholder check, fmt, validate, tflint, checkov,
-    # the tofu test suites, terragrunt evaluate, and the mock-outputs cross-check.
+    # the tofu test suites, terragrunt evaluate, and the two output cross-checks.
     continue-on-error: ${{ vars.AWS_ROLE_ARN == '' }}
     if: github.event_name == 'pull_request'
     strategy:

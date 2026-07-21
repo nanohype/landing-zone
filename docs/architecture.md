@@ -205,7 +205,7 @@ Seven multi-tenant components, each accepting a `var.tenants` map:
 | Component | Purpose | Team |
 |-----------|---------|------|
 | **observability** | CloudWatch alarms (CPU, memory, node count, API errors), dashboards, SNS notification topics | sre |
-| **secrets** | KMS customer-managed keys + Secrets Manager + External Secrets Operator IRSA role | security |
+| **secrets** | KMS customer-managed keys + Secrets Manager (External Secrets Operator reads them with a `cluster-addons` Pod Identity role) | security |
 | **backup** | AWS Backup plans with configurable schedules/retention, vault lock for production | sre |
 | **break-glass** | Emergency access IAM roles with SNS alerts on assumption | security |
 | **service-quotas** | CloudWatch alarms for service quota utilization | platform |
@@ -282,7 +282,7 @@ role's `CreateRole` is gated on the boundary condition (see the [Threat Model](t
 |    databases, storage, IAM)      |     |  - Helm releases             |
 |  - Cilium CNI (bootstrap)       |     |  - ConfigMaps, Secrets       |
 |  - ArgoCD (bootstrap)           |     |  - Ingress, Services         |
-|  - IRSA roles                   |     |  - CRDs, Operators           |
+|  - Pod Identity roles           |     |  - CRDs, Operators           |
 +----------------------------------+     +------------------------------+
               |                                       |
               |         cluster-bootstrap             |
