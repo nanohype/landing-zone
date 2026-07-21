@@ -1,5 +1,5 @@
 ################################################################################
-# IRSA Roles for All Platform Addons
+# Pod Identity Roles for All Platform Addons
 ################################################################################
 
 # cert-manager (Route53 DNS01 challenge)

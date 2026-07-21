@@ -127,22 +127,22 @@ module "eks" {
       desired_size   = var.system_node_desired_size
       capacity_type  = "ON_DEMAND"
 
-      # `disk_size` USED TO BE SET HERE, AND DID NOTHING.
+      # Do NOT reach for `disk_size` here — it is silently ignored.
       #
       # terraform-aws-eks v21 always builds a custom launch template for a managed node
-      # group, and `disk_size` is silently ignored whenever one is used. It is accepted,
-      # it validates, it plans clean, and AWS never sees it — the node group reported
-      # `diskSize: null` and the launch template's BlockDeviceMappings was null, so the
-      # instances fell back to the AMI's own defaults.
+      # group, and `disk_size` has no effect whenever one is used. It is accepted, it
+      # validates, it plans clean, and AWS never sees it: the node group reports
+      # `diskSize: null`, the launch template's BlockDeviceMappings stays null, and the
+      # instances fall back to the AMI's own defaults.
       #
       # For BOTTLEROCKET that default is a 2 GiB OS volume (/dev/xvda) plus a **20 GiB
       # data volume** (/dev/xvdb) — and /dev/xvdb is where container images and
-      # ephemeral storage live. 20 GiB does not fit this platform's image set. On a
-      # fresh install the system nodes hit DiskPressure while the addons were still
-      # pulling, the kubelet evicted 30 pods (the ArgoCD ApplicationSet controller
-      # among them), and convergence went backwards — 40/44 Applications healthy, then
-      # 38, then 37. Karpenter's nodes were fine throughout, because its EC2NodeClass
-      # sizes its volumes explicitly. Only the managed group was left on the defaults.
+      # ephemeral storage live. 20 GiB does not fit this platform's image set: system
+      # nodes hit DiskPressure while the addons are still pulling, the kubelet evicts
+      # pods (the ArgoCD ApplicationSet controller among them), and convergence runs
+      # backwards instead of forwards. Karpenter's nodes are unaffected, because its
+      # EC2NodeClass sizes its volumes explicitly — only a managed group left on the
+      # defaults is exposed.
       #
       # The knob that actually reaches AWS is block_device_mappings. Size /dev/xvdb;
       # /dev/xvda is deliberately left alone, since the Bottlerocket OS image is

@@ -46,24 +46,23 @@ AWS_REGION=<region> tofu apply \
 
 The AWS provider's `assume_role` covers the agent-iam side cross-account. The
 component's `aws eks get-token` uses **ambient** creds, so it reaches the spoke
-API only when the runner already has cluster access. **Same-account works today**
-(the hub is the cluster creator → admin). **Cross-account** needs a cluster-admin
-EKS access entry for the hub role on the spoke cluster — a `cluster-stack`-side
-follow-up, runtime-confirmed at the rung-2 vend.
+API only when the runner already has cluster access. **Same-account** works
+unassisted: the hub is the cluster creator, therefore admin. **Cross-account**
+requires a cluster-admin EKS access entry for the hub role on the spoke cluster,
+granted on the `cluster-stack` side.
 
 ## Sequencing + teardown caveats
 
 - **Stand-up:** the composition renders this Workspace alongside cluster-stack, with
   the cluster-identity vars patched from `Cluster.status` (empty until cluster-stack
-  is Ready). So this Workspace errors-and-retries (with the clear `cluster_endpoint`
-  validation message) for the ~20–40 min the cluster takes, then converges. Benign,
-  but noisy; the explicit gate (only render this once the cluster is Ready) rides the
-  planned function-go-templating migration.
+  is Ready). `function-patch-and-transform` cannot gate one resource on another, so
+  this Workspace errors-and-retries (with the clear `cluster_endpoint` validation
+  message) for the ~20–40 min the cluster takes, then converges. Benign, but noisy.
 - **Teardown:** deleting the `Cluster` deletes both Workspaces with no ordering
   guarantee. This Workspace's `tofu destroy` needs the spoke's k8s API — if cluster-stack
   tears the cluster down first/in-parallel, destroy can't reach the API and the
-  Workspace can wedge (and may hold the S3 state lock). Until ordered teardown is wired,
-  delete this bootstrap Workspace first, or force-clean a wedged one. Tracked follow-up.
+  Workspace can wedge (and may hold the S3 state lock). Delete this bootstrap Workspace
+  before the `Cluster`, or force-clean a wedged one.
 
 ## Tenants repo
 

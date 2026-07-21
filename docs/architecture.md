@@ -76,17 +76,17 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
 | **shared-network** | -- (org IPAM pool discovered by tag, cross-account via RAM) | -- |
 | **egress-network** | -- (org TGW RAM-shared in; `org-networking` owns the static default route) | -- |
 | **cluster** | network | vpc_id, private_subnet_ids, public_subnet_ids |
-| **cluster-addons** | cluster | cluster_name, oidc_provider_arn, oidc_issuer |
+| **cluster-addons** | cluster | cluster_name |
 | **cluster-bootstrap** | cluster | cluster_name, cluster_endpoint, cluster_certificate_authority_data |
-| **druid** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, oidc_provider_arn, oidc_issuer |
-| **pipeline** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, oidc_provider_arn, oidc_issuer |
-| **llm** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, oidc_provider_arn, oidc_issuer |
-| **gateway** | cluster | cluster_sg_id, oidc_provider_arn, oidc_issuer |
-| **rag** | cluster | cluster_sg_id, oidc_provider_arn, oidc_issuer |
-| **mlops** | cluster | cluster_sg_id, oidc_provider_arn, oidc_issuer |
-| **governance** | cluster | cluster_sg_id, oidc_provider_arn, oidc_issuer |
+| **druid** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name |
+| **pipeline** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name |
+| **llm** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name |
+| **gateway** | cluster | cluster_sg_id, cluster_name |
+| **rag** | cluster | cluster_sg_id, cluster_name |
+| **mlops** | cluster | cluster_sg_id, cluster_name |
+| **governance** | cluster | cluster_sg_id, cluster_name |
 | **observability** | cluster | cluster_name |
-| **secrets** | cluster | oidc_provider_arn, oidc_issuer |
+| **secrets** | cluster | cluster_name |
 | **agent-iam** | cluster | oidc_provider_arn, oidc_issuer, operator_permissions_boundary_arn (optional) |
 | **competitive-intelligence-platform** | network, cluster, agent-iam | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name (+ resolves the operator-minted tenant role) |
 | **digest-pipeline-platform** | network, cluster, agent-iam | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name, ses_sending_domain |
@@ -182,7 +182,7 @@ the shared-hub blast-radius discussion.
 |-----------|--------------------|
 | **cluster** | EKS control plane, Karpenter, system node group, access entries |
 | **cluster-bootstrap** | Helm-based Cilium CNI + ArgoCD bootstrap |
-| **cluster-addons** | IRSA roles for Velero, OpenCost, KEDA, Argo Events/Workflows |
+| **cluster-addons** | Pod Identity roles for Velero, OpenCost, KEDA, Argo Events/Workflows |
 
 `cluster-bootstrap` is the GitOps boundary -- after bootstrap, ArgoCD manages in-cluster workloads from `eks-gitops`.
 
@@ -192,13 +192,13 @@ Seven multi-tenant components, each accepting a `var.tenants` map:
 
 | Component | Per-Tenant Resources | Team |
 |-----------|---------------------|------|
-| **druid** | Aurora MySQL (Serverless v2), MSK cluster, S3 buckets, Secrets Manager, SSM parameters, IRSA | data-platform |
-| **pipeline** | AWS Batch compute, S3 data lake (raw/staging/curated), Glue catalog, MSK, Step Functions, IRSA | data-platform |
-| **gateway** | API Gateway v2, WAF with bot control, Cognito user pool, usage plans, IRSA | platform |
-| **llm** | EFS storage, DynamoDB, SQS queues, S3 model storage, ECR, Secrets Manager, IRSA | ml-platform |
-| **mlops** | DynamoDB tables, ECR repos, S3 (datasets/artifacts), SQS, IRSA | ml-platform |
-| **rag** | OpenSearch Serverless, S3 document storage, DynamoDB (conversations), IRSA | ml-platform |
-| **governance** | S3 audit/guardrail buckets, DynamoDB, EventBridge, IRSA | security |
+| **druid** | Aurora MySQL (Serverless v2), MSK cluster, S3 buckets, Secrets Manager, SSM parameters, Pod Identity roles | data-platform |
+| **pipeline** | AWS Batch compute, S3 data lake (raw/staging/curated), Glue catalog, MSK, Step Functions, Pod Identity roles | data-platform |
+| **gateway** | API Gateway v2, WAF with bot control, Cognito user pool, usage plans, Pod Identity roles | platform |
+| **llm** | EFS storage, DynamoDB, SQS queues, S3 model storage, ECR, Secrets Manager, Pod Identity roles | ml-platform |
+| **mlops** | DynamoDB tables, ECR repos, S3 (datasets/artifacts), SQS, Pod Identity roles | ml-platform |
+| **rag** | OpenSearch Serverless, S3 document storage, DynamoDB (conversations), Pod Identity roles | ml-platform |
+| **governance** | S3 audit/guardrail buckets, DynamoDB, EventBridge, Pod Identity roles | security |
 
 ### Operational Layer
 
@@ -298,9 +298,9 @@ After `cluster-bootstrap` deploys Cilium and ArgoCD, ArgoCD watches the GitOps r
 
 GitHub Actions assumes `AWS_ROLE_ARN` via OIDC federation -- no long-lived credentials. Each environment has its own role with a trust policy scoped to the repository.
 
-### Pod Authentication (Pod Identity + IRSA)
+### Pod Authentication (EKS Pod Identity)
 
-The `modules/aws/workload-identity/` module creates IAM roles for service accounts using **EKS Pod Identity**: each role's trust policy targets `pods.eks.amazonaws.com` (not an OIDC provider) and is bound to an exact (cluster, namespace, service-account) through an EKS Pod Identity association. A `tofu test` gate asserts the trust stays Pod-Identity-only. Some components (e.g. druid) still use **IRSA** — an OIDC-provider trust scoped to a namespace/service-account. Either way, multi-tenant components mint one role per tenant. See the [Threat Model](threat-model.md) for the reasoning.
+The `modules/aws/workload-identity/` module creates IAM roles for service accounts using **EKS Pod Identity**: each role's trust policy targets `pods.eks.amazonaws.com` (not an OIDC provider) and is bound to an exact (cluster, namespace, service-account) through an EKS Pod Identity association. A `tofu test` gate asserts the trust stays Pod-Identity-only. Every in-cluster workload role is minted this way, and multi-tenant components mint one role per tenant. Web-identity (OIDC) trust is reserved for the roles assumed from outside the cluster — the agent-platform operator (`agent-iam`), `fleet-hub`, `portal-hub`, and GitHub Actions CI federation. See the [Threat Model](threat-model.md) for the reasoning.
 
 ### Guardrails
 

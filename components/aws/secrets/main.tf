@@ -143,7 +143,7 @@ resource "aws_secretsmanager_secret_version" "this" {
 # External Secrets Operator identity is NOT created here.
 #
 # cluster-addons owns the external-secrets IRSA role (module.external_secrets_irsa in
-# cluster-addons/irsa.tf), alongside every other addon's identity. A ServiceAccount holds
+# cluster-addons/pod-identity.tf), alongside every other addon's identity. A ServiceAccount holds
 # exactly ONE EKS Pod Identity association, so the external-secrets/external-secrets SA's
 # role lives in exactly one place — cluster-addons — and this component never binds it.
 ################################################################################

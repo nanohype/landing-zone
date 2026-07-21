@@ -20,7 +20,7 @@ variable "region" {
 # Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
 # tflint-ignore: terraform_unused_declarations
 variable "cluster_name" {
-  description = "Name of the EKS cluster the Pod Identity association targets."
+  description = "Name of the EKS cluster this environment's secrets serve. Uniform envcommon interface input; this component provisions no cluster-bound resources and does not consume it."
   type        = string
 }
 

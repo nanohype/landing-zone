@@ -57,18 +57,20 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
 - **Tampering** — cluster admin. Mitigated: `authentication_mode = API`, admin via
   a dynamically-mapped access entry (no hardcoded ARN); extra principals go through
   `access_entries` with real ARNs only.
-- **Residual** — addon supply chain: versions are now pinned (`eks_addon_versions`)
+- **Residual** — addon supply chain: versions are pinned (`eks_addon_versions`)
   so an addon cannot silently roll to an unvetted build.
 
-## 4. Workload identity  (`modules/aws/workload-identity`, tenant `irsa.tf`)
+## 4. Workload identity  (`modules/aws/workload-identity`, tenant `pod-identity.tf`)
 
 - **Spoofing / Elevation** — a pod assuming a role it should not. Mitigated: the
   `workload-identity` module mints **Pod Identity** roles whose trust is
   `pods.eks.amazonaws.com` only (no OIDC/web-identity principal), bound to an exact
   (cluster, namespace, service-account) via an EKS Pod Identity association. A
   `tofu test` gate asserts the trust never gains a web-identity action and that
-  inline policies pass through unbroadened. Some components (e.g. druid) still use
-  IRSA (OIDC trust scoped to a namespace/SA); both are per-tenant, one role each.
+  inline policies pass through unbroadened. Every workload role in the repo is
+  minted this way, one per tenant; web-identity (OIDC) trust is reserved for the
+  control-plane roles that assume from outside the cluster — the agent-platform
+  operator, fleet-hub, portal-hub, and GitHub Actions CI federation.
   The `workload-identity` module renders an optional per-statement `Condition`, so
   a caller's grant can be ARN-scoped **and** tag/StringEquals-locked. The addon and
   tenant grants use this: the AWS Load Balancer Controller's mutating EC2/ELB verbs

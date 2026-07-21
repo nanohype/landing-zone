@@ -6,7 +6,7 @@
  * configuration set tracks per-send events for the Grafana
  * `digest-pipeline.email.sent` metric.
  *
- * IRSA policy in irsa.tf scopes ses:SendEmail / ses:SendRawEmail to
+ * Pod Identity policy in pod-identity.tf scopes ses:SendEmail / ses:SendRawEmail to
  * the identity ARN built from var.ses_sending_domain.
  *
  * The DNS records SES requires (3× CNAME for DKIM, optional MX for
