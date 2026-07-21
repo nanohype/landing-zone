@@ -51,7 +51,7 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 The multi-tenant components use `var.tenants = map(object({...}))` with `for_each`:
 druid, pipeline, gateway, llm, mlops, rag, governance.
 
-Each tenant gets isolated AWS resources (databases, buckets, queues, IRSA roles).
+Each tenant gets isolated AWS resources (databases, buckets, queues, Pod Identity roles).
 Tenant modules live in `components/aws/{name}/modules/tenant/`.
 
 ## File Structure
@@ -94,7 +94,7 @@ live/
 
 ## CI/CD
 
-- `ci.yml` — PRs: placeholders gate, fmt, validate (per-component matrix), tofu test, tflint, checkov, terragrunt evaluate (live-leaf render), mock-outputs cross-check, plan matrix
+- `ci.yml` — PRs: placeholders gate, fmt, validate (per-component matrix), tofu test, tflint, checkov, terragrunt evaluate (live-leaf render), mock-outputs cross-check, smoke-outputs cross-check, plan matrix
 - `deploy.yml` — manual dispatch: account/region/environment/component, plan or apply
 - `destroy.yml` — manual dispatch: development/staging only, requires confirmation string
 - `drift.yml` — scheduled weekday drift detection on production + staging (matrix auto-discovered), creates GitHub issues
