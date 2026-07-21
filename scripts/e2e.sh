@@ -2,7 +2,7 @@
 #
 # Manual end-to-end validation of the nanohype stack on a REAL AWS account:
 # provision the substrate, install the operator, deploy one tenant through
-# GitOps, assert real-IRSA conformance + cloudgov, then tear everything down.
+# GitOps, assert tenant-role conformance + cloudgov, then tear everything down.
 #
 # Triggered BY HAND ONLY (task e2e / the workflow_dispatch button) — never on a
 # schedule — because each run provisions real, billable AWS (EKS + NAT +
@@ -71,7 +71,7 @@ reap_cluster_orphans() {
     aws kms schedule-key-deletion --region "$REGION" --key-id "$kid" --pending-window-in-days 7 2>/dev/null && echo "  scheduled KMS key $kid for deletion" || true
     aws kms delete-alias --region "$REGION" --alias-name "alias/eks/$CLUSTER" 2>/dev/null || true
   fi
-  # Tenant IRSA role the operator minted at runtime (finalizer fallback if the
+  # Tenant role the operator minted at runtime (finalizer fallback if the
   # in-cluster delete raced selfHeal or the operator was already gone).
   local trole="$ENVIRONMENT-$TENANT-tenant" p ip
   if aws iam get-role --role-name "$trole" >/dev/null 2>&1; then
@@ -161,7 +161,7 @@ teardown() {
     ) 2>/dev/null || true
   fi
   kubectl -n argocd delete application "portal-tenants-$CLUSTER" --cascade=foreground --timeout=120s 2>/dev/null || true
-  # Now delete the Platform CR; the operator finalizer reaps the tenant IRSA role
+  # Now delete the Platform CR; the operator finalizer reaps the tenant role
   # while the operator is still running (before the cluster is destroyed below).
   kubectl delete platform "$TENANT" -n eks-agent-platform --wait=true --timeout=180s 2>/dev/null || true
   # Destroy substrate in reverse dependency order (agent-iam depends on secrets;
@@ -308,7 +308,7 @@ done
 echo "  Platform $TENANT phase=Ready"
 
 # --- 4. validate ------------------------------------------------------------
-log "VALIDATE real-IRSA conformance"
+log "VALIDATE tenant-role conformance"
 ROLE=$(kubectl get platform "$TENANT" -n eks-agent-platform -o jsonpath='{.status.iamRoleArn}')
 [ -n "$ROLE" ] || die "Platform has no status.iamRoleArn"
 RN="${ROLE##*/}"
@@ -316,7 +316,7 @@ RN="${ROLE##*/}"
   die "tenant role $RN has inline policies (expected none)"
 aws iam get-role --role-name "$RN" --query 'Role.PermissionsBoundary.PermissionsBoundaryArn' --output text | grep -q boundary ||
   die "tenant role $RN missing permissions boundary"
-echo "  IRSA role $RN: permissions boundary set, zero inline policies"
+echo "  tenant role $RN: permissions boundary set, zero inline policies"
 
 log "VALIDATE cloudgov platform audit"
 (cd "$CLOUDGOV_DIR" && go build -o "$WORK/cloudgov" .)

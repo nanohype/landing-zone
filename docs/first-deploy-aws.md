@@ -336,7 +336,7 @@ only run locally.
 ## End-to-end validation (`task e2e`)
 
 A single manual command provisions a throwaway substrate, installs the operator,
-deploys a tenant via GitOps, asserts real-IRSA + cloudgov conformance, and tears
+deploys a tenant via GitOps, asserts tenant-role + cloudgov conformance, and tears
 everything down — always, even on failure (an EXIT trap), so a broken run never
 leaves billing on:
 

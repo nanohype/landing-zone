@@ -100,6 +100,7 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 | **checkov** | Security scan on `components/aws/`, `fleet/aws/`, and `modules/aws/`. Hard gate -- any finding not covered by the documented skip list in `.checkov.yaml` fails the build. |
 | **evaluate** | Credential-less `terragrunt render` on every live leaf. Catches include/function/dependency-wiring breakage that per-component `tofu validate` cannot see. |
 | **mock-outputs** | Runs `scripts/check-mock-outputs.py` -- cross-checks every dependency `mock_outputs` key against the target component's real `outputs.tf`, so a renamed output fails here instead of resolving to a stale mock. |
+| **smoke-outputs** | Runs `scripts/check-smoke-outputs.py` -- cross-checks every output key a `components/**/smoke-test.sh` reads via `jq` against that component's real `outputs.tf`. `jq` yields the string "null" for a key that does not exist, so a stale read makes the smoke test assert against nothing; this fails the build instead. |
 | **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan` to show what would change (credential-gated -- skips green when `AWS_ROLE_ARN` is unset). |
 
 ### deploy.yml -- Manual Deploy
@@ -199,9 +200,9 @@ Production and staging infrastructure is checked for drift every weekday morning
 
 ## Secrets Management
 
-The `secrets` component manages encryption and secrets infrastructure: customer-managed KMS keys with auto-rotation, Secrets Manager as the secrets store, and an IRSA role for External Secrets Operator.
+The `secrets` component manages encryption and storage: customer-managed KMS keys with auto-rotation, and Secrets Manager as the secrets store. The External Secrets Operator role sits in `cluster-addons` with every other addon identity, because a ServiceAccount holds exactly one EKS Pod Identity association.
 
-The flow: secrets are stored in Secrets Manager, External Secrets Operator (running in the cluster, authenticated via IRSA) syncs them, and Kubernetes Secrets are created for pod consumption.
+The flow: secrets are stored in Secrets Manager, External Secrets Operator (running in the cluster, authenticated by an EKS Pod Identity role bound to its ServiceAccount) syncs them, and Kubernetes Secrets are created for pod consumption.
 
 ## Backup and Recovery
 
