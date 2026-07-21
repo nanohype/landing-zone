@@ -165,3 +165,9 @@ variable "enable_external_dns" {
   type        = bool
   default     = false
 }
+
+variable "enable_argo_workflows" {
+  description = "Stamp the Argo Workflows artifact bucket (read from the SSM parameter cluster-addons writes under /eks-agent-platform/<cluster-name>/cluster-addons/argo_workflows_bucket) onto the cluster Secret as the argo-workflows/artifact-bucket annotation, where the argo-workflows ApplicationSet reads it as the S3 artifact repository. Opt-in (default false); enable on clusters running Argo Workflows after cluster-addons has applied with argo_workflows_enabled — the enabling live leaves order cluster-addons before cluster-bootstrap. Leave false where Argo Workflows is not run, whose generator does not target those clusters."
+  type        = bool
+  default     = false
+}

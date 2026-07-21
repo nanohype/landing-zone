@@ -23,6 +23,17 @@ data "aws_ssm_parameter" "velero_bucket" {
   name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/velero_bucket"
 }
 
+# The cluster-addons component publishes the Argo Workflows artifact bucket name to
+# SSM; cluster-bootstrap republishes it as the argo-workflows/artifact-bucket
+# cluster-Secret annotation for the argo-workflows ApplicationSet. Gated on
+# enable_argo_workflows so a cluster without Argo Workflows doesn't fail the
+# parameter read. The live leaves that enable this also order cluster-addons before
+# cluster-bootstrap so the parameter exists by apply time.
+data "aws_ssm_parameter" "argo_workflows_bucket" {
+  count = var.enable_argo_workflows ? 1 : 0
+  name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/argo_workflows_bucket"
+}
+
 # The dns component publishes this environment's primary domain to SSM;
 # cluster-bootstrap republishes it as the external-dns/domain-filter
 # cluster-Secret annotation so the addons-external-dns ApplicationSet confines

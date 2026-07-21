@@ -103,6 +103,35 @@ run "no_managed_monitoring_omits_opencost_label" {
   }
 }
 
+# ── argo-workflows ON: the artifact-bucket annotation is stamped from the SSM ──
+# parameter cluster-addons publishes, so the argo-workflows ApplicationSet can wire
+# the real per-cluster S3 artifact repository. Gated on enable_argo_workflows — the
+# same seam velero/backup-bucket and external-dns/domain-filter use.
+run "argo_workflows_stamps_artifact_bucket_annotation" {
+  command = plan
+
+  variables {
+    enable_argo_workflows = true
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].annotations["argo-workflows/artifact-bucket"] == "mock-ssm-value"
+    error_message = "with Argo Workflows enabled the cluster Secret must carry the argo-workflows/artifact-bucket annotation (read from the cluster-addons SSM parameter) — the S3 artifact repository the argo-workflows ApplicationSet injects"
+  }
+}
+
+# ── argo-workflows OFF (default): no artifact-bucket annotation, so the SSM read ──
+# never runs on a cluster that publishes no bucket, and the argo-workflows
+# generator does not target it.
+run "no_argo_workflows_omits_artifact_bucket_annotation" {
+  command = plan
+
+  assert {
+    condition     = !contains(keys(kubernetes_secret_v1.argocd_cluster.metadata[0].annotations), "argo-workflows/artifact-bucket")
+    error_message = "without Argo Workflows the cluster Secret must not carry argo-workflows/artifact-bucket — the annotation is opt-in and its SSM parameter would not exist"
+  }
+}
+
 # ── network mode create: the cluster Secret carries the network_mode label so ──
 # eks-gitops generators can select on it unconditionally, publishes no subnet
 # annotations (a create cluster's load balancers auto-discover subnets by the ELB
