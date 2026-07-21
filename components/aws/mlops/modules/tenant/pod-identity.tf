@@ -3,8 +3,6 @@
 ################################################################################
 
 locals {
-  irsa_prefix = "${var.environment}-mlops-${var.tenant_id}"
-
   datasets_bucket_arn  = module.datasets_bucket.s3_bucket_arn
   artifacts_bucket_arn = module.artifacts_bucket.s3_bucket_arn
 
@@ -26,7 +24,7 @@ locals {
 module "training_worker_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-training-worker"
+  role_name       = "${local.prefix}-training-worker"
   cluster_name    = var.cluster_name
   namespace       = local.namespace
   service_account = "mlops-training-worker"
@@ -111,7 +109,7 @@ module "training_worker_irsa" {
 module "model_registry_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-model-registry"
+  role_name       = "${local.prefix}-model-registry"
   cluster_name    = var.cluster_name
   namespace       = local.namespace
   service_account = "mlops-model-registry"
@@ -186,7 +184,7 @@ module "model_registry_irsa" {
 module "mlops_api_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-mlops-api"
+  role_name       = "${local.prefix}-mlops-api"
   cluster_name    = var.cluster_name
   namespace       = local.namespace
   service_account = "mlops-api"

@@ -7,9 +7,9 @@ output "tenant_outputs" {
       s3_deepstorage         = tenant.s3_deepstorage
       s3_indexlogs           = tenant.s3_indexlogs
       s3_msq                 = tenant.s3_msq
-      irsa_historical        = tenant.irsa_historical_arn
-      irsa_ingestion         = tenant.irsa_ingestion_arn
-      irsa_query             = tenant.irsa_query_arn
+      historical_role_arn    = tenant.historical_role_arn
+      ingestion_role_arn     = tenant.ingestion_role_arn
+      query_role_arn         = tenant.query_role_arn
       msk_bootstrap          = tenant.msk_bootstrap
       ingestion_policy_json  = tenant.ingestion_policy_json
       msk_client_policy_json = tenant.msk_client_policy_json

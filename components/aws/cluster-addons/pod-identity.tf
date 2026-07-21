@@ -6,7 +6,7 @@
 module "cert_manager_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-cert-manager"
+  role_name       = "${local.role_name_prefix}-cert-manager"
   cluster_name    = var.cluster_name
   namespace       = "cert-manager"
   service_account = "cert-manager"
@@ -44,7 +44,7 @@ module "cert_manager_irsa" {
 module "external_secrets_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-external-secrets"
+  role_name       = "${local.role_name_prefix}-external-secrets"
   cluster_name    = var.cluster_name
   namespace       = "external-secrets"
   service_account = "external-secrets"
@@ -85,7 +85,7 @@ module "external_secrets_irsa" {
 module "alb_controller_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-aws-load-balancer-controller"
+  role_name       = "${local.role_name_prefix}-aws-load-balancer-controller"
   cluster_name    = var.cluster_name
   namespace       = "kube-system"
   service_account = "aws-load-balancer-controller"
@@ -348,7 +348,7 @@ module "alb_controller_irsa" {
 module "external_dns_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-external-dns"
+  role_name       = "${local.role_name_prefix}-external-dns"
   cluster_name    = var.cluster_name
   namespace       = "external-dns"
   service_account = "external-dns"
@@ -380,7 +380,7 @@ module "velero_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.velero_enabled ? 1 : 0
 
-  role_name       = "${local.irsa_role_prefix}-velero"
+  role_name       = "${local.role_name_prefix}-velero"
   cluster_name    = var.cluster_name
   namespace       = "velero"
   service_account = "velero"
@@ -425,7 +425,7 @@ module "velero_irsa" {
 module "loki_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-loki"
+  role_name       = "${local.role_name_prefix}-loki"
   cluster_name    = var.cluster_name
   namespace       = "monitoring"
   service_account = "loki"
@@ -454,7 +454,7 @@ module "loki_irsa" {
 module "tempo_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-tempo"
+  role_name       = "${local.role_name_prefix}-tempo"
   cluster_name    = var.cluster_name
   namespace       = "monitoring"
   service_account = "tempo"
@@ -484,7 +484,7 @@ module "opencost_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.opencost_enabled ? 1 : 0
 
-  role_name       = "${local.irsa_role_prefix}-opencost"
+  role_name       = "${local.role_name_prefix}-opencost"
   cluster_name    = var.cluster_name
   namespace       = "opencost"
   service_account = "opencost"
@@ -523,7 +523,7 @@ module "keda_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.keda_enabled ? 1 : 0
 
-  role_name       = "${local.irsa_role_prefix}-keda-operator"
+  role_name       = "${local.role_name_prefix}-keda-operator"
   cluster_name    = var.cluster_name
   namespace       = "keda"
   service_account = "keda-operator"
@@ -553,7 +553,7 @@ module "argo_events_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.argo_events_enabled ? 1 : 0
 
-  role_name       = "${local.irsa_role_prefix}-argo-events"
+  role_name       = "${local.role_name_prefix}-argo-events"
   cluster_name    = var.cluster_name
   namespace       = "argo-events"
   service_account = "argo-events-controller-manager"
@@ -609,7 +609,7 @@ module "argo_workflows_irsa" {
   source = "../../../modules/aws/workload-identity"
   count  = var.argo_workflows_enabled ? 1 : 0
 
-  role_name       = "${local.irsa_role_prefix}-argo-workflows"
+  role_name       = "${local.role_name_prefix}-argo-workflows"
   cluster_name    = var.cluster_name
   namespace       = "argo-workflows"
   service_account = "argo-workflows-server"

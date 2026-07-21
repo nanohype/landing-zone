@@ -37,8 +37,8 @@ resource "aws_ssm_parameter" "dynamodb_conversations_table" {
   tags  = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_bedrock_api_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-bedrock-api-role-arn"
+resource "aws_ssm_parameter" "bedrock_api_role_arn" {
+  name  = "${local.ssm_prefix}/bedrock-api-role-arn"
   type  = "String"
   value = module.bedrock_api_irsa.iam_role_arn
   tags  = local.tenant_tags

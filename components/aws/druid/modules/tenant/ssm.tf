@@ -46,24 +46,24 @@ resource "aws_ssm_parameter" "s3_msq" {
   tags = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_historical" {
-  name  = "${local.ssm_prefix}/irsa/historical"
+resource "aws_ssm_parameter" "historical_role" {
+  name  = "${local.ssm_prefix}/role/historical"
   type  = "String"
   value = module.historical_irsa.iam_role_arn
 
   tags = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_ingestion" {
-  name  = "${local.ssm_prefix}/irsa/ingestion"
+resource "aws_ssm_parameter" "ingestion_role" {
+  name  = "${local.ssm_prefix}/role/ingestion"
   type  = "String"
   value = module.ingestion_irsa.iam_role_arn
 
   tags = local.tenant_tags
 }
 
-resource "aws_ssm_parameter" "irsa_query" {
-  name  = "${local.ssm_prefix}/irsa/query"
+resource "aws_ssm_parameter" "query_role" {
+  name  = "${local.ssm_prefix}/role/query"
   type  = "String"
   value = module.query_irsa.iam_role_arn
 

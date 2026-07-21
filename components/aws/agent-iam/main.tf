@@ -14,7 +14,7 @@ data "aws_partition" "current" {}
 locals {
   account_id       = data.aws_caller_identity.current.account_id
   partition        = data.aws_partition.current.partition
-  irsa_role_prefix = "${var.cluster_name}-agent-platform"
+  role_name_prefix = "${var.cluster_name}-agent-platform"
 
   # Path every tenant role is minted under. The operator's IAM permissions are
   # scoped to this path so it can never touch roles outside it. Matches the
@@ -65,7 +65,7 @@ locals {
 ################################################################################
 
 resource "aws_iam_policy" "tenant_boundary" {
-  name        = "${local.irsa_role_prefix}-tenant-boundary"
+  name        = "${local.role_name_prefix}-tenant-boundary"
   path        = "/eks-agent-platform/"
   description = "Permissions boundary ceiling for eks-agent-platform tenant roles"
 
@@ -185,7 +185,7 @@ resource "aws_iam_policy" "tenant_boundary" {
 ################################################################################
 
 resource "aws_iam_policy" "tenant_baseline" {
-  name        = "${local.irsa_role_prefix}-tenant-baseline"
+  name        = "${local.role_name_prefix}-tenant-baseline"
   path        = "/eks-agent-platform/"
   description = "Baseline policy attached to every eks-agent-platform tenant role"
 
@@ -283,7 +283,7 @@ data "aws_iam_policy_document" "operator_trust" {
 }
 
 resource "aws_iam_role" "operator" {
-  name               = "${local.irsa_role_prefix}-operator"
+  name               = "${local.role_name_prefix}-operator"
   path               = "/eks-agent-platform/"
   assume_role_policy = data.aws_iam_policy_document.operator_trust.json
   description        = "IRSA role for the eks-agent-platform operator"

@@ -7,9 +7,9 @@ locals {
   # Key on the full cluster name (<environment>-<clusterName>), not the environment.
   # The environment alone does NOT distinguish two clusters co-located in one account
   # and environment — that's what the cluster name's unique base is for. Every
-  # cluster-scoped name (IRSA roles, buckets) rides the cluster identity so siblings
+  # cluster-scoped name (addon roles, buckets) rides the cluster identity so siblings
   # never collide.
-  irsa_role_prefix = var.cluster_name
+  role_name_prefix = var.cluster_name
   # Account- and region-qualified on top of the cluster name, because S3 bucket names
   # are GLOBALLY unique across every AWS account on earth — not per-account. A bare
   # "<cluster>-loki" is a name someone else already owns, so a fresh install of this

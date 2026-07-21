@@ -81,14 +81,14 @@ for TENANT in $TENANTS; do
     echo "  ECR repository exists"
   fi
 
-  # --- IRSA Roles ---
-  for ROLE_KEY in irsa_inference_server_role_arn irsa_api_gateway_role_arn; do
+  # --- Pod Identity Roles ---
+  for ROLE_KEY in inference_server_role_arn api_gateway_role_arn; do
     ROLE_ARN=$(jq -r ".tenant_outputs.value[\"${TENANT}\"].${ROLE_KEY}" outputs.json)
     if [[ -n "$ROLE_ARN" && "$ROLE_ARN" != "null" ]]; then
       ROLE_NAME=$(echo "$ROLE_ARN" | awk -F'/' '{print $NF}')
       echo "Checking ${ROLE_KEY}..."
       aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1 || {
-        echo "FAIL: IRSA role '${ROLE_NAME}' not found"
+        echo "FAIL: role '${ROLE_NAME}' not found"
         exit 1
       }
       echo "  ${ROLE_KEY}: exists"

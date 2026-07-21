@@ -18,8 +18,8 @@ output "conversations_table" {
   value       = aws_dynamodb_table.conversations.name
 }
 
-output "irsa_arn" {
-  description = "IAM role ARN for the bedrock-api IRSA"
+output "bedrock_api_role_arn" {
+  description = "Pod Identity role ARN for the bedrock-api workload"
   value       = module.bedrock_api_irsa.iam_role_arn
 }
 

@@ -28,31 +28,31 @@ variable "team" {
 }
 
 variable "velero_enabled" {
-  description = "Enable Velero IRSA role and S3 bucket"
+  description = "Enable Velero Pod Identity role and S3 bucket"
   type        = bool
   default     = true
 }
 
 variable "opencost_enabled" {
-  description = "Enable OpenCost IRSA role"
+  description = "Enable OpenCost Pod Identity role"
   type        = bool
   default     = true
 }
 
 variable "keda_enabled" {
-  description = "Enable KEDA IRSA role"
+  description = "Enable KEDA Pod Identity role"
   type        = bool
   default     = true
 }
 
 variable "argo_events_enabled" {
-  description = "Enable Argo Events IRSA role"
+  description = "Enable Argo Events Pod Identity role"
   type        = bool
   default     = true
 }
 
 variable "argo_workflows_enabled" {
-  description = "Enable Argo Workflows IRSA role and S3 bucket"
+  description = "Enable Argo Workflows Pod Identity role and S3 bucket"
   type        = bool
   default     = true
 }

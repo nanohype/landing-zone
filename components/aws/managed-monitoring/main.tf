@@ -1,8 +1,8 @@
 locals {
-  # Key on the full cluster name (<environment>-<clusterName>) so the IRSA roles match
+  # Key on the full cluster name (<environment>-<clusterName>) so the addon roles match
   # this cluster's AMP/AMG resources (which already key on var.cluster_name) and don't
   # collide with a co-located sibling cluster in the same account and environment.
-  irsa_role_prefix = var.cluster_name
+  role_name_prefix = var.cluster_name
 
   tags = merge(var.tags, {
     Component = "managed-monitoring"
@@ -48,7 +48,7 @@ resource "aws_prometheus_alert_manager_definition" "this" {
 module "alloy_amp_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-alloy-amp"
+  role_name       = "${local.role_name_prefix}-alloy-amp"
   cluster_name    = var.cluster_name
   namespace       = "monitoring"
   service_account = "alloy"
@@ -328,7 +328,7 @@ resource "aws_secretsmanager_secret_version" "grafana_token" {
 module "grafana_token_rotator_irsa" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_role_prefix}-grafana-token-rotator"
+  role_name       = "${local.role_name_prefix}-grafana-token-rotator"
   cluster_name    = var.cluster_name
   namespace       = "grafana-operator"
   service_account = "grafana-token-rotator"

@@ -4,7 +4,6 @@
 
 locals {
   druid_namespace = "druid-${var.tenant_id}"
-  irsa_prefix     = "${var.environment}-druid-${var.tenant_id}"
 
   s3_buckets = [
     module.deepstorage_bucket.s3_bucket_arn,
@@ -38,7 +37,7 @@ locals {
   # the cluster UUID (assigned at create time) wildcarded. Every ARN carries the
   # tenant's account, region, and cluster name, so an ingestion or client pod can
   # only reach its own tenant's brokers, topics, and consumer groups.
-  msk_cluster_name = "${local.irsa_prefix}-msk"
+  msk_cluster_name = "${local.prefix}-msk"
   msk_resource_arns = [
     "arn:aws:kafka:${var.region}:${var.account_id}:cluster/${local.msk_cluster_name}/*",
     "arn:aws:kafka:${var.region}:${var.account_id}:topic/${local.msk_cluster_name}/*",
@@ -50,7 +49,7 @@ locals {
 module "historical_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-historical"
+  role_name       = "${local.prefix}-historical"
   cluster_name    = var.cluster_name
   namespace       = local.druid_namespace
   service_account = "druid-historical"
@@ -74,7 +73,7 @@ module "historical_irsa" {
 module "ingestion_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-ingestion"
+  role_name       = "${local.prefix}-ingestion"
   cluster_name    = var.cluster_name
   namespace       = local.druid_namespace
   service_account = "druid-ingestion"
@@ -100,7 +99,7 @@ module "ingestion_irsa" {
 module "query_irsa" {
   source = "../../../../../modules/aws/workload-identity"
 
-  role_name       = "${local.irsa_prefix}-query"
+  role_name       = "${local.prefix}-query"
   cluster_name    = var.cluster_name
   namespace       = local.druid_namespace
   service_account = "druid-query"
@@ -115,7 +114,7 @@ module "msk_client_irsa" {
   source = "../../../../../modules/aws/workload-identity"
   count  = var.tenant_config.msk_enabled ? 1 : 0
 
-  role_name       = "${local.irsa_prefix}-msk-client"
+  role_name       = "${local.prefix}-msk-client"
   cluster_name    = var.cluster_name
   namespace       = local.druid_namespace
   service_account = "druid-msk-client"

@@ -48,13 +48,13 @@ output "ecr_repository_uri" {
   value       = aws_ecr_repository.this.repository_url
 }
 
-output "irsa_inference_server_role_arn" {
-  description = "IAM role ARN for inference server IRSA"
+output "inference_server_role_arn" {
+  description = "Pod Identity role ARN for the inference server"
   value       = module.inference_server_irsa.iam_role_arn
 }
 
-output "irsa_api_gateway_role_arn" {
-  description = "IAM role ARN for API gateway IRSA"
+output "api_gateway_role_arn" {
+  description = "Pod Identity role ARN for the API gateway"
   value       = module.api_gateway_irsa.iam_role_arn
 }
 

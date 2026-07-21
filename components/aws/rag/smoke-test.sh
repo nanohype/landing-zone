@@ -46,16 +46,16 @@ for TENANT in $TENANTS; do
   fi
   echo "  Conversations table ACTIVE"
 
-  # --- IRSA Role ---
-  IRSA_ARN=$(jq -r ".tenants.value[\"${TENANT}\"].irsa_arn" outputs.json)
-  if [[ -n "$IRSA_ARN" && "$IRSA_ARN" != "null" ]]; then
-    ROLE_NAME=$(echo "$IRSA_ARN" | awk -F'/' '{print $NF}')
-    echo "Checking IRSA role..."
+  # --- Pod Identity Role ---
+  ROLE_ARN=$(jq -r ".tenants.value[\"${TENANT}\"].bedrock_api_role_arn" outputs.json)
+  if [[ -n "$ROLE_ARN" && "$ROLE_ARN" != "null" ]]; then
+    ROLE_NAME=$(echo "$ROLE_ARN" | awk -F'/' '{print $NF}')
+    echo "Checking bedrock-api role..."
     aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1 || {
-      echo "FAIL: IRSA role '${ROLE_NAME}' not found"
+      echo "FAIL: role '${ROLE_NAME}' not found"
       exit 1
     }
-    echo "  IRSA role exists"
+    echo "  bedrock-api role exists"
   fi
 done
 

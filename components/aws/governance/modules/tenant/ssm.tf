@@ -52,14 +52,14 @@ resource "aws_ssm_parameter" "eventbridge_bus_arn" {
 }
 
 resource "aws_ssm_parameter" "audit_writer_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-audit-writer-role-arn"
+  name  = "${local.ssm_prefix}/audit-writer-role-arn"
   type  = "String"
   value = module.audit_writer_irsa.iam_role_arn
   tags  = local.tenant_tags
 }
 
 resource "aws_ssm_parameter" "governance_api_role_arn" {
-  name  = "${local.ssm_prefix}/irsa-governance-api-role-arn"
+  name  = "${local.ssm_prefix}/governance-api-role-arn"
   type  = "String"
   value = module.governance_api_irsa.iam_role_arn
   tags  = local.tenant_tags

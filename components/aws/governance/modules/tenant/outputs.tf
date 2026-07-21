@@ -54,12 +54,12 @@ output "event_bus_arn" {
 }
 
 output "audit_writer_role_arn" {
-  description = "IRSA role ARN for audit-writer service account"
+  description = "Pod Identity role ARN for the audit-writer service account"
   value       = module.audit_writer_irsa.iam_role_arn
 }
 
 output "governance_api_role_arn" {
-  description = "IRSA role ARN for governance-api service account"
+  description = "Pod Identity role ARN for the governance-api service account"
   value       = module.governance_api_irsa.iam_role_arn
 }
 

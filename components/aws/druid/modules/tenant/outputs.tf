@@ -23,18 +23,18 @@ output "s3_msq" {
   value       = module.msq_bucket.s3_bucket_id
 }
 
-output "irsa_historical_arn" {
-  description = "IRSA role ARN for historical nodes"
+output "historical_role_arn" {
+  description = "Pod Identity role ARN for historical nodes"
   value       = module.historical_irsa.iam_role_arn
 }
 
-output "irsa_ingestion_arn" {
-  description = "IRSA role ARN for ingestion nodes"
+output "ingestion_role_arn" {
+  description = "Pod Identity role ARN for ingestion nodes"
   value       = module.ingestion_irsa.iam_role_arn
 }
 
-output "irsa_query_arn" {
-  description = "IRSA role ARN for query nodes"
+output "query_role_arn" {
+  description = "Pod Identity role ARN for query nodes"
   value       = module.query_irsa.iam_role_arn
 }
 

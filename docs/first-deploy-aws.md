@@ -179,13 +179,13 @@ Bootstrap creates the App-of-Apps Application pointing at `eks-gitops`. Applicat
 
 ## Post-Deploy
 
-### Wire IRSA role ARNs into eks-gitops
+### Wire Pod Identity role ARNs into eks-gitops
 
 `cluster-addons` outputs the real role ARNs that need to replace the `000000000000` placeholders:
 
 ```bash
 cd live/aws/workload-<env>/us-west-2/<env>/cluster-addons
-terragrunt output -json irsa_role_arns
+terragrunt output -json pod_identity_role_arns
 terragrunt output -json s3_bucket_names
 ```
 
