@@ -28,3 +28,6 @@ override.tf.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Local planning notes
+.plans/
