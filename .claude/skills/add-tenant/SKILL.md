@@ -8,7 +8,7 @@ user-invocable: true
 Add a new tenant to a multi-tenant component.
 
 **Arguments:**
-- `$ARGUMENTS[0]` — component (druid, pipeline, gateway, llm, mlops, rag, governance)
+- `$ARGUMENTS[0]` — component (druid, pipeline, governance)
 - `$ARGUMENTS[1]` — tenant name (e.g., "analytics", "ml-team")
 - `$ARGUMENTS[2]` — environment (default: all environments)
 

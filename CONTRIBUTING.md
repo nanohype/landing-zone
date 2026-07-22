@@ -86,7 +86,7 @@ Follow the standard component steps above, plus:
 
 4. Use the shared workload identity module (`modules/aws/workload-identity/`) for pod IAM roles.
 
-Existing multi-tenant components to reference: `druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`.
+Existing multi-tenant components to reference: `druid`, `pipeline`, `governance`.
 
 ## Adding a Tenant
 

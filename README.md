@@ -23,10 +23,9 @@ OpenTofu + Terragrunt monorepo for enterprise platform infrastructure on AWS.
 │  Environment Layer (development / staging / production)               │
 │                                                                       │
 │  ┌──────────┐    ┌──────────┐    ┌──────────────────────────────┐    │
-│  │ network  │───▶│ cluster  │───▶│ druid · pipeline · llm       │    │
-│  │ (create  │    │          │───▶│ gateway · rag · mlops         │    │
-│  │  | adopt)│    │          │───▶│ governance · observability    │    │
-│  │          │    │          │───▶│ secrets · cluster-addons      │    │
+│  │ network  │───▶│ cluster  │───▶│ druid · pipeline              │    │
+│  │ (create  │    │          │───▶│ governance · observability    │    │
+│  │  | adopt)│    │          │───▶│ secrets · cluster-addons      │    │
 │  │          │    │          │───▶│ cluster-bootstrap             │    │
 │  └──────────┘    └──────────┘    └──────────────────────────────┘    │
 │                                                                       │

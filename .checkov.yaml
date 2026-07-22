@@ -15,8 +15,8 @@
 # (#checkov:skip=<id>:<reason>), so removing the resource removes the skip with
 # it. Currently inline: CKV_AWS_21 (S3 versioning — digest raw_aggregations plus the
 # agent-iam / fleet-hub / portal-hub access-log sink buckets, each with its own
-# rationale), CKV_AWS_42 (llm tenant EFS encryption false positive), CKV_AWS_331
-# (org-networking TGW auto-accept), CKV_AWS_252 (org-compliance CloudTrail SNS).
+# rationale), CKV_AWS_331 (org-networking TGW auto-accept), CKV_AWS_252
+# (org-compliance CloudTrail SNS).
 
 skip-check:
   # ── AWS: provider-managed encryption at rest (SSE-S3 / AWS-managed keys) ──
