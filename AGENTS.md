@@ -6,7 +6,7 @@ You're an AI client (or the author of one) about to provision cloud substrate. T
 
 OpenTofu + Terragrunt monorepo for the AWS substrate every nanohype-stack app lands on:
 
-- **`components/aws/`** — VPC (`network`/`shared-network`/`egress-network`), base IAM, KMS keys, EKS cluster, cluster bootstrap, observability, secrets, gateway, governance, `agent-iam`, plus per-app `<app>-platform` single-tenant components (competitive-intelligence-platform, digest-pipeline-platform, incident-response-platform, slack-knowledge-bot-platform). Shared multi-tenant components (`var.tenants`): `druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`.
+- **`components/aws/`** — VPC (`network`/`shared-network`/`egress-network`), base IAM, KMS keys, EKS cluster, cluster bootstrap, observability, secrets, governance, `agent-iam`, plus per-app `<app>-platform` single-tenant components (competitive-intelligence-platform, digest-pipeline-platform, incident-response-platform, slack-knowledge-bot-platform). Shared multi-tenant components (`var.tenants`): `druid`, `pipeline`, `governance`.
 
 Plus:
 

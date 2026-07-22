@@ -1,3 +1,18 @@
+/**
+ * Lakehouse substrate — per-tenant MSK, Glue catalog, Batch compute, and a
+ * three-tier S3 data lake (raw / staging / curated).
+ *
+ * NO WORKLOAD CONSUMES THIS YET. Nothing reads the SSM parameters it
+ * publishes, and there is no cluster-side chart for it. That is deliberate,
+ * not an oversight: it is held for a lakehouse workload, and it is the one
+ * component in this repo exempt from the rule that substrate without a
+ * consumer gets deleted.
+ *
+ * The exemption is not open-ended. If no workload materializes, this goes the
+ * way of the other unconsumed components — the test is whether something reads
+ * `<env>-pipeline-<tenant>/*` out of SSM. Check before assuming it is load-bearing.
+ */
+
 data "aws_caller_identity" "current" {}
 
 locals {

@@ -18,7 +18,7 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 - **AWS components** under `components/aws/`, grouped by layer:
   - **Network** — `network` (mode-aware VPC: `create` owns a VPC, `adopt` participates in a shared one), `shared-network` (owner side of the cross-account adopt topology, RAM-shares subnets), `egress-network` (central egress hub behind the org transit gateway)
   - **Cluster** — `cluster`, `cluster-bootstrap`, `cluster-addons`
-  - **Workload (multi-tenant, `var.tenants`)** — `druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`
+  - **Workload (multi-tenant, `var.tenants`)** — `druid`, `pipeline`, `governance`
   - **Operational** — `observability`, `secrets`, `backup`, `break-glass`, `service-quotas`, `cost`, `dns`, `github-oidc`, `managed-monitoring`
   - **Agent-platform** — `agent-iam` (operator role + tenant permissions boundary + model-artifacts/eval-reports buckets) and the four per-app single-tenant substrates `competitive-intelligence-platform`, `digest-pipeline-platform`, `incident-response-platform`, `slack-knowledge-bot-platform`
   - **Fleet & portal (cross-account, hub-side)** — `fleet-hub`, `fleet-vend`, `fleet-unwedge`, `portal-hub`, `portal-spoke`
@@ -27,7 +27,7 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 - **Environments:** development, staging, production; `hub` (fleet/portal control plane); `org` (management account)
 - **Accounts:** workload-development, workload-staging, workload-production, management, `fleet` (hub control plane), `network` (network-owner account for the shared-network/egress-network adopt topology)
 - **Multi-region support:** us-west-2
-- **Dependency chain:** `network → cluster → {cluster-addons, cluster-bootstrap, druid, pipeline, llm, gateway, rag, mlops, governance, observability, secrets, agent-iam → *-platform}`
+- **Dependency chain:** `network → cluster → {cluster-addons, cluster-bootstrap, druid, pipeline, governance, observability, secrets, agent-iam → *-platform}`
 - Standalone (no dependencies): `cost`, `dns`, `backup`, `break-glass`, `service-quotas`, `github-oidc`
 - `shared-network` and `egress-network` run in the network-owner account; `managed-monitoring`, `fleet-hub`, and the portal/fleet roles run on the hub; `org-*` components deploy to the management account only
 - **GitOps boundary:** OpenTofu deploys cloud resources + Cilium + ArgoCD. ArgoCD manages in-cluster workloads via [eks-gitops](https://github.com/nanohype/eks-gitops)
@@ -49,7 +49,7 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
 ## Multi-Tenant Pattern
 
 The multi-tenant components use `var.tenants = map(object({...}))` with `for_each`:
-druid, pipeline, gateway, llm, mlops, rag, governance.
+druid, pipeline, governance.
 
 Each tenant gets isolated AWS resources (databases, buckets, queues, Pod Identity roles).
 Tenant modules live in `components/aws/{name}/modules/tenant/`.

@@ -39,7 +39,7 @@ variables {
 # The guards are pure string checks on var.tenants keys, evaluated during
 # variable evaluation before any resource is planned — so each negative case
 # fails fast at the validation. The positive direction (a short, non-env key is
-# accepted) is covered by the rag suite, whose passing runs are keyed "t1"
+# accepted) is covered by the pipeline suite, whose passing runs are keyed "t1"
 # against the identical guard.
 
 # no-doubled-env: a tenant keyed with the environment token composes into a
