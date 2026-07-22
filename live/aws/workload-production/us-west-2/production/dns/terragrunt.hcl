@@ -9,7 +9,7 @@ include "envcommon" {
 
 inputs = {
   domain_name        = "example.com"
-  create_hosted_zone = true
+  dns_mode           = "create"
   enable_dnssec      = true
   subdomain_prefixes = []
 

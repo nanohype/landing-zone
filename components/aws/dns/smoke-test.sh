@@ -2,25 +2,28 @@
 set -euo pipefail
 
 # Parse outputs
-HOSTED_ZONE_ID=$(jq -r '.hosted_zone_id.value // ""' outputs.json)
+DNS_MODE=$(jq -r '.dns_mode.value' outputs.json)
+HOSTED_ZONE_ID=$(jq -r '.hosted_zone_id.value' outputs.json)
 DOMAIN_NAME=$(jq -r '.domain_name.value' outputs.json)
 
 # --- Primary Hosted Zone ---
-if [[ -n "$HOSTED_ZONE_ID" ]]; then
-  echo "Checking primary hosted zone '${DOMAIN_NAME}' (${HOSTED_ZONE_ID})..."
-  ZONE_NAME=$(aws route53 get-hosted-zone --id "$HOSTED_ZONE_ID" --query 'HostedZone.Name' --output text 2>/dev/null || echo "NOT_FOUND")
-  if [[ "$ZONE_NAME" == "NOT_FOUND" ]]; then
-    echo "FAIL: hosted zone ${HOSTED_ZONE_ID} not found"
-    exit 1
-  fi
-  echo "  Primary zone exists: ${ZONE_NAME}"
-
-  # Check NS records are present
-  NS_COUNT=$(aws route53 list-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" --query "ResourceRecordSets[?Type=='NS'] | length(@)" --output text)
-  echo "  NS record sets: ${NS_COUNT}"
-else
-  echo "Skipping primary hosted zone (not configured)"
+# hosted_zone_id always resolves to a real zone — built in create mode, referenced in adopt
+# mode. Either way the zone must exist and its name must match the component's domain.
+echo "Checking primary hosted zone '${DOMAIN_NAME}' (${HOSTED_ZONE_ID}, mode=${DNS_MODE})..."
+ZONE_NAME=$(aws route53 get-hosted-zone --id "$HOSTED_ZONE_ID" --query 'HostedZone.Name' --output text 2>/dev/null || echo "NOT_FOUND")
+if [[ "$ZONE_NAME" == "NOT_FOUND" ]]; then
+  echo "FAIL: hosted zone ${HOSTED_ZONE_ID} not found"
+  exit 1
 fi
+if [[ "${ZONE_NAME%.}" != "$DOMAIN_NAME" ]]; then
+  echo "FAIL: resolved zone '${ZONE_NAME%.}' does not match domain '${DOMAIN_NAME}'"
+  exit 1
+fi
+echo "  Primary zone exists and matches domain: ${ZONE_NAME}"
+
+# Check NS records are present
+NS_COUNT=$(aws route53 list-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" --query "ResourceRecordSets[?Type=='NS'] | length(@)" --output text)
+echo "  NS record sets: ${NS_COUNT}"
 
 # --- Subdomain Zones ---
 echo "Checking subdomain zones..."
