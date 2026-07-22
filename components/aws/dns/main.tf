@@ -1,6 +1,9 @@
 data "aws_caller_identity" "current" {}
 
 locals {
+  create_mode = var.dns_mode == "create"
+  adopt_mode  = var.dns_mode == "adopt"
+
   tags = merge(var.tags, {
     Component = "dns"
     Team      = var.team
@@ -24,7 +27,7 @@ locals {
 ################################################################################
 
 resource "aws_route53_zone" "primary" {
-  count = var.create_hosted_zone ? 1 : 0
+  count = local.create_mode ? 1 : 0
 
   name    = var.domain_name
   comment = "${var.environment} primary hosted zone"
@@ -39,7 +42,7 @@ resource "aws_route53_zone" "primary" {
 ################################################################################
 
 resource "aws_route53_zone" "subdomains" {
-  for_each = var.create_hosted_zone ? toset(var.subdomain_prefixes) : toset([])
+  for_each = local.create_mode ? toset(var.subdomain_prefixes) : toset([])
 
   name    = "${each.value}.${var.domain_name}"
   comment = "${var.environment} subdomain zone for ${each.value}"
@@ -50,7 +53,7 @@ resource "aws_route53_zone" "subdomains" {
 }
 
 resource "aws_route53_record" "subdomain_delegation" {
-  for_each = var.create_hosted_zone ? toset(var.subdomain_prefixes) : toset([])
+  for_each = local.create_mode ? toset(var.subdomain_prefixes) : toset([])
 
   zone_id = aws_route53_zone.primary[0].zone_id
   name    = "${each.value}.${var.domain_name}"
@@ -80,7 +83,7 @@ resource "aws_acm_certificate" "this" {
 }
 
 resource "aws_route53_record" "cert_validation" {
-  for_each = var.create_hosted_zone ? local.cert_validation_records : {}
+  for_each = local.create_mode ? local.cert_validation_records : {}
 
   allow_overwrite = true
   name            = each.value.name
@@ -93,7 +96,7 @@ resource "aws_route53_record" "cert_validation" {
 resource "aws_acm_certificate_validation" "this" {
   for_each = {
     for k, v in var.acm_certificates : k => v
-    if v.wait_for_validation && var.create_hosted_zone
+    if v.wait_for_validation && local.create_mode
   }
 
   certificate_arn = aws_acm_certificate.this[each.key].arn
@@ -108,7 +111,7 @@ resource "aws_acm_certificate_validation" "this" {
 ################################################################################
 
 resource "aws_kms_key" "dnssec" {
-  count = var.enable_dnssec && var.create_hosted_zone ? 1 : 0
+  count = local.create_mode && var.enable_dnssec ? 1 : 0
 
   customer_master_key_spec = "ECC_NIST_P256"
   deletion_window_in_days  = 7
@@ -153,7 +156,7 @@ resource "aws_kms_key" "dnssec" {
 }
 
 resource "aws_route53_key_signing_key" "this" {
-  count = var.enable_dnssec && var.create_hosted_zone ? 1 : 0
+  count = local.create_mode && var.enable_dnssec ? 1 : 0
 
   hosted_zone_id             = aws_route53_zone.primary[0].id
   key_management_service_arn = aws_kms_key.dnssec[0].arn
@@ -161,7 +164,7 @@ resource "aws_route53_key_signing_key" "this" {
 }
 
 resource "aws_route53_hosted_zone_dnssec" "this" {
-  count = var.enable_dnssec && var.create_hosted_zone ? 1 : 0
+  count = local.create_mode && var.enable_dnssec ? 1 : 0
 
   hosted_zone_id = aws_route53_zone.primary[0].id
 
