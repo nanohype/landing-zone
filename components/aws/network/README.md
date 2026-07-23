@@ -48,6 +48,11 @@ The default. Builds a VPC (via `terraform-aws-modules/vpc`) with:
   **off** for an eks-fleet provisioning hub, whose EKS endpoint private DNS would otherwise
   shadow the IRSA OIDC issuer subdomain (`oidc.eks.<region>.amazonaws.com`) and break
   `data.tls_certificate` when the in-VPC runner provisions a spoke's OIDC provider.
+  Endpoints are an optimization, not a hard requirement: the shared envcommon
+  (`_envcommon/aws/network.hcl`) sets `enable_vpc_endpoints = false` as the minimal-footprint
+  baseline, so a leaf that inherits it reaches the AWS APIs over NAT and pays no per-endpoint
+  hourly cost. A leaf turns them on when private connectivity (or avoiding NAT data cost) is
+  worth it — staging and production do.
 - **Flow logs** — `enable_flow_logs` (default `false`; the leaves set it explicitly —
   staging/production on, development off).
 - **ELB role tags** — `kubernetes.io/role/elb` (public) and `.../internal-elb` (private).
