@@ -20,9 +20,11 @@
 ################################################################################
 
 data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
+  partition  = data.aws_partition.current.partition
 
   # Account+region-scoped names. The bucket carries the account id + region
   # because S3's namespace is global; the role carries the region because IAM is
@@ -128,14 +130,16 @@ resource "aws_s3_bucket_policy" "staging" {
 
 ################################################################################
 # Import service role. Bedrock assumes this during a CreateModelImportJob to
-# read the staged weights. Confused-deputy protection is aws:SourceAccount only.
-# A model-import-job aws:SourceArn condition — which AWS's own doc example shows —
-# is deliberately omitted: Bedrock validates this role during the create call,
-# before the job (and its ARN) exists, so a job-scoped SourceArn can never be
-# satisfied at validation time and the call fails with the misleading
-# "The provided role ARN is invalid". SourceAccount pins the confused-deputy
-# boundary to this account, which is the control that matters. The grant is
-# read-only on this one bucket, pinned to same-account resources.
+# read the staged weights. Trust follows AWS's confused-deputy guidance: the
+# Bedrock service principal, scoped by aws:SourceAccount and an aws:SourceArn
+# pinned to model-import-job resources in this account+region (ArnEquals
+# wildcard-matches the real job ARN). The grant is read-only on this one bucket,
+# pinned to same-account resources.
+#
+# First-apply note: a freshly created role's trust can take several minutes to
+# propagate before Bedrock's CreateModelImportJob validation accepts it — until
+# then the call fails with the misleading "The provided role ARN is invalid".
+# That is IAM eventual consistency, not a policy error; retry.
 ################################################################################
 
 resource "aws_iam_role" "import" {
@@ -151,6 +155,7 @@ resource "aws_iam_role" "import" {
       Action    = "sts:AssumeRole"
       Condition = {
         StringEquals = { "aws:SourceAccount" = local.account_id }
+        ArnEquals    = { "aws:SourceArn" = "arn:${local.partition}:bedrock:${var.region}:${local.account_id}:model-import-job/*" }
       }
     }]
   })
