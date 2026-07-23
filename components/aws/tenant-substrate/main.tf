@@ -30,7 +30,6 @@ module "tenant" {
   source   = "./modules/tenant"
 
   environment     = var.environment
-  region          = var.region
   account_id      = local.account_id
   tenant_id       = each.key
   datastores      = each.value.datastores

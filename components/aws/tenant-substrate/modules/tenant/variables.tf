@@ -3,11 +3,6 @@ variable "environment" {
   type        = string
 }
 
-variable "region" {
-  description = "AWS region — used to compose resource ARNs in the outputs."
-  type        = string
-}
-
 variable "account_id" {
   description = "AWS account ID — embedded into S3 bucket names for global uniqueness."
   type        = string

@@ -8,8 +8,9 @@ variable "environment" {
   }
 }
 
+# tflint-ignore: terraform_unused_declarations
 variable "region" {
-  description = "AWS region."
+  description = "AWS region. Declared for envcommon interface uniformity; this component composes no region-qualified names of its own — every datastore ARN carries the region from the resource itself."
   type        = string
 }
 

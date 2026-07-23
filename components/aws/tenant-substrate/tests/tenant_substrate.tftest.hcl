@@ -55,7 +55,6 @@ run "every_kind_provisions_and_is_backup_tagged" {
 
   variables {
     environment     = "development"
-    region          = "us-west-2"
     account_id      = "123456789012"
     tenant_id       = "t1"
     vpc_id          = "vpc-0123456789abcdef0"
@@ -116,7 +115,6 @@ run "queue_without_redrive_has_no_dlq" {
 
   variables {
     environment     = "development"
-    region          = "us-west-2"
     account_id      = "123456789012"
     tenant_id       = "t1"
     vpc_id          = "vpc-0123456789abcdef0"
