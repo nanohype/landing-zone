@@ -48,7 +48,7 @@ inputs = {
   adopt_private_subnet_ids = dependency.shared_network.outputs.private_subnet_ids
   adopt_public_subnet_ids  = dependency.shared_network.outputs.public_subnet_ids
 
-  # No create-mode levers here: nat_gateways, enable_flow_logs, enable_vpc_endpoints,
+  # No create-mode levers here: nat_gateways, enable_flow_logs, enable_interface_endpoints,
   # ipam_pool_id, transit_gateway_id, and centralized_egress are all owner-side
   # concerns the shared-network leaf runs. The last three hard-reject network_mode =
   # adopt in their variable validations; the rest are simply inert in adopt mode

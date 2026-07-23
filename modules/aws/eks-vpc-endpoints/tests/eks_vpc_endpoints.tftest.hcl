@@ -7,8 +7,11 @@
 #
 # The endpoint set is what makes the private-by-default cluster reachable without
 # NAT; the EKS interface endpoint is deliberately toggled OFF for an eks-fleet
-# provisioning hub (its private DNS shadows the OIDC issuer). A regression that
-# always creates it — or drops one of the always-on endpoints — is what this bites.
+# provisioning hub (its private DNS shadows the OIDC issuer). The gateway and
+# interface halves toggle independently (enable_s3_gateway_endpoint /
+# enable_interface_endpoints) so a minimal-footprint VPC can keep the free S3
+# gateway while dropping the paid interface set. A regression that always creates
+# the EKS endpoint, drops an always-on endpoint, or ignores a toggle is what this bites.
 
 mock_provider "aws" {
   mock_data "aws_vpc_endpoint_service" {
@@ -62,5 +65,36 @@ run "hub_drops_eks_interface_endpoint" {
   assert {
     condition     = contains(keys(output.endpoints), "eks_auth")
     error_message = "eks_auth must stay on even with the EKS interface endpoint off — it serves Pod Identity, not the EKS API"
+  }
+}
+
+# ── minimal footprint: interface endpoints off, the free S3 gateway stays ──
+run "gateway_only_drops_interface_set" {
+  command = plan
+
+  variables {
+    enable_interface_endpoints = false
+    security_group_id          = "" # not required when interface endpoints are off
+  }
+
+  assert {
+    condition     = keys(output.endpoints) == ["s3"]
+    error_message = "with interface endpoints off, only the S3 gateway endpoint must remain"
+  }
+}
+
+# ── gateway also off: an empty endpoint set (both halves toggled off) ──
+run "both_halves_off_is_empty" {
+  command = plan
+
+  variables {
+    enable_s3_gateway_endpoint = false
+    enable_interface_endpoints = false
+    security_group_id          = ""
+  }
+
+  assert {
+    condition     = length(keys(output.endpoints)) == 0
+    error_message = "with both halves off, no endpoints are created"
   }
 }

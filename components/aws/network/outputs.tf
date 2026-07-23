@@ -59,6 +59,6 @@ output "public_route_table_ids" {
 }
 
 output "vpc_endpoints_sg_id" {
-  description = "Security group ID for VPC endpoints (null in adopt mode — the owner runs endpoints)"
+  description = "Security group ID for the interface VPC endpoints (null in adopt mode, or when enable_interface_endpoints is false — a gateway-only VPC runs no interface endpoints and needs no SG)"
   value       = try(aws_security_group.vpc_endpoints[0].id, null)
 }

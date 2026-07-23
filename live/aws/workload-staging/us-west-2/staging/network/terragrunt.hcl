@@ -13,5 +13,5 @@ inputs = {
   # production's per-AZ egress posture.
   nat_gateways         = 3
   enable_flow_logs     = true
-  enable_vpc_endpoints = true
+  enable_interface_endpoints    = true
 }

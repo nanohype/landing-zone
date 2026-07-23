@@ -16,8 +16,12 @@ module "eks_vpc_endpoints" {
     module.vpc.private_route_table_ids,
     module.vpc.public_route_table_ids,
   ])
-  security_group_id             = aws_security_group.vpc_endpoints[0].id
-  environment                   = var.environment
+  security_group_id = aws_security_group.vpc_endpoints[0].id
+  environment       = var.environment
+  # The owner runs the FULL set (gateway + interface) or none — an adopting cluster cannot
+  # build its own, so a partial set would silently break it. Both halves track enable_vpc_endpoints.
+  enable_s3_gateway_endpoint    = var.enable_vpc_endpoints
+  enable_interface_endpoints    = var.enable_vpc_endpoints
   enable_eks_interface_endpoint = var.enable_eks_interface_endpoint
   tags                          = local.tags
 }
