@@ -21,7 +21,10 @@ dependency "shared_dns" {
 }
 
 inputs = {
-  # Associate the shared Profile with this account's cluster VPC. The profile_id comes straight
-  # from the shared-dns owner leaf's output — a consuming account never hand-copies it.
+  # adopt: associate the shared Profile with this account's cluster VPC (the multi-account path).
+  # The profile_id comes straight from the shared-dns owner leaf's output — a consuming account
+  # never hand-copies it. A single-account startup would instead run dns_mode = create with its own
+  # private_zones; this leaf demonstrates the enterprise adopt shape.
+  dns_mode   = "adopt"
   profile_id = dependency.shared_dns.outputs.profile_id
 }
