@@ -20,14 +20,14 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
   - **Cluster** — `cluster`, `cluster-bootstrap`, `cluster-addons`
   - **Workload (multi-tenant, `var.tenants`)** — `druid`, `pipeline`, `governance`, `tenant-substrate` (the generic per-tenant datastore substrate: a tenant declares its stateful stores — relational/keyValue/objectStore/queue/cache/stream — and the module provisions them from that declaration, rendered from the Platform CRs by the factory)
   - **Operational** — `observability`, `secrets`, `backup`, `break-glass`, `service-quotas`, `cost`, `dns`, `github-oidc`, `managed-monitoring`
-  - **Agent-platform** — `agent-iam` (operator role + tenant permissions boundary + model-artifacts/eval-reports buckets) and the four per-app single-tenant substrates `competitive-intelligence-platform`, `digest-pipeline-platform`, `incident-response-platform`, `slack-knowledge-bot-platform`
+  - **Agent-platform** — `agent-iam` (operator role + tenant permissions boundary + model-artifacts/eval-reports buckets). A tenant's stateful substrate is not a per-app component: it is declared in `Platform.spec.datastores` and provisioned by the generic `tenant-substrate` component; SES / EventBridge Scheduler capabilities are declared in `Platform.spec.identity.capabilities` and the operator generates their grants
   - **Fleet & portal (cross-account, hub-side)** — `fleet-hub`, `fleet-vend`, `fleet-unwedge`, `portal-hub`, `portal-spoke`
   - **Organization (management account)** — `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`, `org-scp`
-- **Shared modules** under `modules/aws/` — `workload-identity` (EKS Pod Identity role factory), `platform-app` (shared Pod-Identity association + `<env>-<app>-app-access` policy shell), `eks-vpc-endpoints` (the private endpoint set both create-mode `network` and `shared-network` build)
+- **Shared modules** under `modules/aws/` — `workload-identity` (EKS Pod Identity role factory), `eks-vpc-endpoints` (the private endpoint set both create-mode `network` and `shared-network` build)
 - **Environments:** development, staging, production; `hub` (fleet/portal control plane); `org` (management account)
 - **Accounts:** workload-development, workload-staging, workload-production, management, `fleet` (hub control plane), `network` (network-owner account for the shared-network/egress-network adopt topology)
 - **Multi-region support:** us-west-2
-- **Dependency chain:** `network → cluster → {cluster-addons, cluster-bootstrap, druid, pipeline, governance, tenant-substrate, observability, secrets, agent-iam → *-platform}`
+- **Dependency chain:** `network → cluster → {cluster-addons, cluster-bootstrap, druid, pipeline, governance, tenant-substrate, observability, secrets, agent-iam}`
 - Standalone (no dependencies): `cost`, `dns`, `backup`, `break-glass`, `service-quotas`, `github-oidc`
 - `shared-network` and `egress-network` run in the network-owner account; `managed-monitoring`, `fleet-hub`, and the portal/fleet roles run on the hub; `org-*` components deploy to the management account only
 - **GitOps boundary:** OpenTofu deploys cloud resources + Cilium + ArgoCD. ArgoCD manages in-cluster workloads via [eks-gitops](https://github.com/nanohype/eks-gitops)
@@ -68,7 +68,6 @@ components/
 modules/
   aws/
     workload-identity/     # EKS Pod Identity role factory
-    platform-app/          # shared Pod-Identity association + app-access policy shell
     eks-vpc-endpoints/     # private endpoint set (create-mode network + shared-network)
 live/
   root.hcl                 # root config (AWS provider + S3 state backend)

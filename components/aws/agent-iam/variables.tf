@@ -50,8 +50,8 @@ variable "bedrock_allowed_model_ids" {
 
     Scope notes: this is the fleet-wide baseline, so the default deliberately covers
     only Anthropic + Nova generation — a tenant needing another provider (Cohere
-    Command, Llama, Mistral, AI21) gets it through its per-tenant app-access policy,
-    not by widening this shared default. The expansion covers direct foundation
+    Command, Llama, Mistral, AI21) gets it through a reviewed managed policy
+    referenced in spec.identity.extraPolicyArns, not by widening this shared default. The expansion covers direct foundation
     models and system-defined cross-region inference profiles; application inference
     profiles, provisioned throughput, and custom/imported models are NOT matched —
     add their ARNs explicitly (or use the empty-list escape hatch) if a fork uses them.
