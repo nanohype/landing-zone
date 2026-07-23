@@ -12,6 +12,7 @@ locals {
 }
 
 resource "aws_s3_bucket" "object_store" {
+  #checkov:skip=CKV_AWS_21:versioning is tenant-configurable and defaults Enabled (see aws_s3_bucket_versioning.object_store); a datastore opting a regenerable-data bucket to Suspended is a deliberate per-datastore posture choice, and checkov cannot resolve the per-tenant value
   for_each = local.object_stores
 
   bucket = local.object_store_buckets[each.key]
@@ -20,7 +21,6 @@ resource "aws_s3_bucket" "object_store" {
 }
 
 resource "aws_s3_bucket_versioning" "object_store" {
-  #checkov:skip=CKV_AWS_21:versioning is tenant-configurable and defaults Enabled; a datastore opting a regenerable-data bucket to Suspended is a deliberate per-datastore posture choice
   for_each = local.object_stores
 
   bucket = aws_s3_bucket.object_store[each.key].id

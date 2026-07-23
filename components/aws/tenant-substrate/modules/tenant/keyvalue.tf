@@ -3,6 +3,7 @@
 ################################################################################
 
 resource "aws_dynamodb_table" "key_value" {
+  #checkov:skip=CKV2_AWS_16:the table defaults to PAY_PER_REQUEST, which needs no autoscaling; billing mode is tenant-configurable and checkov cannot resolve the per-tenant value to confirm it
   for_each = local.key_value_stores
 
   name         = "${local.prefix}-${each.key}"
