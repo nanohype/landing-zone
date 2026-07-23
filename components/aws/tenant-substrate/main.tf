@@ -3,7 +3,7 @@
  *
  * A Platform CR declares the stateful stores its tenant needs (spec.datastores);
  * this component provisions them from that same declaration, so adding a tenant
- * is a declaration rather than a hand-written <app>-platform component. Six
+ * is a declaration rather than a hand-written per-app component. Six
  * datastore kinds map to Aurora Serverless v2, DynamoDB, S3, SQS, ElastiCache,
  * and MSK Serverless.
  *

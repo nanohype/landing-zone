@@ -248,22 +248,24 @@ aws secretsmanager create-secret \
 ## App platform tenants
 
 App workloads (the Platform tenants deployed through eks-gitops) run on the
-operator-reconciled `<env>-<app>-tenant` role. Bedrock model access is declared
-in each app's `Platform.spec.identity` (`allowedModelFamilies` /
-`allowedModels`); the app's substrate grants (DynamoDB, SQS, S3, KMS, Secrets
-Manager, …) are the `<app>-platform` component's `<app>-<env>-app-access`
-managed policy, wired through `spec.identity.extraPolicyArns`. The Pod Identity
-association resolves the tenant role by name, so bring a tenant up in this
-order:
+operator-reconciled `<env>-<app>-tenant` role, as the operator-owned
+`tenant-runtime` ServiceAccount. Everything the role grants is generated from
+the app's `Platform` CR: Bedrock model access from `spec.identity`
+(`allowedModelFamilies` / `allowedModels`), the substrate grants (DynamoDB, SQS,
+S3, Secrets Manager, …) from `spec.datastores`, and SES / EventBridge Scheduler
+from `spec.identity.capabilities`. The stores themselves are provisioned by the
+generic `tenant-substrate` component from that same declaration. Bring a tenant
+up in this order:
 
 1. `agent-iam` (tenant boundary, baseline, operator role) — part of the core
    Deploy sequence above.
-2. Apply the app's `Platform` CR with `extraPolicyArns: []`; wait for `Ready`.
-3. `task apply … COMPONENT=<app>-platform` — substrate resources, the
-   app-access policy, and the Pod Identity association onto the tenant role.
-4. Set `extraPolicyArns` to the component's `app_access_policy_arn` output and
-   re-apply the CR; wait for the `ModelAccessScoped` condition.
-5. Register the app's ApplicationSet entry in eks-gitops; ArgoCD syncs the
+2. `task apply … COMPONENT=tenant-substrate` — provisions the tenant's declared
+   datastores (its `var.tenants` map is rendered from the Platform CRs).
+3. Apply the app's `Platform` CR. The operator mints the tenant role, generates
+   its datastore-access + capability-access policies, creates the
+   `tenant-runtime` ServiceAccount, and binds it via a Pod Identity association.
+   Wait for `Ready`.
+4. Register the app's ApplicationSet entry in eks-gitops; ArgoCD syncs the
    chart.
 
 Design facts at this seam:

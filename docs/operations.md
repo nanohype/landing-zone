@@ -61,22 +61,19 @@ Order within the org layer is flexible -- these components have no inter-depende
 12. rag                       (depends on cluster)
 13. mlops                     (depends on cluster)
 14. governance                (depends on cluster)
-15. competitive-intelligence-platform  (depends on network + cluster + agent-iam)
-16. digest-pipeline-platform           (depends on network + cluster + agent-iam)
-17. incident-response-platform         (depends on cluster + agent-iam)
-18. slack-knowledge-bot-platform       (depends on network + cluster + agent-iam)
-19. cost                      (standalone)
-20. dns                       (standalone)
-21. backup                    (standalone)
-22. break-glass               (standalone)
-23. service-quotas            (standalone)
-24. github-oidc               (standalone)
+15. tenant-substrate          (depends on network + cluster; provisions each tenant's declared datastores)
+16. cost                      (standalone)
+17. dns                       (standalone)
+18. backup                    (standalone)
+19. break-glass               (standalone)
+20. service-quotas            (standalone)
+21. github-oidc               (standalone)
 ```
 
-Steps 3-14 can run in parallel within their dependency tier; the four `*-platform` tenants
-(15-18) need `agent-iam` first (and their `Platform` CR `Ready` before the Pod Identity
-association applies — see [First-time AWS Deploy](first-deploy-aws.md)). Steps 19-24 can run at
-any time.
+Steps 3-14 can run in parallel within their dependency tier; `tenant-substrate` (15) provisions a
+tenant's declared datastores, its `var.tenants` map rendered from the Platform CRs — the operator
+owns the tenant IAM + Pod Identity (see [First-time AWS Deploy](first-deploy-aws.md)). Steps 16-21
+can run at any time.
 
 The cross-account **network-owner** components (`shared-network`, `egress-network`) and the
 **hub** control plane (`managed-monitoring`, `fleet-*`, `portal-*`) deploy from their own

@@ -55,9 +55,9 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
   org-cost, org-networking, org-scp
 
   Agent-platform subsystem (depends on cluster):
-  agent-iam -> the four *-platform tenant substrates
-  (competitive-intelligence, digest-pipeline,
-   incident-response, slack-knowledge-bot)
+  agent-iam (operator role + tenant boundary);
+  tenant-substrate provisions a tenant's declared
+  datastores from its Platform CR
 
   Fleet / portal subsystem (cross-account, hub-side):
   fleet-hub -> fleet-vend; portal-hub -> portal-spoke,
@@ -88,10 +88,7 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
 | **observability** | cluster | cluster_name |
 | **secrets** | cluster | cluster_name |
 | **agent-iam** | cluster | oidc_provider_arn, oidc_issuer, operator_permissions_boundary_arn (optional) |
-| **competitive-intelligence-platform** | network, cluster, agent-iam | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name (+ resolves the operator-minted tenant role) |
-| **digest-pipeline-platform** | network, cluster, agent-iam | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name, ses_sending_domain |
-| **incident-response-platform** | cluster, agent-iam | cluster_name (no VPC — no in-VPC data plane) |
-| **slack-knowledge-bot-platform** | network, cluster, agent-iam | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name |
+| **tenant-substrate** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name — provisions each tenant's declared datastores (`var.tenants` rendered from the Platform CRs) |
 | **fleet-hub** | cluster | oidc_provider_arn, oidc_issuer |
 | **fleet-vend** | fleet-hub | hub_role_arn, external_id |
 | **fleet-unwedge** | portal-hub | portal_role_arn, external_id |
@@ -216,19 +213,18 @@ Seven multi-tenant components, each accepting a `var.tenants` map:
 
 ### Agent-Platform Layer
 
-The IAM + storage substrate the `eks-agent-platform` operator runs on, plus the
-per-app tenant substrates it binds. `agent-iam` mints the operator role and the
-tenant permissions boundary; each `*-platform` component provisions one tenant's
-AWS resources and attaches an app-access policy to the operator-minted tenant
-role via **EKS Pod Identity** (not raw IRSA).
+The IAM substrate the `eks-agent-platform` operator runs on. `agent-iam` mints
+the operator role and the tenant permissions boundary; the operator then mints
+each tenant's role, binds the `tenant-runtime` ServiceAccount to it via **EKS
+Pod Identity** (not raw IRSA), and generates the tenant's datastore-access and
+capability-access policies from its Platform CR. The stores themselves are
+provisioned by the generic `tenant-substrate` component from the same
+declaration — there is no per-app substrate component.
 
 | Component | What it provisions | Team |
 |-----------|--------------------|------|
 | **agent-iam** | Operator IRSA role (mints tenant roles under `/eks-agent-platform/tenants/`, boundary-gated), tenant permissions boundary + baseline policy, model-artifacts + eval-reports S3 buckets, operator SSM parameters | platform |
-| **competitive-intelligence-platform** | Aurora Serverless v2 (Postgres + pgvector), app-secrets, app-access policy bound via Pod Identity | strategy |
-| **digest-pipeline-platform** | Aurora Serverless v2, voice-baseline + raw-aggregations S3 buckets, SESv2 sending identity + config set, app-access policy | growth |
-| **incident-response-platform** | DynamoDB (incidents/audit/identity-cache), SQS FIFO queues + DLQs, S3 audit archive, EventBridge Scheduler group + role, app-access policy | reliability |
-| **slack-knowledge-bot-platform** | KMS (token envelope), DynamoDB (tokens/audit/identity-cache), ElastiCache Redis, Aurora Serverless v2 (pgvector), SQS FIFO + DLQ, S3 audit archive, app-access policy | workplace |
+| **tenant-substrate** | Per-tenant Aurora / DynamoDB / S3 / SQS / ElastiCache / MSK provisioned from `Platform.spec.datastores` (`var.tenants` rendered from the Platform CRs) — datastores + security groups only; the tenant IAM is the operator's | per-tenant |
 
 ### Fleet & Portal Layer
 
@@ -358,9 +354,5 @@ different product team), not set in `_envcommon`.
 | **security** | governance, secrets, break-glass |
 | **data-platform** | druid, pipeline |
 | **ml-platform** | llm, mlops, rag |
-| **strategy** | competitive-intelligence-platform |
-| **growth** | digest-pipeline-platform |
-| **reliability** | incident-response-platform |
-| **workplace** | slack-knowledge-bot-platform |
 | **finops** | cost |
 | *(required input)* | managed-monitoring — no `team` default; the caller must supply one |

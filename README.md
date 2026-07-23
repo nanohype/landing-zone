@@ -30,8 +30,8 @@ OpenTofu + Terragrunt monorepo for enterprise platform infrastructure on AWS.
 │  └──────────┘    └──────────┘    └──────────────────────────────┘    │
 │                                                                       │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │ agent-iam ──▶ competitive-intelligence · digest-pipeline ·    │   │
-│  │              incident-response · slack-knowledge-bot (-platform)│  │
+│  │ agent-iam: operator IRSA role + tenant permissions boundary   │   │
+│  │ (a tenant's substrate is declared in Platform.spec.datastores) │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                                                                       │
 │  ┌──────────────────────────────────────────────────────────────┐   │
@@ -79,7 +79,6 @@ landing-zone/
 ├── modules/
 │   └── aws/
 │       ├── workload-identity/    # EKS Pod Identity role factory
-│       ├── platform-app/         # Shared Pod-Identity association + app-access policy shell
 │       └── eks-vpc-endpoints/    # Private endpoint set (create-mode network + shared-network)
 ├── scripts/
 │   └── init-backend-aws.sh
