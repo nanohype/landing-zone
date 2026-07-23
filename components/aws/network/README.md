@@ -42,12 +42,24 @@ The default. Builds a VPC (via `terraform-aws-modules/vpc`) with:
   in-between count is rejected because the upstream module ties NAT count to subnet count),
   or **centralized egress** through the transit gateway (`centralized_egress = true`, zero
   NAT, the private default route points at the TGW — see `egress-network` for the far side).
-- **VPC endpoints** — the full private set an EKS cluster needs, via the shared
-  `modules/aws/eks-vpc-endpoints` module (the same set `shared-network` runs, so an owned VPC
-  and an adopted VPC are identical). `enable_eks_interface_endpoint` defaults on; turn it
-  **off** for an eks-fleet provisioning hub, whose EKS endpoint private DNS would otherwise
-  shadow the IRSA OIDC issuer subdomain (`oidc.eks.<region>.amazonaws.com`) and break
-  `data.tls_certificate` when the in-VPC runner provisions a spoke's OIDC provider.
+- **VPC endpoints** — via the shared `modules/aws/eks-vpc-endpoints` module (the same set
+  `shared-network` runs, so an owned VPC and an adopted VPC are identical), split into two
+  independently-toggled halves:
+  - `enable_s3_gateway_endpoint` (default on) — the **S3 gateway** endpoint. Free (no hourly
+    or data charge) and keeps S3 + ECR-image-layer traffic in-VPC, so it stays on even for a
+    minimal-footprint VPC.
+  - `enable_interface_endpoints` (default on) — the **interface** set (ecr.api, ecr.dkr,
+    secretsmanager, ssm, sts, eks-auth, aps-workspaces, and eks). Paid per endpoint per AZ, so
+    the minimal-footprint baseline leaves them **off** and the cluster reaches those services
+    over NAT. `enable_eks_interface_endpoint` further gates the EKS API endpoint within the
+    set: turn it **off** for an eks-fleet provisioning hub, whose EKS endpoint private DNS
+    would otherwise shadow the IRSA OIDC issuer subdomain (`oidc.eks.<region>.amazonaws.com`)
+    and break `data.tls_certificate` when the in-VPC runner provisions a spoke's OIDC provider.
+
+  The shared envcommon (`_envcommon/aws/network.hcl`) sets `enable_interface_endpoints = false`
+  as the minimal-footprint baseline, keeping the free S3 gateway on. A leaf turns the interface
+  set on when private connectivity (or avoiding NAT data cost) is worth it — staging and
+  production do.
 - **Flow logs** — `enable_flow_logs` (default `false`; the leaves set it explicitly —
   staging/production on, development off).
 - **ELB role tags** — `kubernetes.io/role/elb` (public) and `.../internal-elb` (private).
@@ -124,7 +136,8 @@ carefully:
 | `max_azs` | `3` | zones spanned |
 | `nat_gateways` | `1` | `1` (shared) or `max_azs` (per-AZ HA); 0 under centralized egress |
 | `enable_flow_logs` | `false` | create; the owner logs an adopted VPC |
-| `enable_vpc_endpoints` | `true` | create; the owner runs endpoints on an adopted VPC |
+| `enable_s3_gateway_endpoint` | `true` | create; free S3 gateway endpoint, worth keeping on |
+| `enable_interface_endpoints` | `true` | create; paid interface set (envcommon baseline sets `false`) |
 | `enable_eks_interface_endpoint` | `true` | create; set `false` for an eks-fleet provisioning hub |
 | `adopt_vpc_id` | `""` | adopt, required — the VPC to participate in |
 | `adopt_private_subnet_ids` | `[]` | adopt, required non-empty |

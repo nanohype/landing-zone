@@ -125,7 +125,7 @@ module "vpc" {
 module "eks_vpc_endpoints" {
   source = "../../../modules/aws/eks-vpc-endpoints"
 
-  count = local.create_mode && var.enable_vpc_endpoints ? 1 : 0
+  count = local.create_mode && (var.enable_s3_gateway_endpoint || var.enable_interface_endpoints) ? 1 : 0
 
   vpc_id             = module.vpc[0].vpc_id
   private_subnet_ids = module.vpc[0].private_subnets
@@ -133,14 +133,17 @@ module "eks_vpc_endpoints" {
     module.vpc[0].private_route_table_ids,
     module.vpc[0].public_route_table_ids,
   ])
-  security_group_id             = aws_security_group.vpc_endpoints[0].id
+  # The endpoint SG exists only when interface endpoints do; a gateway-only VPC passes none.
+  security_group_id             = var.enable_interface_endpoints ? aws_security_group.vpc_endpoints[0].id : ""
   environment                   = var.environment
+  enable_s3_gateway_endpoint    = var.enable_s3_gateway_endpoint
+  enable_interface_endpoints    = var.enable_interface_endpoints
   enable_eks_interface_endpoint = var.enable_eks_interface_endpoint
   tags                          = local.tags
 }
 
 resource "aws_security_group" "vpc_endpoints" {
-  count = local.create_mode && var.enable_vpc_endpoints ? 1 : 0
+  count = local.create_mode && var.enable_interface_endpoints ? 1 : 0
 
   name_prefix = "${var.environment}-vpc-endpoints-"
   description = "Security group for VPC endpoints"

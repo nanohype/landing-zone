@@ -1,26 +1,33 @@
-# The private endpoint set every EKS VPC on the platform needs: an S3 gateway
-# endpoint plus the interface endpoints for the AWS services the cluster and its
-# addons call over the data path. Both the create-mode `network` component and the
-# `shared-network` owner component consume this module, so the endpoint set is
-# defined once and never drifts between the VPC a cluster owns and the VPC a cluster
-# adopts.
+# The private endpoint set an EKS VPC on the platform can run, split into two
+# independently-toggled halves:
 #
-# The security group is owned by the caller (it scopes 443 to the caller's VPC CIDR)
-# and passed in — the module only wires it onto the interface endpoints.
+#   - the S3 gateway endpoint (enable_s3_gateway_endpoint) — free (no hourly or
+#     data charge), keeps S3 + ECR-layer traffic in-VPC. Worth keeping on even
+#     for a minimal-footprint VPC.
+#   - the interface endpoint set (enable_interface_endpoints) — ecr.api, ecr.dkr,
+#     secretsmanager, ssm, sts, eks-auth, aps-workspaces, and eks. These carry an
+#     hourly + data charge per endpoint per AZ, so a minimal VPC leaves them off
+#     and reaches those services over NAT.
+#
+# Both the create-mode `network` component and the `shared-network` owner consume
+# this module, so the endpoint set is defined once and never drifts between the
+# VPC a cluster owns and the VPC a cluster adopts.
+#
+# The security group is owned by the caller (it scopes 443 to the caller's VPC
+# CIDR) and passed in — the module only wires it onto the interface endpoints, so
+# a gateway-only caller can leave security_group_id unset.
 
-module "endpoints" {
-  source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
-  version = "~> 5.0"
-
-  vpc_id = var.vpc_id
-
-  endpoints = merge({
+locals {
+  gateway_endpoints = var.enable_s3_gateway_endpoint ? {
     s3 = {
       service         = "s3"
       service_type    = "Gateway"
       route_table_ids = var.route_table_ids
       tags            = { Name = "${var.environment}-s3-endpoint" }
     }
+  } : {}
+
+  interface_endpoints = var.enable_interface_endpoints ? merge({
     ecr_api = {
       service             = "ecr.api"
       private_dns_enabled = true
@@ -56,9 +63,10 @@ module "endpoints" {
       security_group_ids  = [var.security_group_id]
       tags                = { Name = "${var.environment}-sts-endpoint" }
     }
-    # eks-auth stays unconditional: it serves eks-auth.<region>.amazonaws.com (EKS Pod
-    # Identity), a SIBLING of eks.<region>.amazonaws.com — not a parent of the OIDC
-    # issuer — so its private DNS doesn't shadow oidc.eks.<region>. Don't conditionalize it.
+    # eks-auth stays unconditional within the interface set: it serves
+    # eks-auth.<region>.amazonaws.com (EKS Pod Identity), a SIBLING of
+    # eks.<region>.amazonaws.com — not a parent of the OIDC issuer — so its private DNS
+    # doesn't shadow oidc.eks.<region>. Don't conditionalize it on enable_eks_interface_endpoint.
     eks_auth = {
       service             = "eks-auth"
       private_dns_enabled = true
@@ -95,7 +103,15 @@ module "endpoints" {
       security_group_ids  = [var.security_group_id]
       tags                = { Name = "${var.environment}-eks-endpoint" }
     }
-  } : {})
+  } : {}) : {}
+}
+
+module "endpoints" {
+  source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
+  version = "~> 5.0"
+
+  vpc_id    = var.vpc_id
+  endpoints = merge(local.gateway_endpoints, local.interface_endpoints)
 
   tags = var.tags
 }

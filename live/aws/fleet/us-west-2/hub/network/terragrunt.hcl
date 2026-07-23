@@ -15,6 +15,6 @@ include "envcommon" {
 inputs = {
   nat_gateways                  = 1
   enable_flow_logs              = false
-  enable_vpc_endpoints          = true
+  enable_interface_endpoints    = true
   enable_eks_interface_endpoint = false
 }

@@ -180,8 +180,14 @@ variable "enable_flow_logs" {
   default     = false
 }
 
-variable "enable_vpc_endpoints" {
-  description = "Enable VPC endpoints for AWS services (create mode; the owner runs endpoints on an adopted VPC)"
+variable "enable_s3_gateway_endpoint" {
+  description = "Create the S3 gateway endpoint (create mode). Free — no hourly or data-processing charge — and keeps S3/ECR-layer traffic in-VPC, so it is worth keeping on even for a minimal-footprint VPC. Default on. Inert in adopt mode (the owner runs endpoints)."
+  type        = bool
+  default     = true
+}
+
+variable "enable_interface_endpoints" {
+  description = "Create the interface endpoint set — ecr.api, ecr.dkr, secretsmanager, ssm, sts, eks-auth, aps-workspaces, and eks (create mode). Paid per endpoint per AZ plus data processing, so a minimal-footprint VPC leaves them off and reaches those services over NAT; turn on for private connectivity. Default on. Inert in adopt mode (the owner runs endpoints)."
   type        = bool
   default     = true
 }
