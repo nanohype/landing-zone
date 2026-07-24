@@ -62,6 +62,34 @@ most often sets:
 | `tenants` | `druid`, `pipeline`, `llm`, `mlops`, `rag` | per-tenant maps (one Pod Identity role each) |
 | `cluster_iam_role_path` + `cluster_permissions_boundary_arn` | `cluster` | set for cross-account fleet-vend gating; defaults `/` + empty = same-account |
 | `network_mode` + `adopt_*` | `network` | whether the VPC is built here or adopted from a shared owner (see [Network mode](#network-mode-create--adopt)) |
+| `observability_tier` | `cluster-bootstrap` | `floor` (CloudWatch only) or `full` (+ in-cluster LGTM and AMP/AMG) — published as the `observability/tier` cluster-Secret label the eks-gitops generators select on (see [Observability tier](#observability-tier-floor--full)) |
+
+## Observability tier (floor | full)
+
+Every cluster runs one of two observability substrates, set per leaf via
+`observability_tier` and published as the `observability/tier` label on the ArgoCD cluster
+registration Secret.
+
+| | `floor` | `full` |
+|---|---|---|
+| metrics | CloudWatch — Container Insights from the `amazon-cloudwatch-observability` addon, plus application metrics as CloudWatch EMF | that, plus Amazon Managed Prometheus |
+| logs | CloudWatch Logs | that, plus Loki |
+| traces | dropped — no backend | Tempo |
+| dashboards | the CloudWatch dashboard this account already builds | that, plus Amazon Managed Grafana |
+
+Both tiers run the OpenTelemetry node agent and a gateway serving the same
+`telemetry.monitoring.svc:4317/4318` endpoint, so **a tenant chart is byte-identical across
+tiers** — only the gateway's exporters differ. The Container Insights addon is installed at
+both tiers, because the CloudWatch alarms and dashboard this component builds are not
+tier-specific; what the tier gates is the in-cluster stack on top.
+
+The label is always set, never omitted. An ApplicationSet generator selects on a value and
+cannot branch on a key's absence, so a conditional label would make every full-tier generator
+silently match nothing.
+
+The default is `floor` — a vended cluster is born light and opting up is deliberate. Every
+cluster in the committed tree pins `full` explicitly rather than relying on the default, so
+no existing cluster can lose telemetry to a change in what the default means.
 
 ## Network mode (create | adopt)
 

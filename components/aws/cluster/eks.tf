@@ -114,6 +114,63 @@ module "eks" {
       most_recent                 = lookup(var.eks_addon_versions, "eks-pod-identity-agent", null) == null
       resolve_conflicts_on_create = "OVERWRITE"
     }
+    # Container Insights. The observability component alarms and dashboards read
+    # the ContainerInsights CloudWatch namespace, and this addon is what fills
+    # it: without a producer those alarms sit INSUFFICIENT_DATA and the
+    # composite rollups can never fire.
+    #
+    # enhanced_container_insights is NOT optional here. It is what publishes the
+    # ClusterName-only dimension rollups the alarms key on — the classic metric
+    # set publishes node_cpu_utilization and node_memory_utilization only under
+    # ClusterName+InstanceId+NodeName, so a cluster-scoped alarm on either finds
+    # nothing. cluster_failed_node_count is ClusterName-only in both sets;
+    # everything else the alarms watch needs enhanced.
+    #
+    # containerLogs is off on purpose, at BOTH tiers. It would tail
+    # /var/log/pods into /aws/containerinsights/<cluster>/application — exactly
+    # the logs the OpenTelemetry node agent already collects and forwards to the
+    # gateway. Two collectors on the same files is double ingestion and double
+    # cost, so this addon stays the metrics producer and the collector keeps
+    # owning logs. That is also what lets floor and full run the same collector
+    # pipeline with only the exporters differing. Disabling it does not touch
+    # the metrics path.
+    #
+    # Pinned to the EKS-default version for cluster_version 1.36, resolved from
+    # the registry. The pin is load-bearing beyond reproducibility here: from
+    # v6.2.0 this addon can run either the Classic pipeline (CloudWatch-format
+    # metric names, EMF) or the OTel one (Prometheus-native names), and the two
+    # publish DIFFERENT metric names. The observability component's alarms read
+    # CloudWatch-format names — node_cpu_utilization, cluster_failed_node_count,
+    # apiserver_request_total_5xx — so this cluster must stay on Classic, which
+    # is what this version's own defaults select (containerInsights.enabled
+    # true, otelContainerInsights.enabled false). A bump that flips that default
+    # silently retargets every alarm at a metric that no longer exists.
+    amazon-cloudwatch-observability = {
+      addon_version               = lookup(var.eks_addon_versions, "amazon-cloudwatch-observability", null)
+      most_recent                 = lookup(var.eks_addon_versions, "amazon-cloudwatch-observability", null) == null
+      resolve_conflicts_on_create = "OVERWRITE"
+      # Credentials come from the cloudwatch_observability Pod Identity
+      # association (pod-identity.tf), so the addon takes no
+      # service_account_role_arn and declares no pod_identity_association of its
+      # own — declaring one here as well would collide with that association on
+      # the same (namespace, service account).
+      configuration_values = jsonencode({
+        agent = {
+          config = {
+            logs = {
+              metrics_collected = {
+                kubernetes = {
+                  enhanced_container_insights = true
+                }
+              }
+            }
+          }
+        }
+        containerLogs = {
+          enabled = false
+        }
+      })
+    }
   }
 
   # System node group — runs critical platform addons

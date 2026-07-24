@@ -15,7 +15,6 @@ output "alarm_arns" {
     aws_cloudwatch_metric_alarm.node_cpu_utilization[0].arn,
     aws_cloudwatch_metric_alarm.node_memory_utilization[0].arn,
     aws_cloudwatch_metric_alarm.cluster_failed_node_count[0].arn,
-    aws_cloudwatch_metric_alarm.pod_restart_count[0].arn,
   ] : []
 }
 

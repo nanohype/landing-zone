@@ -21,6 +21,11 @@ inputs = {
   argocd_repo_replicas     = 2
   argocd_appset_replicas   = 1
 
+  # Pinned explicitly rather than inheriting the floor default: this cluster
+  # already runs the full LGTM stack, and letting it fall to floor would delete
+  # Loki, Tempo and the Grafana operator out from under live telemetry.
+  observability_tier = "full"
+
   enable_velero_backup = true
   enable_external_dns  = true
 }
