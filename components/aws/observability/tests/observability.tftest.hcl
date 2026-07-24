@@ -160,7 +160,6 @@ run "child_alarms_carry_no_sns_action" {
         aws_cloudwatch_metric_alarm.node_cpu_utilization[0],
         aws_cloudwatch_metric_alarm.node_memory_utilization[0],
         aws_cloudwatch_metric_alarm.cluster_failed_node_count[0],
-        aws_cloudwatch_metric_alarm.pod_restart_count[0],
       ] : try(length(a.alarm_actions), 0) == 0 && try(length(a.ok_actions), 0) == 0
     ])
     error_message = "child metric alarms must carry no alarm_actions/ok_actions — the composite is the only notification surface"
@@ -185,9 +184,8 @@ run "composites_roll_up_their_children" {
     condition = (
       strcontains(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_rule, "ALARM(\"development-platform-node-cpu-high\")")
       && strcontains(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_rule, "ALARM(\"development-platform-node-memory-high\")")
-      && strcontains(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_rule, "ALARM(\"development-platform-pod-restarts-high\")")
     )
-    error_message = "degraded composite must OR the cpu, memory, and pod-restart child alarms"
+    error_message = "degraded composite must OR the cpu and memory child alarms"
   }
 
   assert {
@@ -263,4 +261,40 @@ run "adopt_mode_rejects_local_email" {
   }
 
   expect_failures = [var.alert_email_endpoints]
+}
+
+# Every alarm watches a metric that CloudWatch actually publishes under the
+# ClusterName dimension alone. Container Insights publishes most of its metrics
+# only with node- or pod-scoped dimension sets; an alarm keyed on ClusterName
+# against one of those sits in INSUFFICIENT_DATA forever and its composite can
+# never fire — a monitor that looks installed and monitors nothing.
+#
+# The metric names are pinned individually because the failure is not detectable
+# from the alarm's own shape: an alarm named "-api-server-5xx" watched
+# apiserver_request_total, the count of ALL API-server requests, which clears any
+# 5xx threshold on a healthy cluster within seconds.
+run "alarms_watch_cluster_scoped_metrics_that_exist" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      aws_cloudwatch_metric_alarm.cluster_api_server_errors[0].metric_name == "apiserver_request_total_5xx",
+      aws_cloudwatch_metric_alarm.node_cpu_utilization[0].metric_name == "node_cpu_utilization",
+      aws_cloudwatch_metric_alarm.node_memory_utilization[0].metric_name == "node_memory_utilization",
+      aws_cloudwatch_metric_alarm.cluster_failed_node_count[0].metric_name == "cluster_failed_node_count",
+    ])
+    error_message = "an alarm watches a metric with no ClusterName-only rollup, or the api-server alarm regressed onto the total-request counter"
+  }
+
+  assert {
+    condition = alltrue([
+      for a in [
+        aws_cloudwatch_metric_alarm.cluster_api_server_errors[0],
+        aws_cloudwatch_metric_alarm.node_cpu_utilization[0],
+        aws_cloudwatch_metric_alarm.node_memory_utilization[0],
+        aws_cloudwatch_metric_alarm.cluster_failed_node_count[0],
+      ] : length(a.dimensions) == 1 && try(a.dimensions["ClusterName"], "") == "development-platform"
+    ])
+    error_message = "every cluster-health alarm must key on ClusterName alone — a narrower dimension set makes it unmatchable at cluster scope"
+  }
 }

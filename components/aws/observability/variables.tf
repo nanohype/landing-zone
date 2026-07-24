@@ -92,14 +92,12 @@ variable "alarm_config" {
     memory_utilization_threshold = number
     node_not_ready_period        = number
     api_server_error_threshold   = number
-    api_server_latency_threshold = number
   })
   default = {
     cpu_utilization_threshold    = 80
     memory_utilization_threshold = 80
     node_not_ready_period        = 300
     api_server_error_threshold   = 5
-    api_server_latency_threshold = 3000
   }
 }
 

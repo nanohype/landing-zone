@@ -216,12 +216,18 @@ resource "aws_cloudwatch_metric_alarm" "cluster_api_server_errors" {
   alarm_name          = "${var.cluster_name}-api-server-5xx"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 3
-  metric_name         = "apiserver_request_total"
-  namespace           = "ContainerInsights"
-  period              = 300
-  statistic           = "Sum"
-  threshold           = var.alarm_config.api_server_error_threshold
-  alarm_description   = "EKS API server 5xx error rate"
+  # apiserver_request_total_5xx, NOT apiserver_request_total. The latter counts
+  # ALL API-server requests and carries the same ClusterName rollup, so a
+  # perfectly healthy cluster clears any sane 5xx threshold on it within
+  # seconds — this alarm would latch in ALARM and page through its critical
+  # composite continuously. The mistake read as harmless only while nothing
+  # published the ContainerInsights namespace at all.
+  metric_name       = "apiserver_request_total_5xx"
+  namespace         = "ContainerInsights"
+  period            = 300
+  statistic         = "Sum"
+  threshold         = var.alarm_config.api_server_error_threshold
+  alarm_description = "EKS API server 5xx responses exceed ${var.alarm_config.api_server_error_threshold} per 5 minutes"
 
   dimensions = {
     ClusterName = var.cluster_name
@@ -290,26 +296,6 @@ resource "aws_cloudwatch_metric_alarm" "cluster_failed_node_count" {
   tags = local.alarm_tags.critical
 }
 
-resource "aws_cloudwatch_metric_alarm" "pod_restart_count" {
-  count = var.enable_cluster_alarms ? 1 : 0
-
-  alarm_name          = "${var.cluster_name}-pod-restarts-high"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "pod_number_of_container_restarts"
-  namespace           = "ContainerInsights"
-  period              = 300
-  statistic           = "Sum"
-  threshold           = 10
-  alarm_description   = "High pod restart rate in EKS cluster"
-
-  dimensions = {
-    ClusterName = var.cluster_name
-  }
-
-  tags = local.alarm_tags.warning
-}
-
 ################################################################################
 # Composite Alarms — per-cluster, per-severity rollups
 #
@@ -342,14 +328,13 @@ resource "aws_cloudwatch_composite_alarm" "cluster_health_degraded" {
   count = var.enable_cluster_alarms ? 1 : 0
 
   alarm_name        = "${var.cluster_name}-health-degraded"
-  alarm_description = "Degraded cluster-health rollup — node CPU/memory saturation or elevated pod restarts. One ticket for a broadly degraded cluster."
+  alarm_description = "Degraded cluster-health rollup — node CPU or memory saturation. One ticket for a broadly degraded cluster."
   alarm_actions     = [local.topic_arns.warning]
   ok_actions        = [local.topic_arns.info]
 
   alarm_rule = join(" OR ", [
     "ALARM(\"${aws_cloudwatch_metric_alarm.node_cpu_utilization[0].alarm_name}\")",
     "ALARM(\"${aws_cloudwatch_metric_alarm.node_memory_utilization[0].alarm_name}\")",
-    "ALARM(\"${aws_cloudwatch_metric_alarm.pod_restart_count[0].alarm_name}\")",
   ])
 
   tags = local.alarm_tags.warning
@@ -429,21 +414,6 @@ resource "aws_cloudwatch_dashboard" "eks" {
           stat   = "Average"
           region = var.region
           view   = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 0
-        y      = 12
-        width  = 12
-        height = 6
-        properties = {
-          title   = "Container Restarts"
-          metrics = [["ContainerInsights", "pod_number_of_container_restarts", "ClusterName", var.cluster_name]]
-          period  = 300
-          stat    = "Sum"
-          region  = var.region
-          view    = "timeSeries"
         }
       },
       {

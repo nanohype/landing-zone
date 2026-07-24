@@ -14,4 +14,9 @@ inputs = {
   argocd_server_replicas   = 1
   argocd_repo_replicas     = 1
   argocd_appset_replicas   = 1
+
+  # The hub already runs the full LGTM stack and has a managed-monitoring
+  # workspace, so it is pinned explicitly rather than inheriting the floor
+  # default — flipping it would remove telemetry from a live cluster.
+  observability_tier = "full"
 }

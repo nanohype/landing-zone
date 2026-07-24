@@ -248,3 +248,47 @@ run "adopt_mode_publishes_both_subnet_csvs" {
     error_message = "the network-config ConfigMap must carry the populated public subnet CSV in adopt mode"
   }
 }
+
+# ── observability tier: always-set, both values ────────────────────────────────
+# The label is what the eks-gitops generators select on to decide whether a
+# cluster gets the in-cluster LGTM stack or CloudWatch alone. It is unconditional
+# for the same reason network_mode is: a generator matches a VALUE, it cannot
+# branch on a key's absence, so a conditional label would make every full-tier
+# generator silently match nothing on a cluster that simply predates it.
+run "floor_tier_is_labelled" {
+  command = plan
+
+  variables {
+    observability_tier = "floor"
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].labels["observability/tier"] == "floor"
+    error_message = "a floor cluster's Secret must carry observability/tier=floor — the label is always set, never omitted"
+  }
+}
+
+run "full_tier_is_labelled" {
+  command = plan
+
+  variables {
+    observability_tier = "full"
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].labels["observability/tier"] == "full"
+    error_message = "a full cluster's Secret must carry observability/tier=full"
+  }
+}
+
+# Born light. A vended cluster that never says otherwise gets the cheap tier;
+# opting up is a deliberate act, and every existing cluster pins full explicitly
+# rather than relying on this.
+run "tier_defaults_to_floor" {
+  command = plan
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].labels["observability/tier"] == "floor"
+    error_message = "observability_tier must default to floor so a new cluster is born light"
+  }
+}

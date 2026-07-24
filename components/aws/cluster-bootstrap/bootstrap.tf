@@ -353,6 +353,11 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # network mode unconditionally (a generator can't branch on an annotation's
       # presence). create for a self-owned VPC, adopt for a participated one.
       "network_mode" = var.network_mode
+      # Always set, for the same reason network_mode is: an ApplicationSet
+      # generator selects on a value, it cannot branch on a key's absence. A
+      # conditional label here would make every full-tier generator silently
+      # match nothing on a cluster that simply predates the label.
+      "observability/tier" = var.observability_tier
       }, var.enable_agent_platform ? {
       # Opts this cluster into the eks-agent-platform operator ApplicationSet.
       # Disable to install the operator out of band (see enable_agent_platform).

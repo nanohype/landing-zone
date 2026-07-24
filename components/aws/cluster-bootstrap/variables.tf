@@ -48,6 +48,17 @@ variable "network_mode" {
   }
 }
 
+variable "observability_tier" {
+  description = "Which observability substrate this cluster runs: floor (CloudWatch is the only backend — the amazon-cloudwatch-observability addon publishes the ContainerInsights metrics this account's alarms read, and the OTel gateway exports metrics as CloudWatch EMF and logs to CloudWatch Logs) or full (that plus the in-cluster LGTM stack — Loki, Tempo, kube-state-metrics, grafana-operator — and Amazon Managed Prometheus / Grafana). Published as the observability/tier label on the ArgoCD cluster Secret so eks-gitops ApplicationSet generators can select on it unconditionally: the full-tier generators skip a floor cluster and the floor gateway's generator claims it instead. Both tiers run the OTel node agent and a gateway serving the same telemetry.monitoring.svc:4317/4318 endpoint, so a tenant chart is byte-identical across tiers and only the exporters differ. Defaults to floor — a cluster is born light and opts up."
+  type        = string
+  default     = "floor"
+
+  validation {
+    condition     = can(regex("^(floor|full)$", var.observability_tier))
+    error_message = "observability_tier must be either floor or full."
+  }
+}
+
 variable "private_subnet_ids" {
   description = "Private subnet IDs of the cluster's VPC. Published (as a Secret annotation + a ConfigMap CSV) only in adopt mode, where a load balancer controller can't auto-discover subnets by tag because RAM hides owner subnet tags from participants. Left empty in create mode, where subnets are discovered by the kubernetes.io/role/internal-elb tag the cluster stamps."
   type        = list(string)

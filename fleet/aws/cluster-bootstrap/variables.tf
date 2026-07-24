@@ -72,6 +72,17 @@ variable "vpc_id" {
   type        = string
 }
 
+variable "observability_tier" {
+  description = "Which observability substrate this cluster runs: floor (CloudWatch only) or full (that plus the in-cluster LGTM stack and Amazon Managed Prometheus / Grafana). Threaded to cluster-bootstrap, which publishes it as the ArgoCD cluster-Secret observability/tier label the eks-gitops ApplicationSet generators select on. The eks-fleet Cluster composition patches it from spec.observabilityTier; the default keeps a vended cluster light, and opting up is a deliberate act."
+  type        = string
+  default     = "floor"
+
+  validation {
+    condition     = can(regex("^(floor|full)$", var.observability_tier))
+    error_message = "observability_tier must be either floor or full."
+  }
+}
+
 variable "network_mode" {
   description = "How the cluster's VPC was provisioned: create (self-owned) or adopt (participated, same- or cross-account via RAM). Threaded to cluster-bootstrap, which publishes it as the ArgoCD cluster-Secret network_mode label and onto the kube-system/network-config ConfigMap the scheme-aware Kyverno load-balancer subnet injection reads. The eks-fleet Cluster composition patches it from the network stanza; default create keeps a self-owned VPC's behavior unchanged."
   type        = string

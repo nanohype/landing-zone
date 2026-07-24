@@ -40,6 +40,7 @@ module "cluster_bootstrap" {
   vpc_id                             = var.vpc_id
 
   network_mode       = var.network_mode
+  observability_tier = var.observability_tier
   private_subnet_ids = var.private_subnet_ids
   public_subnet_ids  = var.public_subnet_ids
 

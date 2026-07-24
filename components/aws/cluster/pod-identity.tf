@@ -33,3 +33,34 @@ module "ebs_csi_irsa" {
 
   tags = local.tags
 }
+
+# CloudWatch Observability agent (Container Insights)
+#
+# The amazon-cloudwatch-observability addon runs its agent as the
+# `cloudwatch-agent` service account in the `amazon-cloudwatch` namespace. The
+# addon resource carries the association inline, but the role is minted here so
+# it lives with the other addon roles and inherits the same path and boundary —
+# on a fleet-vended cluster both are load-bearing.
+module "cloudwatch_observability" {
+  source = "../../../modules/aws/workload-identity"
+
+  role_name = "${local.role_name_prefix}-cloudwatch-agent"
+  # module.eks.cluster_name for the same ordering reason the EBS CSI role uses
+  # it: the association cannot be created before the cluster exists.
+  cluster_name    = module.eks.cluster_name
+  namespace       = "amazon-cloudwatch"
+  service_account = "cloudwatch-agent"
+
+  # The AWS-managed policy for the CloudWatch agent — PutMetricData, the EMF log
+  # path, and the EC2/EKS describes it uses to resolve node identity. Attaching
+  # the managed policy rather than transcribing it means AWS carries the drift
+  # when the agent grows a call, which is the whole point of a managed addon.
+  managed_policy_arns = [
+    "arn:${local.partition}:iam::aws:policy/CloudWatchAgentServerPolicy",
+  ]
+
+  path                 = var.cluster_iam_role_path
+  permissions_boundary = local.cluster_permissions_boundary
+
+  tags = local.tags
+}
