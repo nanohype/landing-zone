@@ -195,6 +195,22 @@ run "vend_ceiling_admits_the_operators_amp_reads" {
     error_message = "InfraProvisioningCeiling must admit the agent-platform operator's read-only AMP actions, or SLO evaluation 403s on every role minted under this boundary"
   }
 
+  # The floor tier's collector gateway ships traces to X-Ray, and floor is the
+  # DEFAULT tier for a vended cluster — so a ceiling missing these drops every
+  # span on the common case while metrics and logs on the same role keep
+  # working, which reads as a healthy tier rather than a broken one.
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.vend_boundary.policy).Statement :
+      s if try(s.Sid, "") == "InfraProvisioningCeiling"
+      && contains(s.Action, "xray:PutTraceSegments")
+      && contains(s.Action, "xray:PutTelemetryRecords")
+      && contains(s.Action, "xray:GetSamplingRules")
+      && contains(s.Action, "xray:GetSamplingTargets")
+    ]) == 1
+    error_message = "InfraProvisioningCeiling must admit the floor gateway's X-Ray writes and sampling reads, or every vended cluster silently drops traces"
+  }
+
   # Read-only, on the ceiling too. A boundary that admitted a write would let a
   # compromised operator fabricate the very signal its control loop acts on.
   assert {

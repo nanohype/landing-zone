@@ -105,7 +105,13 @@ module "otel_gateway_cloudwatch" {
         "logs:PutRetentionPolicy",
       ]
       Resource = [
-        "arn:${local.partition}:logs:${var.region}:${local.account_id}:log-group:/aws/otel/${local.cluster_name}*",
+        # Anchored with the trailing separator, not a bare prefix: "development"
+        # is a prefix of "development-2", so /aws/otel/<name>* would let one
+        # cluster write into a prefix-sibling's telemetry log groups. The
+        # log-stream ARN form is listed too because PutLogEvents authorizes
+        # against it.
+        "arn:${local.partition}:logs:${var.region}:${local.account_id}:log-group:/aws/otel/${local.cluster_name}/*",
+        "arn:${local.partition}:logs:${var.region}:${local.account_id}:log-group:/aws/otel/${local.cluster_name}/*:log-stream:*",
       ]
     },
     {
