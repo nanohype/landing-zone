@@ -64,3 +64,54 @@ module "cloudwatch_observability" {
 
   tags = local.tags
 }
+
+# OpenTelemetry gateway, floor tier
+#
+# A floor cluster's collector gateway exports metrics as CloudWatch EMF and logs
+# to CloudWatch Logs — both of which are CloudWatch Logs writes, since EMF is
+# structured log records CloudWatch extracts metrics from.
+#
+# Bound to `otel-gateway-cw`, NOT `otel-gateway`. EKS permits one Pod Identity
+# association per (namespace, service account), and managed-monitoring already
+# binds (monitoring, otel-gateway) to the AMP remote-write role on every cluster
+# that runs it. Two roles cannot share the identity, so the floor tier's gateway
+# runs as a differently-named service account.
+#
+# Minted unconditionally rather than behind a tier flag. On a full cluster the
+# service account simply does not exist and the association sits unused, which
+# costs nothing — and it means flipping a cluster between tiers is a label
+# change in one repo, not a coordinated terraform apply.
+module "otel_gateway_cloudwatch" {
+  source = "../../../modules/aws/workload-identity"
+
+  role_name       = "${local.role_name_prefix}-otel-gateway-cw"
+  cluster_name    = module.eks.cluster_name
+  namespace       = "monitoring"
+  service_account = "otel-gateway-cw"
+
+  # Scoped to the log groups the gateway's own exporters write, rather than the
+  # blanket CloudWatchAgentServerPolicy: this workload carries tenant telemetry,
+  # so its credential should not also be able to publish arbitrary custom
+  # metrics or read the account's other log groups.
+  policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:PutLogEvents",
+        "logs:PutRetentionPolicy",
+      ]
+      Resource = [
+        "arn:${local.partition}:logs:${var.region}:${local.account_id}:log-group:/aws/otel/${local.cluster_name}*",
+      ]
+    },
+  ]
+
+  path                 = var.cluster_iam_role_path
+  permissions_boundary = local.cluster_permissions_boundary
+
+  tags = local.tags
+}
