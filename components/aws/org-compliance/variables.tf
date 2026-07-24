@@ -70,6 +70,25 @@ variable "conformance_packs" {
   default     = []
 }
 
+variable "organization_managed_rules" {
+  description = <<-EOT
+    AWS Config organization managed rules — a managed rule deployed from this management (or
+    delegated-admin) account across every member account, so a check evaluates resources in
+    the workload accounts, not just here. Regular config_rules above run only in this account;
+    an org-managed rule is how a cross-account posture check (e.g. backup coverage of resources
+    that live in workload accounts) is enforced org-wide. resource_types_scope narrows which
+    resource types the rule evaluates; excluded_accounts opts specific accounts out.
+  EOT
+  type = map(object({
+    rule_identifier      = string
+    description          = optional(string, "")
+    input_parameters     = optional(map(string), {})
+    resource_types_scope = optional(list(string), [])
+    excluded_accounts    = optional(list(string), [])
+  }))
+  default = {}
+}
+
 variable "team" {
   description = "Owning team for this component"
   type        = string

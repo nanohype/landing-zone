@@ -212,3 +212,39 @@ run "config_records_all_supported_resources" {
     error_message = "Config recorder must include global resource types (IAM, etc.), else global config drift is unrecorded"
   }
 }
+
+# -----------------------------------------------------------------------------
+# Organization managed rules: an org-managed rule evaluates member accounts, so
+# a backup-coverage check reaches resources in the workload accounts, not just
+# this one. The rule identifier is what selects the AWS-managed check, so a typo
+# there silently evaluates the wrong (or no) rule.
+# -----------------------------------------------------------------------------
+run "org_managed_backup_rules_are_deployed" {
+  command = plan
+
+  variables {
+    organization_managed_rules = {
+      backup-resources-protected = {
+        rule_identifier = "BACKUP_RESOURCES_PROTECTED_BY_BACKUP_PLAN"
+      }
+      backup-plan-min-frequency-retention = {
+        rule_identifier = "BACKUP_PLAN_MIN_FREQUENCY_AND_MIN_RETENTION_CHECK"
+        input_parameters = {
+          requiredFrequencyValue = "1"
+          requiredFrequencyUnit  = "days"
+          requiredRetentionDays  = "35"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_config_organization_managed_rule.this["backup-resources-protected"].rule_identifier == "BACKUP_RESOURCES_PROTECTED_BY_BACKUP_PLAN"
+    error_message = "the backup-coverage org-managed rule must carry the BACKUP_RESOURCES_PROTECTED_BY_BACKUP_PLAN identifier"
+  }
+
+  assert {
+    condition     = jsondecode(aws_config_organization_managed_rule.this["backup-plan-min-frequency-retention"].input_parameters).requiredRetentionDays == "35"
+    error_message = "the frequency/retention rule must enforce the 35-day retention floor"
+  }
+}

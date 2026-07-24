@@ -182,6 +182,29 @@ resource "aws_config_config_rule" "this" {
 }
 
 ################################################################################
+# Organization Managed Rules
+################################################################################
+
+# Deployed from this account across every member account, so the check evaluates resources
+# where they live — a workload account's Aurora / DynamoDB / S3 / EFS, not just this account's.
+# Backup coverage is the motivating case: BACKUP_RESOURCES_PROTECTED_BY_BACKUP_PLAN flags a
+# backup-eligible resource protected by no plan (the silently-unprotected gap), the detective
+# half of central-backup's coverage enforcement.
+resource "aws_config_organization_managed_rule" "this" {
+  for_each = var.enable_config ? var.organization_managed_rules : {}
+
+  name            = each.key
+  rule_identifier = each.value.rule_identifier
+  description     = each.value.description != "" ? each.value.description : null
+
+  input_parameters     = length(each.value.input_parameters) > 0 ? jsonencode(each.value.input_parameters) : null
+  resource_types_scope = length(each.value.resource_types_scope) > 0 ? each.value.resource_types_scope : null
+  excluded_accounts    = length(each.value.excluded_accounts) > 0 ? each.value.excluded_accounts : null
+
+  depends_on = [aws_config_configuration_recorder.this]
+}
+
+################################################################################
 # Conformance Packs
 ################################################################################
 
