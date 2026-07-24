@@ -17,14 +17,33 @@ variable "region" {
   type        = string
 }
 
-variable "vpc_id" {
-  description = "VPC ID"
-  type        = string
-}
+variable "network" {
+  description = <<-EOT
+    VPC placement facts from the network component's `network` output, taken as one object
+    rather than as loose vpc_id / subnet scalars that could disagree. The network producer
+    guarantees the private subnets reside in vpc_id (built there in create mode, asserted
+    there in adopt mode), so consuming the object whole is what makes the triple correct by
+    construction. ownership_mode is create when this account owns the VPC and adopt when it
+    participates in a VPC owned by another account (a RAM-shared VPC); in adopt mode pipeline
+    mints its own MSK/Batch security groups in the shared VPC — the AWS-supported participant
+    pattern — and network-preflight.tf asserts placement at plan.
+  EOT
+  type = object({
+    vpc_id             = string
+    ownership_mode     = string
+    private_subnet_ids = list(string)
+    private_subnet_azs = list(string)
+  })
 
-variable "private_subnet_ids" {
-  description = "Private subnet IDs"
-  type        = list(string)
+  validation {
+    condition     = contains(["create", "adopt"], var.network.ownership_mode)
+    error_message = "network.ownership_mode must be \"create\" or \"adopt\"."
+  }
+
+  validation {
+    condition     = length(var.network.private_subnet_ids) > 0
+    error_message = "network.private_subnet_ids must be non-empty — MSK and Batch are placed in these subnets."
+  }
 }
 
 variable "cluster_sg_id" {

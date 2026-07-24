@@ -3,6 +3,47 @@ output "network_mode" {
   value       = var.network_mode
 }
 
+output "network" {
+  description = <<-EOT
+    The VPC placement facts as one coherent object, for consumers that place resources
+    into this VPC (workload components such as druid and pipeline). Bundling ids,
+    ownership, and AZ coverage together makes the relationship checkable at the source:
+    the subnets are either built by this module (create) or asserted to reside in vpc_id
+    (adopt — see adopt.tf's per-subnet postconditions), so a consumer that takes this
+    object whole cannot receive a vpc_id / subnet triple that disagrees. ownership_mode is
+    create when this account owns the VPC, adopt when it participates in a VPC owned by
+    another account (the participant mints its own security groups; the owner runs the VPC,
+    endpoints, and egress). AZ names (private_subnet_azs) are account-local — cross-account
+    consumers must key on private_subnet_az_ids, which are stable across accounts. Adding a
+    future network fact (an IPv6 CIDR, a per-AZ subnet map) is an additive field here, not a
+    new scalar every consumer must re-wire.
+  EOT
+  value = {
+    vpc_id                = local.resolved_vpc_id
+    vpc_cidr_block        = local.resolved_vpc_cidr
+    ownership_mode        = var.network_mode
+    private_subnet_ids    = local.resolved_private_subnet_ids
+    public_subnet_ids     = local.resolved_public_subnet_ids
+    private_subnet_azs    = local.resolved_private_subnet_azs
+    public_subnet_azs     = local.resolved_public_subnet_azs
+    private_subnet_az_ids = local.resolved_private_subnet_az_ids
+    public_subnet_az_ids  = local.resolved_public_subnet_az_ids
+  }
+
+  # At-source consistency: the AZ lists are built to parallel the subnet-id lists (element i
+  # of each names subnet i's zone). A length mismatch means the object is internally
+  # inconsistent before any consumer touches it — fail here, at the producer, rather than
+  # letting a consumer index past the end of a shorter list.
+  precondition {
+    condition     = length(local.resolved_private_subnet_ids) == length(local.resolved_private_subnet_azs) && length(local.resolved_private_subnet_ids) == length(local.resolved_private_subnet_az_ids)
+    error_message = "network output object is internally inconsistent: private_subnet_ids (${length(local.resolved_private_subnet_ids)}), private_subnet_azs (${length(local.resolved_private_subnet_azs)}), and private_subnet_az_ids (${length(local.resolved_private_subnet_az_ids)}) must be equal length — each AZ entry names the zone of the subnet at the same index."
+  }
+  precondition {
+    condition     = length(local.resolved_public_subnet_ids) == length(local.resolved_public_subnet_azs) && length(local.resolved_public_subnet_ids) == length(local.resolved_public_subnet_az_ids)
+    error_message = "network output object is internally inconsistent: public_subnet_ids (${length(local.resolved_public_subnet_ids)}), public_subnet_azs (${length(local.resolved_public_subnet_azs)}), and public_subnet_az_ids (${length(local.resolved_public_subnet_az_ids)}) must be equal length — each AZ entry names the zone of the subnet at the same index."
+  }
+}
+
 output "vpc_id" {
   description = "The ID of the VPC"
   value       = local.resolved_vpc_id

@@ -33,8 +33,8 @@ module "tenant" {
   account_id      = local.account_id
   tenant_id       = each.key
   tenant_config   = each.value
-  vpc_id          = var.vpc_id
-  private_subnets = var.private_subnet_ids
+  vpc_id          = var.network.vpc_id
+  private_subnets = var.network.private_subnet_ids
   cluster_sg_id   = var.cluster_sg_id
   cluster_name    = var.cluster_name
   tags            = local.tags
