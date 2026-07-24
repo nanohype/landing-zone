@@ -47,7 +47,8 @@ variable "cluster_version" {
 variable "eks_addon_versions" {
   description = <<-EOT
     Pinned EKS managed add-on versions, keyed by addon name (vpc-cni, coredns,
-    kube-proxy, aws-ebs-csi-driver, eks-pod-identity-agent). Pinning makes the
+    kube-proxy, aws-ebs-csi-driver, eks-pod-identity-agent,
+    amazon-cloudwatch-observability). Pinning makes the
     addon set reproducible instead of rolling to most_recent on every apply. The
     defaults are the EKS-default versions for the default cluster_version (1.36);
     RE-PIN THEM WHEN cluster_version CHANGES. Source current values with:
@@ -62,6 +63,13 @@ variable "eks_addon_versions" {
     kube-proxy             = "v1.36.0-eksbuild.7"
     aws-ebs-csi-driver     = "v1.62.0-eksbuild.1"
     eks-pod-identity-agent = "v1.3.10-eksbuild.3"
+    # The pin also selects the Container Insights PIPELINE, not just a build.
+    # From v6.2.0 the addon can run either the Classic (CloudWatch-format, EMF)
+    # or the OTel (Prometheus-native names) pipeline, and they publish different
+    # metric names. The observability component's alarms read CloudWatch-format
+    # names, so this cluster runs Classic — which is what the addon's defaults
+    # select at this version. Re-check that when bumping.
+    amazon-cloudwatch-observability = "v6.4.0-eksbuild.1"
   }
 }
 

@@ -69,7 +69,7 @@ module "cloudwatch_observability" {
 #
 # A floor cluster's collector gateway exports metrics as CloudWatch EMF and logs
 # to CloudWatch Logs — both of which are CloudWatch Logs writes, since EMF is
-# structured log records CloudWatch extracts metrics from.
+# structured log records CloudWatch extracts metrics from — and traces to X-Ray.
 #
 # Bound to `otel-gateway-cw`, NOT `otel-gateway`. EKS permits one Pod Identity
 # association per (namespace, service account), and managed-monitoring already
@@ -107,6 +107,25 @@ module "otel_gateway_cloudwatch" {
       Resource = [
         "arn:${local.partition}:logs:${var.region}:${local.account_id}:log-group:/aws/otel/${local.cluster_name}*",
       ]
+    },
+    {
+      # Traces. A floor cluster has no Tempo, so the gateway ships spans to
+      # X-Ray — the provider-native trace store — rather than discarding them.
+      #
+      # Resource "*" is not laziness: X-Ray's write and sampling APIs are
+      # account-scoped and accept no resource ARN, so a narrower Resource makes
+      # the statement match nothing. The Get* pair is read-only sampling-rule
+      # retrieval, which is how the exporter honours centrally-managed sampling
+      # instead of deciding locally.
+      Effect = "Allow"
+      Action = [
+        "xray:PutTraceSegments",
+        "xray:PutTelemetryRecords",
+        "xray:GetSamplingRules",
+        "xray:GetSamplingTargets",
+        "xray:GetSamplingStatisticSummaries",
+      ]
+      Resource = ["*"]
     },
   ]
 

@@ -135,11 +135,16 @@ module "eks" {
     # pipeline with only the exporters differing. Disabling it does not touch
     # the metrics path.
     #
-    # Deliberately absent from eks_addon_versions: the current default version
-    # has to be resolved from the registry
-    # (aws eks describe-addon-versions --addon-name amazon-cloudwatch-observability),
-    # not written from memory, and the map's documented fallback is most_recent
-    # for exactly the addon left out. Pin it in the same pass that reads it.
+    # Pinned to the EKS-default version for cluster_version 1.36, resolved from
+    # the registry. The pin is load-bearing beyond reproducibility here: from
+    # v6.2.0 this addon can run either the Classic pipeline (CloudWatch-format
+    # metric names, EMF) or the OTel one (Prometheus-native names), and the two
+    # publish DIFFERENT metric names. The observability component's alarms read
+    # CloudWatch-format names — node_cpu_utilization, cluster_failed_node_count,
+    # apiserver_request_total_5xx — so this cluster must stay on Classic, which
+    # is what this version's own defaults select (containerInsights.enabled
+    # true, otelContainerInsights.enabled false). A bump that flips that default
+    # silently retargets every alarm at a metric that no longer exists.
     amazon-cloudwatch-observability = {
       addon_version               = lookup(var.eks_addon_versions, "amazon-cloudwatch-observability", null)
       most_recent                 = lookup(var.eks_addon_versions, "amazon-cloudwatch-observability", null) == null
