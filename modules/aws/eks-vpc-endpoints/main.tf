@@ -75,13 +75,13 @@ locals {
       tags                = { Name = "${var.environment}-eks-auth-endpoint" }
     }
     # Amazon Managed Prometheus data plane — aps-workspaces.<region>.amazonaws.com,
-    # used for BOTH alloy's remote_write and opencost's sigv4-proxied queries.
+    # used for BOTH the collector gateway's remote_write and opencost's sigv4-proxied queries.
     #
     # Without it, aps-workspaces has no private DNS inside the VPC while every other
     # AWS service the platform touches does, so those two callers fall off the
     # endpoint path and depend on public resolution + NAT egress. Observed on a live
     # cluster as `dial tcp: lookup aps-workspaces.us-west-2.amazonaws.com: i/o
-    # timeout` — opencost crashlooping and alloy unable to ship metrics at all.
+    # timeout` — opencost crashlooping and the gateway unable to ship metrics at all.
     #
     # A private endpoint also removes the NAT data-processing charge on a metrics
     # stream that runs 24/7, so it is cheaper than the alternative, not just correct.

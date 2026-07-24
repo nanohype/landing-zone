@@ -1,6 +1,6 @@
 ################################################################################
 # Outputs to wire into eks-gitops:
-#   - alloy values-{env}.yaml: amp_remote_write_url, region, Pod Identity role ARN
+#   - addons-otel-gateway appset: amp_remote_write_url + region for the gateway
 #   - dashboards/base: grafana_endpoint
 ################################################################################
 
@@ -15,7 +15,7 @@ output "amp_workspace_arn" {
 }
 
 output "amp_remote_write_url" {
-  description = "AMP remote-write endpoint (paste into eks-gitops alloy values)"
+  description = "AMP remote-write endpoint (injected into the eks-gitops otel-gateway addon)"
   value       = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
 }
 
@@ -24,9 +24,9 @@ output "amp_query_endpoint" {
   value       = aws_prometheus_workspace.this.prometheus_endpoint
 }
 
-output "alloy_amp_role_arn" {
-  description = "Pod Identity role ARN bound to the alloy service account (monitoring/alloy) for AMP remote_write"
-  value       = module.alloy_amp_irsa.iam_role_arn
+output "otel_gateway_amp_role_arn" {
+  description = "Pod Identity role ARN bound to the otel-gateway service account (monitoring/otel-gateway) for AMP remote_write"
+  value       = module.otel_gateway_amp.iam_role_arn
 }
 
 output "grafana_endpoint" {

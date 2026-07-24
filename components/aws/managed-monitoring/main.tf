@@ -35,23 +35,24 @@ resource "aws_prometheus_alert_manager_definition" "this" {
 }
 
 ################################################################################
-# Pod Identity — alloy remote-write into AMP
+# Pod Identity — OpenTelemetry Collector gateway remote-write into AMP
 #
-# Allows the in-cluster alloy collector (DaemonSet, service account `alloy` in
-# the `monitoring` namespace) to push metrics to AMP via SigV4. The workload is
-# alloy — Grafana's successor to the grafana-agent — so the identity is bound to
-# the `alloy` service account. Binding it to the old `grafana-agent` name would
-# leave the real workload falling back to the node instance role, which has no
-# aps:RemoteWrite and gets a 403 on every remote_write batch.
+# Grants the in-cluster OpenTelemetry Collector gateway (Deployment, service
+# account `otel-gateway` in the `monitoring` namespace) aps:RemoteWrite on this
+# workspace via EKS Pod Identity. The gateway is the single egress that signs AMP
+# remote-writes with SigV4; the credential chain resolves through the Pod Identity
+# agent, with no role-arn annotation on the pod. Without the binding the pod falls
+# back to the node instance role, which has no aps:RemoteWrite and gets a 403 on
+# every remote_write batch.
 ################################################################################
 
-module "alloy_amp_irsa" {
+module "otel_gateway_amp" {
   source = "../../../modules/aws/workload-identity"
 
-  role_name       = "${local.role_name_prefix}-alloy-amp"
+  role_name       = "${local.role_name_prefix}-otel-gateway-amp"
   cluster_name    = var.cluster_name
   namespace       = "monitoring"
-  service_account = "alloy"
+  service_account = "otel-gateway"
 
   policy_statements = [
     {
@@ -187,7 +188,7 @@ resource "aws_grafana_role_association" "viewer" {
 #   - AMP query + remote-write URLs go to Secrets Manager. External Secrets
 #     Operator syncs them into the cluster (the aws-secrets-manager
 #     ClusterSecretStore), where the Grafana data source templates its url from
-#     the synced Secret and alloy reads its remote-write url from an env
+#     the synced Secret and the OTel gateway reads its remote-write url from an env
 #     var. The endpoints aren't sensitive; Secrets Manager is simply the store
 #     ESO is wired to, alongside the Grafana service-account token.
 #   - The AMG workspace URL goes to SSM. The Grafana CR's url field can't be
