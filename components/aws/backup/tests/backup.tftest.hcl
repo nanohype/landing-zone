@@ -43,6 +43,13 @@ mock_provider "aws" {
       arn = "arn:aws:iam::123456789012:role/mock"
     }
   }
+  # The restore testing plan's include_vaults is ARN-validated at plan; pin the vault ARN so
+  # the random mock default doesn't fail the parse.
+  mock_resource "aws_backup_vault" {
+    defaults = {
+      arn = "arn:aws:backup:us-west-2:123456789012:backup-vault:mock"
+    }
+  }
 }
 
 variables {
@@ -75,5 +82,100 @@ run "backup_notifications_key_admits_backup_publisher" {
       && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
     ]) == 1
     error_message = "backup-notifications CMK policy must admit backup.amazonaws.com for kms:GenerateDataKey*, scoped by aws:SourceAccount"
+  }
+}
+
+# The local vault lock is GOVERNANCE mode, never COMPLIANCE. Governance omits
+# changeable_for_days, keeping the lock removable by an explicit override; COMPLIANCE mode
+# (set by changeable_for_days) is immutable after its grace period — the irreversible door
+# the estate already got burned by. This is the acceptance criterion "no vault in COMPLIANCE
+# mode without a named regulation."
+run "vault_lock_is_governance_not_compliance" {
+  command = plan
+
+  variables {
+    enable_vault_lock = true
+  }
+
+  assert {
+    condition     = aws_backup_vault_lock_configuration.this[0].changeable_for_days == null
+    error_message = "the local vault lock must be GOVERNANCE mode (changeable_for_days unset), never COMPLIANCE"
+  }
+}
+
+# When a central vault is wired, every plan rule copies its recovery points to it — the
+# resilience win that moves the durable copy out of the account holding the data.
+run "plan_rules_copy_to_central_vault" {
+  command = plan
+
+  variables {
+    central_vault_arn = "arn:aws:backup:us-east-1:666666666666:backup-vault:development-central-backup-vault"
+  }
+
+  assert {
+    condition = alltrue([
+      for plan in aws_backup_plan.this : anytrue([
+        for rule in plan.rule : anytrue([
+          for ca in rule.copy_action :
+          ca.destination_vault_arn == "arn:aws:backup:us-east-1:666666666666:backup-vault:development-central-backup-vault"
+        ])
+      ])
+    ])
+    error_message = "with central_vault_arn set, every backup plan rule must carry a copy_action to the central vault"
+  }
+}
+
+# No central vault and no per-plan override: no copy action is emitted — the shape before
+# central backup is stood up.
+run "no_copy_action_without_central_vault" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for plan in aws_backup_plan.this : alltrue([
+        for rule in plan.rule : length(rule.copy_action) == 0
+      ])
+    ])
+    error_message = "without a central vault or a per-plan override, no copy_action should be emitted"
+  }
+}
+
+# Restore testing is off by default (it provisions real resources), and when enabled it
+# creates a plan plus one selection per protected-resource type, each testing all recovery
+# points of that type.
+run "restore_testing_absent_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_backup_restore_testing_plan.this) == 0
+    error_message = "restore testing must be off by default"
+  }
+}
+
+run "restore_testing_created_when_enabled" {
+  command = plan
+
+  variables {
+    restore_testing = {
+      enabled        = true
+      resource_types = ["Aurora", "DynamoDB"]
+    }
+  }
+
+  assert {
+    condition     = length(aws_backup_restore_testing_plan.this) == 1
+    error_message = "restore testing plan must be created when restore_testing.enabled is true"
+  }
+
+  assert {
+    condition     = length(aws_backup_restore_testing_selection.this) == 2
+    error_message = "one restore testing selection per resource type"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in aws_backup_restore_testing_selection.this : contains(s.protected_resource_arns, "*")
+    ])
+    error_message = "each restore testing selection must test all protected resources of its type (protected_resource_arns = [\"*\"])"
   }
 }

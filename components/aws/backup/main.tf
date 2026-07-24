@@ -7,6 +7,23 @@ locals {
     Component = "backup"
     Team      = var.team
   })
+
+  # Every plan rule copies its recovery points to the central vault (components/aws/shared-backup)
+  # so a backup survives the loss of the account that produced it. A plan may carry its own
+  # copy_action to override the destination or the copy retention; otherwise, when a central
+  # vault is wired, the copy inherits that plan's own retention. With no central vault and no
+  # per-plan override, no copy action is emitted (the create-mode default before central backup
+  # is stood up).
+  effective_copy_action = {
+    for k, v in var.backup_plans : k => (
+      v.copy_action != null ? v.copy_action : (
+        var.central_vault_arn != "" ? {
+          destination_vault_arn = var.central_vault_arn
+          retention_days        = v.retention_days
+        } : null
+      )
+    )
+  }
 }
 
 ################################################################################
@@ -37,13 +54,20 @@ resource "aws_backup_vault" "this" {
   tags = local.tags
 }
 
+# GOVERNANCE mode, deliberately not COMPLIANCE. Omitting changeable_for_days keeps the lock
+# removable by a principal holding the explicit override permission (backup:DeleteBackupVault
+# LockConfiguration); including it would put the vault in COMPLIANCE mode, immutable after the
+# grace period and unremovable by anyone including the root account or AWS — the one-way door
+# the estate already paid tuition on with an S3 object lock. The protection this vault needs is
+# "no routine role can delete a recovery point," which governance mode plus a withheld override
+# delivers without the irreversibility. A named regulation is the only thing that flips a vault
+# to COMPLIANCE, recorded in the central-backup ledger at that time.
 resource "aws_backup_vault_lock_configuration" "this" {
   count = var.enable_vault_lock ? 1 : 0
 
-  backup_vault_name   = aws_backup_vault.this.name
-  changeable_for_days = 3
-  max_retention_days  = 365
-  min_retention_days  = 1
+  backup_vault_name  = aws_backup_vault.this.name
+  min_retention_days = var.min_retention_days
+  max_retention_days = var.max_retention_days
 }
 
 ################################################################################
@@ -66,7 +90,7 @@ resource "aws_backup_plan" "this" {
     }
 
     dynamic "copy_action" {
-      for_each = each.value.copy_action != null ? [each.value.copy_action] : []
+      for_each = local.effective_copy_action[each.key] != null ? [local.effective_copy_action[each.key]] : []
       content {
         destination_vault_arn = copy_action.value.destination_vault_arn
         lifecycle {
