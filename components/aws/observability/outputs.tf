@@ -1,10 +1,6 @@
 output "sns_topic_arns" {
-  description = "Map of SNS topic ARNs by severity level"
-  value = {
-    critical = aws_sns_topic.critical.arn
-    warning  = aws_sns_topic.warning.arn
-    info     = aws_sns_topic.info.arn
-  }
+  description = "Map of alert topic ARNs by severity level. In create mode these are the topics this component built; in adopt mode they are the central topics it was pointed at. Same shape either way, so a consumer wires against one interface."
+  value       = local.topic_arns
 }
 
 output "dashboard_url" {
