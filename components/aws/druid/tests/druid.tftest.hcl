@@ -37,13 +37,17 @@ mock_provider "aws" {
 }
 
 variables {
-  environment        = "development"
-  region             = "us-west-2"
-  vpc_id             = "vpc-0123456789abcdef0"
-  private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
-  cluster_sg_id      = "sg-0123456789abcdef0"
-  cluster_name       = "development-platform"
-  team               = "platform"
+  environment = "development"
+  region      = "us-west-2"
+  network = {
+    vpc_id             = "vpc-0123456789abcdef0"
+    ownership_mode     = "create"
+    private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+    private_subnet_azs = ["us-west-2a", "us-west-2b"]
+  }
+  cluster_sg_id = "sg-0123456789abcdef0"
+  cluster_name  = "development-platform"
+  team          = "platform"
   tenants = {
     t1 = {}
   }
@@ -131,4 +135,110 @@ run "rejects_tenant_key_prefixed_with_environment" {
   }
 
   expect_failures = [var.tenants]
+}
+
+# --- adopt-mode network preflight -------------------------------------------
+# In adopt mode druid participates in a VPC it does not own. network-preflight.tf reads each
+# private subnet and the cluster SG and asserts they reside in network.vpc_id. The overrides
+# stand in for the AWS reads (data sources are gated on adopt mode, so create-mode runs above
+# never execute them and need no mocks).
+
+# Happy adopt path: every subnet and the cluster SG are in the adopted VPC, so the plan
+# proceeds and the tenant substrate still renders. An un-indexed override_data target applies
+# its values to every instance of the for_each/count data source.
+run "adopt_mode_plans_with_matching_placement" {
+  command = plan
+
+  variables {
+    network = {
+      vpc_id             = "vpc-adopt00000000000"
+      ownership_mode     = "adopt"
+      private_subnet_ids = ["subnet-adopt0000000a", "subnet-adopt0000000b"]
+      private_subnet_azs = ["us-west-2a", "us-west-2b"]
+    }
+  }
+
+  override_data {
+    target = data.aws_subnet.placement
+    values = { vpc_id = "vpc-adopt00000000000" }
+  }
+  override_data {
+    target = data.aws_security_group.cluster
+    values = { vpc_id = "vpc-adopt00000000000" }
+  }
+
+  assert {
+    condition     = output.tenant_outputs["t1"].ingestion_policy_json != null
+    error_message = "adopt-mode plan with matching placement must render the tenant substrate"
+  }
+}
+
+# A private subnet from a different VPC must fail at plan, naming the subnet — the acceptance
+# criterion for this plan. Every adopted subnet resolves to a foreign VPC; the cluster SG is
+# in the adopted VPC so the only expected failure is the subnet placement postcondition.
+run "adopt_mode_rejects_foreign_subnet" {
+  command = plan
+
+  variables {
+    network = {
+      vpc_id             = "vpc-adopt00000000000"
+      ownership_mode     = "adopt"
+      private_subnet_ids = ["subnet-foreign00000a", "subnet-foreign00000b"]
+      private_subnet_azs = ["us-west-2a", "us-west-2b"]
+    }
+  }
+
+  override_data {
+    target = data.aws_subnet.placement
+    values = { vpc_id = "vpc-somewhere-else00" }
+  }
+  override_data {
+    target = data.aws_security_group.cluster
+    values = { vpc_id = "vpc-adopt00000000000" }
+  }
+
+  expect_failures = [data.aws_subnet.placement]
+}
+
+# A cluster security group from a different VPC must also fail at plan — a bare-id membership
+# reference to an SG in another VPC would attach an ingress rule that silently never matches.
+run "adopt_mode_rejects_foreign_cluster_sg" {
+  command = plan
+
+  variables {
+    network = {
+      vpc_id             = "vpc-adopt00000000000"
+      ownership_mode     = "adopt"
+      private_subnet_ids = ["subnet-adopt0000000a", "subnet-adopt0000000b"]
+      private_subnet_azs = ["us-west-2a", "us-west-2b"]
+    }
+  }
+
+  override_data {
+    target = data.aws_subnet.placement
+    values = { vpc_id = "vpc-adopt00000000000" }
+  }
+  override_data {
+    target = data.aws_security_group.cluster
+    values = { vpc_id = "vpc-somewhere-else00" }
+  }
+
+  expect_failures = [data.aws_security_group.cluster]
+}
+
+# AZ coverage is druid's own floor, checked in both modes: fewer than two distinct zones
+# fails before Aurora's DB subnet group would reject it at apply.
+run "rejects_single_az_coverage" {
+  command = plan
+
+  variables {
+    network = {
+      vpc_id             = "vpc-0123456789abcdef0"
+      ownership_mode     = "create"
+      private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+      private_subnet_azs = ["us-west-2a", "us-west-2a"]
+    }
+  }
+
+  expect_failures = [terraform_data.az_coverage]
 }
