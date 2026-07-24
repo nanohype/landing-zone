@@ -132,6 +132,39 @@ run "no_argo_workflows_omits_artifact_bucket_annotation" {
   }
 }
 
+# ── managed-monitoring ON: the Loki + Tempo S3 bucket annotations are stamped by ──
+# the same gate, so the addons-observability appset can back logs and traces with
+# durable object storage instead of PVCs that die with the cluster.
+run "managed_monitoring_stamps_loki_tempo_bucket_annotations" {
+  command = plan
+
+  variables {
+    enable_managed_monitoring = true
+  }
+
+  assert {
+    condition = (
+      kubernetes_secret_v1.argocd_cluster.metadata[0].annotations["observability/loki-bucket"] == "mock-ssm-value"
+      && kubernetes_secret_v1.argocd_cluster.metadata[0].annotations["observability/tempo-bucket"] == "mock-ssm-value"
+    )
+    error_message = "with managed monitoring enabled the cluster Secret must carry observability/loki-bucket and observability/tempo-bucket (read from the cluster-addons SSM parameters) — the S3 backends the addons-observability ApplicationSet injects"
+  }
+}
+
+# ── managed-monitoring OFF (default): no Loki/Tempo bucket annotations, so the SSM ──
+# reads never run and the appset falls back to filesystem storage.
+run "no_managed_monitoring_omits_loki_tempo_annotations" {
+  command = plan
+
+  assert {
+    condition = (
+      !contains(keys(kubernetes_secret_v1.argocd_cluster.metadata[0].annotations), "observability/loki-bucket")
+      && !contains(keys(kubernetes_secret_v1.argocd_cluster.metadata[0].annotations), "observability/tempo-bucket")
+    )
+    error_message = "without managed monitoring the cluster Secret must not carry the observability/*-bucket annotations — they are opt-in and their SSM parameters would not be read"
+  }
+}
+
 # ── network mode create: the cluster Secret carries the network_mode label so ──
 # eks-gitops generators can select on it unconditionally, publishes no subnet
 # annotations (a create cluster's load balancers auto-discover subnets by the ELB

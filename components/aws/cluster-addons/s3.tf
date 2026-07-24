@@ -57,6 +57,30 @@ resource "aws_ssm_parameter" "velero_bucket" {
   tags = local.tags
 }
 
+# Publish the Loki and Tempo bucket names to SSM so cluster-bootstrap can stamp them onto the
+# ArgoCD cluster Secret as the observability/loki-bucket and observability/tempo-bucket
+# annotations, where the addons-observability ApplicationSet injects them as the S3 backend for
+# logs and traces. Both buckets already exist and their Pod Identity roles carry the S3 access
+# (see loki_bucket / tempo_bucket above and pod-identity.tf), so only the names are published —
+# the collectors resolve credentials from their Pod Identity association, no static-key Secret.
+# Unconditional because the buckets are; cluster-bootstrap gates the annotation on
+# enable_managed_monitoring, so a cluster without the monitoring stack keeps filesystem storage.
+resource "aws_ssm_parameter" "loki_bucket" {
+  name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/loki_bucket"
+  type  = "String"
+  value = module.loki_bucket.s3_bucket_id
+
+  tags = local.tags
+}
+
+resource "aws_ssm_parameter" "tempo_bucket" {
+  name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/tempo_bucket"
+  type  = "String"
+  value = module.tempo_bucket.s3_bucket_id
+
+  tags = local.tags
+}
+
 # Loki log storage
 module "loki_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
