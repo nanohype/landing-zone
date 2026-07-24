@@ -69,4 +69,24 @@ inputs = {
   conformance_packs = [
     "Operational-Best-Practices-for-Amazon-EKS",
   ]
+
+  # Backup coverage, checked across every member account (the resources live in the workload
+  # accounts, not here). The detective half of central-backup's coverage enforcement: the
+  # protection check catches a backup-eligible resource silently protected by no plan, and the
+  # frequency/retention check catches a plan weaker than the 24h RPO / 35-day DR floor.
+  organization_managed_rules = {
+    backup-resources-protected = {
+      rule_identifier = "BACKUP_RESOURCES_PROTECTED_BY_BACKUP_PLAN"
+      description     = "A backup-eligible resource (Aurora, RDS, DynamoDB, S3, EFS, ...) protected by no backup plan is silently unprotected."
+    }
+    backup-plan-min-frequency-retention = {
+      rule_identifier = "BACKUP_PLAN_MIN_FREQUENCY_AND_MIN_RETENTION_CHECK"
+      description     = "A backup plan whose frequency or retention is weaker than the 24h RPO / 35-day DR floor."
+      input_parameters = {
+        requiredFrequencyValue = "1"
+        requiredFrequencyUnit  = "days"
+        requiredRetentionDays  = "35"
+      }
+    }
+  }
 }

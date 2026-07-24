@@ -22,3 +22,8 @@ output "config_bucket_name" {
   description = "Config snapshots S3 bucket name"
   value       = try(module.config_bucket[0].s3_bucket_id, null)
 }
+
+output "organization_managed_rule_ids" {
+  description = "Map of organization managed Config rule name to rule identifier."
+  value       = { for k, v in aws_config_organization_managed_rule.this : k => v.rule_identifier }
+}
