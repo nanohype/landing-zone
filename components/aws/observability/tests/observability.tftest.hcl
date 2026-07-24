@@ -122,17 +122,97 @@ run "adopt_mode_points_alarms_at_central_topics" {
     error_message = "adopt mode must build no local topics or alert key — the destination is central"
   }
 
+  # The composite alarms (not the child alarms) carry the notification, so it's the
+  # composites that must point at the central topics in adopt mode.
   assert {
     condition = contains(
-      aws_cloudwatch_metric_alarm.cluster_api_server_errors[0].alarm_actions,
+      aws_cloudwatch_composite_alarm.cluster_health_critical[0].alarm_actions,
       "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-critical"
     )
-    error_message = "adopt-mode alarms must publish to the central critical topic"
+    error_message = "adopt-mode critical composite must publish to the central critical topic"
+  }
+
+  assert {
+    condition = contains(
+      aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_actions,
+      "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-warning"
+    )
+    error_message = "adopt-mode degraded composite must publish to the central warning topic"
   }
 
   assert {
     condition     = output.sns_topic_arns.critical == "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-critical"
     error_message = "sns_topic_arns must re-export the adopted central ARNs, the same shape as create mode"
+  }
+}
+
+# --- composite rollup (fleet_alerting) ---------------------------------------
+
+# The child metric alarms carry NO SNS action — they only compute state. This is the
+# guarantee that N simultaneous firings can't each page: only the composite notifies.
+run "child_alarms_carry_no_sns_action" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for a in [
+        aws_cloudwatch_metric_alarm.cluster_api_server_errors[0],
+        aws_cloudwatch_metric_alarm.node_cpu_utilization[0],
+        aws_cloudwatch_metric_alarm.node_memory_utilization[0],
+        aws_cloudwatch_metric_alarm.cluster_failed_node_count[0],
+        aws_cloudwatch_metric_alarm.pod_restart_count[0],
+      ] : try(length(a.alarm_actions), 0) == 0 && try(length(a.ok_actions), 0) == 0
+    ])
+    error_message = "child metric alarms must carry no alarm_actions/ok_actions — the composite is the only notification surface"
+  }
+}
+
+# Each severity composite ORs exactly its children and carries one SNS action. The
+# critical composite rolling up both critical signals is what makes a hard-down cluster
+# page once rather than once per firing alarm.
+run "composites_roll_up_their_children" {
+  command = plan
+
+  assert {
+    condition = (
+      strcontains(aws_cloudwatch_composite_alarm.cluster_health_critical[0].alarm_rule, "ALARM(\"development-platform-api-server-5xx\")")
+      && strcontains(aws_cloudwatch_composite_alarm.cluster_health_critical[0].alarm_rule, "ALARM(\"development-platform-failed-nodes\")")
+    )
+    error_message = "critical composite must OR the api-server-5xx and failed-nodes child alarms"
+  }
+
+  assert {
+    condition = (
+      strcontains(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_rule, "ALARM(\"development-platform-node-cpu-high\")")
+      && strcontains(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_rule, "ALARM(\"development-platform-node-memory-high\")")
+      && strcontains(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_rule, "ALARM(\"development-platform-pod-restarts-high\")")
+    )
+    error_message = "degraded composite must OR the cpu, memory, and pod-restart child alarms"
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_composite_alarm.cluster_health_critical[0].alarm_actions) == 1
+      && length(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_actions) == 1
+    )
+    error_message = "each composite must carry exactly one severity SNS action"
+  }
+}
+
+# Every alarm and composite carries the standard fleet dimensions (Severity, ClusterName)
+# as tags, so routing and rollup key on tags rather than on parsed alarm names.
+run "alarms_carry_standard_severity_dimensions" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.cluster_api_server_errors[0].tags["Severity"] == "critical"
+      && aws_cloudwatch_metric_alarm.cluster_api_server_errors[0].tags["ClusterName"] == "development-platform"
+      && aws_cloudwatch_metric_alarm.node_cpu_utilization[0].tags["Severity"] == "warning"
+      && aws_cloudwatch_composite_alarm.cluster_health_critical[0].tags["Severity"] == "critical"
+      && aws_cloudwatch_composite_alarm.cluster_health_degraded[0].tags["Severity"] == "warning"
+    )
+    error_message = "fleet alarms and composites must carry the standard Severity + ClusterName dimensions as tags"
   }
 }
 

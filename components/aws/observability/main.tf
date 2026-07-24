@@ -19,6 +19,15 @@ locals {
     Component = "observability"
     Team      = var.team
   })
+
+  # Standard fleet-alarm dimensions (observability-slo fleet_alerting): every alarm and
+  # composite carries Severity + ClusterName as tags so routing and rollup key on a
+  # consistent tag set, not on parsed alarm names. Environment is already present via the
+  # root config's default tags, so it is not re-declared here.
+  alarm_tags = {
+    critical = merge(local.tags, { Severity = "critical", ClusterName = var.cluster_name })
+    warning  = merge(local.tags, { Severity = "warning", ClusterName = var.cluster_name })
+  }
 }
 
 ################################################################################
@@ -192,7 +201,13 @@ resource "aws_sns_topic_subscription" "warning_email" {
 }
 
 ################################################################################
-# CloudWatch Alarms
+# CloudWatch Alarms — child state-computers
+#
+# These carry NO SNS action. Per observability-slo's fleet_alerting contract they
+# exist only to compute state; the per-severity composite alarms below OR them
+# together and own the notification, so a hard-down cluster pages once rather than
+# once per firing alarm. Each is tagged with its Severity + ClusterName so the
+# rollup and any downstream routing key on tags, not on parsed names.
 ################################################################################
 
 resource "aws_cloudwatch_metric_alarm" "cluster_api_server_errors" {
@@ -207,14 +222,12 @@ resource "aws_cloudwatch_metric_alarm" "cluster_api_server_errors" {
   statistic           = "Sum"
   threshold           = var.alarm_config.api_server_error_threshold
   alarm_description   = "EKS API server 5xx error rate"
-  alarm_actions       = [local.topic_arns.critical]
-  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
   }
 
-  tags = local.tags
+  tags = local.alarm_tags.critical
 }
 
 resource "aws_cloudwatch_metric_alarm" "node_cpu_utilization" {
@@ -229,14 +242,12 @@ resource "aws_cloudwatch_metric_alarm" "node_cpu_utilization" {
   statistic           = "Average"
   threshold           = var.alarm_config.cpu_utilization_threshold
   alarm_description   = "EKS node CPU utilization exceeds ${var.alarm_config.cpu_utilization_threshold}%"
-  alarm_actions       = [local.topic_arns.warning]
-  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
   }
 
-  tags = local.tags
+  tags = local.alarm_tags.warning
 }
 
 resource "aws_cloudwatch_metric_alarm" "node_memory_utilization" {
@@ -251,14 +262,12 @@ resource "aws_cloudwatch_metric_alarm" "node_memory_utilization" {
   statistic           = "Average"
   threshold           = var.alarm_config.memory_utilization_threshold
   alarm_description   = "EKS node memory utilization exceeds ${var.alarm_config.memory_utilization_threshold}%"
-  alarm_actions       = [local.topic_arns.warning]
-  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
   }
 
-  tags = local.tags
+  tags = local.alarm_tags.warning
 }
 
 resource "aws_cloudwatch_metric_alarm" "cluster_failed_node_count" {
@@ -273,14 +282,12 @@ resource "aws_cloudwatch_metric_alarm" "cluster_failed_node_count" {
   statistic           = "Maximum"
   threshold           = 0
   alarm_description   = "EKS cluster has failed/not-ready nodes"
-  alarm_actions       = [local.topic_arns.critical]
-  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
   }
 
-  tags = local.tags
+  tags = local.alarm_tags.critical
 }
 
 resource "aws_cloudwatch_metric_alarm" "pod_restart_count" {
@@ -295,14 +302,57 @@ resource "aws_cloudwatch_metric_alarm" "pod_restart_count" {
   statistic           = "Sum"
   threshold           = 10
   alarm_description   = "High pod restart rate in EKS cluster"
-  alarm_actions       = [local.topic_arns.warning]
-  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
   }
 
-  tags = local.tags
+  tags = local.alarm_tags.warning
+}
+
+################################################################################
+# Composite Alarms — per-cluster, per-severity rollups
+#
+# The single notification surface. Each ORs its child alarms (referenced by name,
+# which also orders creation after them) and owns the SNS action for its tier; the
+# children stay actionless. The critical composite pages once for a hard-down
+# cluster (API 5xx OR failed nodes); the degraded composite raises one ticket for
+# a broadly saturated one (CPU OR memory OR pod restarts). Both resolve to the
+# info tier once on OK. Publishes to local topics in create mode, to the central
+# shared-observability topics in adopt mode — local.topic_arns resolves either.
+################################################################################
+
+resource "aws_cloudwatch_composite_alarm" "cluster_health_critical" {
+  count = var.enable_cluster_alarms ? 1 : 0
+
+  alarm_name        = "${var.cluster_name}-health-critical"
+  alarm_description = "Critical cluster-health rollup — API server 5xx or failed/not-ready nodes. One page for a hard-down cluster."
+  alarm_actions     = [local.topic_arns.critical]
+  ok_actions        = [local.topic_arns.info]
+
+  alarm_rule = join(" OR ", [
+    "ALARM(\"${aws_cloudwatch_metric_alarm.cluster_api_server_errors[0].alarm_name}\")",
+    "ALARM(\"${aws_cloudwatch_metric_alarm.cluster_failed_node_count[0].alarm_name}\")",
+  ])
+
+  tags = local.alarm_tags.critical
+}
+
+resource "aws_cloudwatch_composite_alarm" "cluster_health_degraded" {
+  count = var.enable_cluster_alarms ? 1 : 0
+
+  alarm_name        = "${var.cluster_name}-health-degraded"
+  alarm_description = "Degraded cluster-health rollup — node CPU/memory saturation or elevated pod restarts. One ticket for a broadly degraded cluster."
+  alarm_actions     = [local.topic_arns.warning]
+  ok_actions        = [local.topic_arns.info]
+
+  alarm_rule = join(" OR ", [
+    "ALARM(\"${aws_cloudwatch_metric_alarm.node_cpu_utilization[0].alarm_name}\")",
+    "ALARM(\"${aws_cloudwatch_metric_alarm.node_memory_utilization[0].alarm_name}\")",
+    "ALARM(\"${aws_cloudwatch_metric_alarm.pod_restart_count[0].alarm_name}\")",
+  ])
+
+  tags = local.alarm_tags.warning
 }
 
 ################################################################################
