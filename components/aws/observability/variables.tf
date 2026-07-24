@@ -24,10 +24,53 @@ variable "cluster_name" {
   type        = string
 }
 
+variable "observability_mode" {
+  description = <<-EOT
+    create — this component owns its alert delivery: it builds its own severity SNS topics,
+    their CMK, and their policies, and points its alarms at them (the default).
+
+    adopt — this component participates in fleet-wide alert delivery it does not own. It builds
+    no topics: it points the same alarms at the central topics shared-observability owns
+    (adopt_topic_arns) and re-exports them through the same sns_topic_arns output, so a consumer
+    wires against one interface either way. Alarm definitions stay local in both modes.
+  EOT
+  type        = string
+  default     = "create"
+
+  validation {
+    condition     = can(regex("^(create|adopt)$", var.observability_mode))
+    error_message = "observability_mode must be exactly \"create\" or \"adopt\"."
+  }
+}
+
+variable "adopt_topic_arns" {
+  description = "Central alert topic ARNs by severity (critical/warning/info), from shared-observability's sns_topic_arns output. Required in adopt mode; the alarms publish here instead of to local topics."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = var.observability_mode != "adopt" || alltrue([for sev in ["critical", "warning", "info"] : can(var.adopt_topic_arns[sev])])
+    error_message = "adopt_topic_arns must carry critical, warning, and info ARNs when observability_mode = adopt."
+  }
+
+  # create builds its own topics, so an adopt reference to foreign topics is meaningless there.
+  validation {
+    condition     = var.observability_mode != "create" || length(var.adopt_topic_arns) == 0
+    error_message = "adopt_topic_arns is an adopt-mode input and does not apply when observability_mode = create — leave it empty."
+  }
+}
+
 variable "alert_email_endpoints" {
-  description = "Email addresses for SNS alerts"
+  description = "Email addresses for SNS alerts (create mode only — in adopt mode, subscriptions belong to the central topics shared-observability owns)."
   type        = list(string)
   default     = []
+
+  # adopt mode publishes to central topics it does not own; subscribing pagers to them is the
+  # owner's job. Reject the combination rather than silently ignoring it.
+  validation {
+    condition     = var.observability_mode != "adopt" || length(var.alert_email_endpoints) == 0
+    error_message = "alert_email_endpoints is a create-mode lever — in adopt mode the central topics' subscriptions are owned by shared-observability, so leave it empty."
+  }
 }
 
 variable "enable_cluster_alarms" {

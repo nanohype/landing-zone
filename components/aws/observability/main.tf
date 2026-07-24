@@ -1,7 +1,19 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  account_id = data.aws_caller_identity.current.account_id
+  account_id  = data.aws_caller_identity.current.account_id
+  create_mode = var.observability_mode == "create"
+
+  # The alarm destinations, resolved the same shape in both modes. create builds its own
+  # severity topics and points alarms at them; adopt points the same alarms at the central
+  # topics shared-observability owns (var.adopt_topic_arns), building no topics of its own.
+  # Definitions stay local either way — an alarm references local ARNs and dimensions; only
+  # the destination centralizes.
+  topic_arns = local.create_mode ? {
+    critical = aws_sns_topic.critical[0].arn
+    warning  = aws_sns_topic.warning[0].arn
+    info     = aws_sns_topic.info[0].arn
+  } : var.adopt_topic_arns
 
   tags = merge(var.tags, {
     Component = "observability"
@@ -18,6 +30,8 @@ locals {
 ################################################################################
 
 resource "aws_kms_key" "alerts" {
+  count = local.create_mode ? 1 : 0
+
   description             = "${var.cluster_name} alert topic encryption key"
   deletion_window_in_days = 7
   enable_key_rotation     = true
@@ -54,25 +68,33 @@ resource "aws_kms_key" "alerts" {
 }
 
 resource "aws_kms_alias" "alerts" {
+  count = local.create_mode ? 1 : 0
+
   name          = "alias/${var.cluster_name}-alerts"
-  target_key_id = aws_kms_key.alerts.key_id
+  target_key_id = aws_kms_key.alerts[0].key_id
 }
 
 resource "aws_sns_topic" "critical" {
+  count = local.create_mode ? 1 : 0
+
   name              = "${var.cluster_name}-alerts-critical"
-  kms_master_key_id = aws_kms_key.alerts.arn
+  kms_master_key_id = aws_kms_key.alerts[0].arn
   tags              = local.tags
 }
 
 resource "aws_sns_topic" "warning" {
+  count = local.create_mode ? 1 : 0
+
   name              = "${var.cluster_name}-alerts-warning"
-  kms_master_key_id = aws_kms_key.alerts.arn
+  kms_master_key_id = aws_kms_key.alerts[0].arn
   tags              = local.tags
 }
 
 resource "aws_sns_topic" "info" {
+  count = local.create_mode ? 1 : 0
+
   name              = "${var.cluster_name}-alerts-info"
-  kms_master_key_id = aws_kms_key.alerts.arn
+  kms_master_key_id = aws_kms_key.alerts[0].arn
   tags              = local.tags
 }
 
@@ -81,7 +103,9 @@ resource "aws_sns_topic" "info" {
 # carries. Without it, a service principal acting for any account could publish to
 # these topics; SourceAccount pins the grant to alarms in this account only.
 resource "aws_sns_topic_policy" "critical" {
-  arn = aws_sns_topic.critical.arn
+  count = local.create_mode ? 1 : 0
+
+  arn = aws_sns_topic.critical[0].arn
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -90,7 +114,7 @@ resource "aws_sns_topic_policy" "critical" {
       Effect    = "Allow"
       Principal = { Service = "cloudwatch.amazonaws.com" }
       Action    = "SNS:Publish"
-      Resource  = aws_sns_topic.critical.arn
+      Resource  = aws_sns_topic.critical[0].arn
       Condition = {
         StringEquals = {
           "aws:SourceAccount" = local.account_id
@@ -101,7 +125,9 @@ resource "aws_sns_topic_policy" "critical" {
 }
 
 resource "aws_sns_topic_policy" "warning" {
-  arn = aws_sns_topic.warning.arn
+  count = local.create_mode ? 1 : 0
+
+  arn = aws_sns_topic.warning[0].arn
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -110,7 +136,7 @@ resource "aws_sns_topic_policy" "warning" {
       Effect    = "Allow"
       Principal = { Service = "cloudwatch.amazonaws.com" }
       Action    = "SNS:Publish"
-      Resource  = aws_sns_topic.warning.arn
+      Resource  = aws_sns_topic.warning[0].arn
       Condition = {
         StringEquals = {
           "aws:SourceAccount" = local.account_id
@@ -121,7 +147,9 @@ resource "aws_sns_topic_policy" "warning" {
 }
 
 resource "aws_sns_topic_policy" "info" {
-  arn = aws_sns_topic.info.arn
+  count = local.create_mode ? 1 : 0
+
+  arn = aws_sns_topic.info[0].arn
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -130,7 +158,7 @@ resource "aws_sns_topic_policy" "info" {
       Effect    = "Allow"
       Principal = { Service = "cloudwatch.amazonaws.com" }
       Action    = "SNS:Publish"
-      Resource  = aws_sns_topic.info.arn
+      Resource  = aws_sns_topic.info[0].arn
       Condition = {
         StringEquals = {
           "aws:SourceAccount" = local.account_id
@@ -144,18 +172,21 @@ resource "aws_sns_topic_policy" "info" {
 # SNS Email Subscriptions
 ################################################################################
 
+# create mode only: adopt-mode alarms publish to the central topics, whose subscriptions
+# shared-observability owns — a workload cluster does not subscribe pagers to a topic it
+# does not own.
 resource "aws_sns_topic_subscription" "critical_email" {
-  for_each = toset(var.alert_email_endpoints)
+  for_each = local.create_mode ? toset(var.alert_email_endpoints) : toset([])
 
-  topic_arn = aws_sns_topic.critical.arn
+  topic_arn = aws_sns_topic.critical[0].arn
   protocol  = "email"
   endpoint  = each.value
 }
 
 resource "aws_sns_topic_subscription" "warning_email" {
-  for_each = toset(var.alert_email_endpoints)
+  for_each = local.create_mode ? toset(var.alert_email_endpoints) : toset([])
 
-  topic_arn = aws_sns_topic.warning.arn
+  topic_arn = aws_sns_topic.warning[0].arn
   protocol  = "email"
   endpoint  = each.value
 }
@@ -176,8 +207,8 @@ resource "aws_cloudwatch_metric_alarm" "cluster_api_server_errors" {
   statistic           = "Sum"
   threshold           = var.alarm_config.api_server_error_threshold
   alarm_description   = "EKS API server 5xx error rate"
-  alarm_actions       = [aws_sns_topic.critical.arn]
-  ok_actions          = [aws_sns_topic.info.arn]
+  alarm_actions       = [local.topic_arns.critical]
+  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
@@ -198,8 +229,8 @@ resource "aws_cloudwatch_metric_alarm" "node_cpu_utilization" {
   statistic           = "Average"
   threshold           = var.alarm_config.cpu_utilization_threshold
   alarm_description   = "EKS node CPU utilization exceeds ${var.alarm_config.cpu_utilization_threshold}%"
-  alarm_actions       = [aws_sns_topic.warning.arn]
-  ok_actions          = [aws_sns_topic.info.arn]
+  alarm_actions       = [local.topic_arns.warning]
+  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
@@ -220,8 +251,8 @@ resource "aws_cloudwatch_metric_alarm" "node_memory_utilization" {
   statistic           = "Average"
   threshold           = var.alarm_config.memory_utilization_threshold
   alarm_description   = "EKS node memory utilization exceeds ${var.alarm_config.memory_utilization_threshold}%"
-  alarm_actions       = [aws_sns_topic.warning.arn]
-  ok_actions          = [aws_sns_topic.info.arn]
+  alarm_actions       = [local.topic_arns.warning]
+  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
@@ -242,8 +273,8 @@ resource "aws_cloudwatch_metric_alarm" "cluster_failed_node_count" {
   statistic           = "Maximum"
   threshold           = 0
   alarm_description   = "EKS cluster has failed/not-ready nodes"
-  alarm_actions       = [aws_sns_topic.critical.arn]
-  ok_actions          = [aws_sns_topic.info.arn]
+  alarm_actions       = [local.topic_arns.critical]
+  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
@@ -264,8 +295,8 @@ resource "aws_cloudwatch_metric_alarm" "pod_restart_count" {
   statistic           = "Sum"
   threshold           = 10
   alarm_description   = "High pod restart rate in EKS cluster"
-  alarm_actions       = [aws_sns_topic.warning.arn]
-  ok_actions          = [aws_sns_topic.info.arn]
+  alarm_actions       = [local.topic_arns.warning]
+  ok_actions          = [local.topic_arns.info]
 
   dimensions = {
     ClusterName = var.cluster_name
