@@ -70,6 +70,26 @@ resource "aws_kms_key" "alerts" {
           }
         }
       },
+      # CloudWatch alarms are no longer the only publisher: the agent platform's
+      # kill-switch bus routes governance events (a budget breach, an SLO
+      # burn-rate breach) straight to these topics. EventBridge needs the same
+      # data key, and without this grant the publish is accepted and then
+      # silently dropped — no error surfaces at the rule.
+      {
+        Sid       = "AllowEventBridgePublish"
+        Effect    = "Allow"
+        Principal = { Service = "events.amazonaws.com" }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
     ]
   })
 
@@ -118,18 +138,32 @@ resource "aws_sns_topic_policy" "critical" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid       = "AllowCloudWatchAlarms"
-      Effect    = "Allow"
-      Principal = { Service = "cloudwatch.amazonaws.com" }
-      Action    = "SNS:Publish"
-      Resource  = aws_sns_topic.critical[0].arn
-      Condition = {
-        StringEquals = {
-          "aws:SourceAccount" = local.account_id
+    Statement = [
+      {
+        Sid       = "AllowCloudWatchAlarms"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.critical[0].arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
         }
-      }
-    }]
+      },
+      {
+        Sid       = "AllowEventBridgeRules"
+        Effect    = "Allow"
+        Principal = { Service = "events.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.critical[0].arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
+    ]
   })
 }
 
@@ -140,18 +174,32 @@ resource "aws_sns_topic_policy" "warning" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid       = "AllowCloudWatchAlarms"
-      Effect    = "Allow"
-      Principal = { Service = "cloudwatch.amazonaws.com" }
-      Action    = "SNS:Publish"
-      Resource  = aws_sns_topic.warning[0].arn
-      Condition = {
-        StringEquals = {
-          "aws:SourceAccount" = local.account_id
+    Statement = [
+      {
+        Sid       = "AllowCloudWatchAlarms"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.warning[0].arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
         }
-      }
-    }]
+      },
+      {
+        Sid       = "AllowEventBridgeRules"
+        Effect    = "Allow"
+        Principal = { Service = "events.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.warning[0].arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+        }
+      },
+    ]
   })
 }
 
@@ -175,6 +223,48 @@ resource "aws_sns_topic_policy" "info" {
       }
     }]
   })
+}
+
+################################################################################
+# SSM contract — the severity topic ARNs
+#
+# The eks-agent-platform components layer on this account and read every
+# landing-zone value they need through /eks-agent-platform/<cluster-name>/, the
+# same path the agent-iam contract uses; that tree is the only channel across the
+# repo boundary. Its kill-switch component routes governance events straight to
+# these topics — a budget breach, an SLO burn-rate breach — so it needs the ARNs
+# resolvable at plan time rather than threaded through as orchestrator variables.
+#
+# Published unconditionally across both modes: local.topic_arns resolves to the
+# topics this component created in create mode and to the central topics
+# shared-observability owns in adopt mode, so one publish serves either shape and
+# a consumer wires against one interface regardless.
+#
+# All three tiers are published, not just the two the kill-switch rules consume
+# today. The severity set is the unit the observability-slo standard defines
+# (critical pages, warning tickets, info records recovery), and a discovery
+# contract that carries two thirds of it invites a consumer to guess the third.
+################################################################################
+
+resource "aws_ssm_parameter" "alerts_critical_topic_arn" {
+  name  = "/eks-agent-platform/${var.cluster_name}/observability/alerts_critical_topic_arn"
+  type  = "String"
+  value = local.topic_arns.critical
+  tags  = local.tags
+}
+
+resource "aws_ssm_parameter" "alerts_warning_topic_arn" {
+  name  = "/eks-agent-platform/${var.cluster_name}/observability/alerts_warning_topic_arn"
+  type  = "String"
+  value = local.topic_arns.warning
+  tags  = local.tags
+}
+
+resource "aws_ssm_parameter" "alerts_info_topic_arn" {
+  name  = "/eks-agent-platform/${var.cluster_name}/observability/alerts_info_topic_arn"
+  type  = "String"
+  value = local.topic_arns.info
+  tags  = local.tags
 }
 
 ################################################################################

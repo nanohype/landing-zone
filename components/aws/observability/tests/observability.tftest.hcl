@@ -78,9 +78,11 @@ run "alerts_key_admits_cloudwatch_publisher" {
   }
 }
 
-# Each severity topic's resource policy grants CloudWatch publish scoped by
-# aws:SourceAccount — the confused-deputy guard the sibling CMK policy already
-# carries. Without it a service principal acting for any account could publish.
+# Every statement on every severity topic is SNS:Publish, by a named AWS service
+# principal, scoped by aws:SourceAccount — the confused-deputy guard the sibling
+# CMK policy already carries. The invariant is the scoping, not the identity of
+# the publisher: without it a service principal acting for any account could
+# publish into this cluster's pager.
 run "topic_policies_scope_publish_by_source_account" {
   command = plan
 
@@ -92,12 +94,80 @@ run "topic_policies_scope_publish_by_source_account" {
         aws_sns_topic_policy.info[0].policy,
         ] : alltrue([
           for s in jsondecode(p).Statement :
-          try(s.Principal.Service, "") == "cloudwatch.amazonaws.com"
+          contains(["cloudwatch.amazonaws.com", "events.amazonaws.com"], try(s.Principal.Service, ""))
           && s.Action == "SNS:Publish"
           && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
       ])
     ])
-    error_message = "each of the critical/warning/info topic policies must grant SNS:Publish to cloudwatch.amazonaws.com scoped by aws:SourceAccount"
+    error_message = "every statement on the critical/warning/info topic policies must grant SNS:Publish to an approved service principal, scoped by aws:SourceAccount"
+  }
+
+  # CloudWatch alarms reach all three tiers; that is what the alarms in this
+  # component are for, and a generalized guard above must not let it be dropped.
+  assert {
+    condition = alltrue([
+      for p in [
+        aws_sns_topic_policy.critical[0].policy,
+        aws_sns_topic_policy.warning[0].policy,
+        aws_sns_topic_policy.info[0].policy,
+        ] : anytrue([
+          for s in jsondecode(p).Statement :
+          try(s.Principal.Service, "") == "cloudwatch.amazonaws.com"
+      ])
+    ])
+    error_message = "every severity topic must still admit cloudwatch.amazonaws.com — the alarms in this component publish through it"
+  }
+}
+
+# The agent-platform kill-switch bus routes governance events — a budget breach,
+# an SLO burn-rate breach — straight to the paging and ticket tiers. EventBridge
+# publishes through the topic's own resource policy rather than an assumed role,
+# and the topics are SSE-KMS, so it needs the CMK grant too. Miss either and the
+# publish is accepted and then silently dropped, with no error at the rule.
+run "eventbridge_can_publish_to_the_paging_tiers" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for p in [
+        aws_sns_topic_policy.critical[0].policy,
+        aws_sns_topic_policy.warning[0].policy,
+        ] : anytrue([
+          for s in jsondecode(p).Statement :
+          try(s.Principal.Service, "") == "events.amazonaws.com"
+          && s.Action == "SNS:Publish"
+          && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+      ])
+    ])
+    error_message = "the critical and warning topics must admit events.amazonaws.com for SNS:Publish, scoped by aws:SourceAccount — the kill-switch bus routes governance events to them"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_kms_key.alerts[0].policy).Statement :
+      s
+      if try(s.Principal.Service, "") == "events.amazonaws.com"
+      && contains(s.Action, "kms:GenerateDataKey*")
+      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+    ]) == 1
+    error_message = "the alerts CMK must admit events.amazonaws.com for kms:GenerateDataKey*, scoped by aws:SourceAccount, or an EventBridge publish to an SSE-KMS topic is dropped"
+  }
+}
+
+# The eks-agent-platform tree reads every landing-zone value it needs through
+# /eks-agent-platform/<cluster-name>/; its kill-switch component resolves these
+# topic ARNs at plan time. Published in both modes off the same local, so a
+# consumer wires against one interface whether the topics are local or central.
+run "severity_topic_arns_are_published_to_the_ssm_contract" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      aws_ssm_parameter.alerts_critical_topic_arn.name == "/eks-agent-platform/development-platform/observability/alerts_critical_topic_arn",
+      aws_ssm_parameter.alerts_warning_topic_arn.name == "/eks-agent-platform/development-platform/observability/alerts_warning_topic_arn",
+      aws_ssm_parameter.alerts_info_topic_arn.name == "/eks-agent-platform/development-platform/observability/alerts_info_topic_arn",
+    ])
+    error_message = "the severity topic ARNs must be published under /eks-agent-platform/<cluster-name>/observability/ — the kill-switch component reads them from there"
   }
 }
 

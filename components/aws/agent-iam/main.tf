@@ -526,6 +526,24 @@ resource "aws_iam_role_policy" "operator" {
         Action   = ["events:PutEvents"]
         Resource = "arn:${local.partition}:events:${var.region}:${local.account_id}:event-bus/*"
       },
+      {
+        # Read-only access to this cluster's Amazon Managed Prometheus workspace,
+        # for the SLO reconciler's burn-rate windows. Query-side only — the
+        # OpenTelemetry gateway owns remote-write, and the operator never writes
+        # a series. Wildcarded across workspaces in this account and region for
+        # the same reason KillSwitchEvents is: the workspace is minted by a
+        # sibling component whose ARN is not resolvable when this policy is
+        # built, and the account/region bound is the meaningful boundary.
+        Sid    = "AMPQuery"
+        Effect = "Allow"
+        Action = [
+          "aps:QueryMetrics",
+          "aps:GetLabels",
+          "aps:GetSeries",
+          "aps:GetMetricMetadata",
+        ]
+        Resource = "arn:${local.partition}:aps:${var.region}:${local.account_id}:workspace/*"
+      },
     ]
   })
 }
