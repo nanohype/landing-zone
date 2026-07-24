@@ -168,6 +168,27 @@ run "operator_role_shape" {
     ])
     error_message = "operator tenant-role read must be scoped to tenant ARNs, never Resource=\"*\""
   }
+
+  # The SLO reconciler queries Amazon Managed Prometheus to evaluate burn rates.
+  # Read-only is the invariant worth pinning: the OpenTelemetry gateway owns
+  # remote-write, and an operator that could write series could fabricate the
+  # signal its own control loop acts on.
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
+      alltrue([for a in tolist(s.Action) : startswith(a, "aps:Get") || a == "aps:QueryMetrics"])
+      if try(s.Sid, "") == "AMPQuery"
+    ])
+    error_message = "the operator's AMP grant must stay read-only — no aps:RemoteWrite, no aps:Create*/Update*/Delete*"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
+      s if try(s.Sid, "") == "AMPQuery" && contains(tolist(s.Action), "aps:QueryMetrics")
+    ]) == 1
+    error_message = "the operator must hold aps:QueryMetrics or every SLO evaluation 403s"
+  }
 }
 
 # The artifact + eval buckets hold model weights and evaluation evidence. Public

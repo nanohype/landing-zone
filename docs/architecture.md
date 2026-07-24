@@ -201,7 +201,7 @@ Seven multi-tenant components, each accepting a `var.tenants` map:
 
 | Component | Purpose | Team |
 |-----------|---------|------|
-| **observability** | CloudWatch alarms (CPU, memory, node count, API errors), dashboards, SNS notification topics | sre |
+| **observability** | CloudWatch alarms (CPU, memory, node count, API errors), dashboards, severity SNS notification topics + their ARNs on the `/eks-agent-platform/` contract | sre |
 | **secrets** | KMS customer-managed keys + Secrets Manager (External Secrets Operator reads them with a `cluster-addons` Pod Identity role) | security |
 | **backup** | AWS Backup plans with configurable schedules/retention, vault lock for production | sre |
 | **break-glass** | Emergency access IAM roles with SNS alerts on assumption | security |
@@ -325,7 +325,7 @@ which component wrote it:
 | Prefix | Purpose | Writers |
 |--------|---------|---------|
 | `/platform/<env>/<component>/*` | owner-account metadata and audit — same-account reads by that account's own automation, not a cross-account hand-off | `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`, `org-scp`, `cost`, `secrets`, `shared-network` |
-| `/eks-agent-platform/<cluster-or-env>/<component>/*` | the cluster-consumer contract surface — `cluster-bootstrap` reads these and stamps them onto the ArgoCD cluster registration Secret's annotations, where the `eks-agent-platform` operator and the `eks-gitops` addons consume them | `managed-monitoring`, `dns`, `cluster-addons`, `agent-iam`/eval-runtime |
+| `/eks-agent-platform/<cluster-or-env>/<component>/*` | the cluster-consumer contract surface — `cluster-bootstrap` reads these and stamps them onto the ArgoCD cluster registration Secret's annotations, where the `eks-agent-platform` operator and the `eks-gitops` addons consume them, and the `eks-agent-platform` terraform tree resolves them directly as data sources | `managed-monitoring`, `dns`, `cluster-addons`, `agent-iam`/eval-runtime, `observability` |
 | `/<env>/<component>/*` | standalone operational components that predate the `/platform/` convention | `break-glass`, `backup`, `service-quotas` |
 | `/aws/*` | AWS-reserved paths the repo names within or reads — CloudWatch log-group names (flow logs, CloudTrail, API Gateway) and the public Ubuntu AMI parameter — following AWS's own conventions, not a landing-zone namespace | (log groups; AMI data lookups) |
 

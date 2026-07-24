@@ -322,6 +322,15 @@ resource "aws_iam_policy" "hub_boundary" {
           "ssmmessages:*",
           "eks-auth:AssumeRoleForPodIdentity",
           "pricing:GetProducts",
+          # The agent-platform operator queries its cluster's Amazon Managed
+          # Prometheus workspace to evaluate tenant SLO burn rates. Read-only,
+          # and listed here because this boundary caps that role's effective
+          # policy: granting the action on the identity policy alone works on a
+          # directly-applied cluster and 403s on every vended one.
+          "aps:QueryMetrics",
+          "aps:GetLabels",
+          "aps:GetSeries",
+          "aps:GetMetricMetadata",
         ]
         Resource = "*"
       },

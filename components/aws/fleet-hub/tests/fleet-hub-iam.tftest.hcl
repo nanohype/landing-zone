@@ -178,3 +178,38 @@ run "identity_cluster_role_write_is_boundary_gated_and_path_scoped" {
     error_message = "identity policy role-write must be scoped to the /eks-fleet/* role ARN, never Resource=\"*\""
   }
 }
+
+# ── The ceiling is also the operator's runtime ceiling ──────────────────────
+# This boundary caps the effective policy of every role minted with it, the
+# agent-platform operator included. Its SLO reconciler queries Amazon Managed
+# Prometheus to evaluate tenant burn rates, so the read actions have to be
+# admitted here as well as on the operator's identity policy. Granting them in
+# only one place works on a directly-applied cluster and 403s on every vended
+# one — a failure that hides until the first vend, which is exactly why it is
+# pinned rather than reviewed.
+run "hub_ceiling_admits_the_operators_amp_reads" {
+  command = plan
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.hub_boundary.policy).Statement :
+      s if try(s.Sid, "") == "HubCeiling"
+      && contains(s.Action, "aps:QueryMetrics")
+      && contains(s.Action, "aps:GetLabels")
+      && contains(s.Action, "aps:GetSeries")
+      && contains(s.Action, "aps:GetMetricMetadata")
+    ]) == 1
+    error_message = "HubCeiling must admit the agent-platform operator's read-only AMP actions, or SLO evaluation 403s on every role minted under this boundary"
+  }
+
+  # Read-only, on the ceiling too. A boundary that admitted a write would let a
+  # compromised operator fabricate the very signal its control loop acts on.
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_policy.hub_boundary.policy).Statement :
+      alltrue([for a in s.Action : !startswith(a, "aps:") || startswith(a, "aps:Get") || a == "aps:QueryMetrics"])
+      if try(s.Effect, "") == "Allow"
+    ])
+    error_message = "the ceiling must admit no aps action beyond the read-only set (no RemoteWrite, no Create/Update/Delete)"
+  }
+}
