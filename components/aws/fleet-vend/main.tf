@@ -134,6 +134,16 @@ resource "aws_iam_policy" "vend_boundary" {
           "aps:GetLabels",
           "aps:GetSeries",
           "aps:GetMetricMetadata",
+          # A floor-tier cluster's OpenTelemetry gateway ships traces to X-Ray,
+          # and floor is the default tier for a vended cluster — so without these
+          # the common case drops every span while its metrics and logs keep
+          # working, which reads as a healthy tier. Same ceiling hazard as the
+          # aps reads above, and it has to be fixed in the same two places.
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+          "xray:GetSamplingRules",
+          "xray:GetSamplingTargets",
+          "xray:GetSamplingStatisticSummaries",
         ]
         Resource = "*"
       },

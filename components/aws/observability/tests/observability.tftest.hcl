@@ -86,6 +86,11 @@ run "alerts_key_admits_cloudwatch_publisher" {
 run "topic_policies_scope_publish_by_source_account" {
   command = plan
 
+  # CloudWatch's grants carry the account guard. EventBridge's deliberately do
+  # not — see the AllowEventBridgeRules comment — so the assertion is
+  # per-principal rather than blanket. A blanket rule here is what would push
+  # someone to "fix" the EventBridge statement by adding a condition that
+  # silently kills every page.
   assert {
     condition = alltrue([
       for p in [
@@ -96,10 +101,13 @@ run "topic_policies_scope_publish_by_source_account" {
           for s in jsondecode(p).Statement :
           contains(["cloudwatch.amazonaws.com", "events.amazonaws.com"], try(s.Principal.Service, ""))
           && s.Action == "SNS:Publish"
-          && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+          && (
+            try(s.Principal.Service, "") != "cloudwatch.amazonaws.com"
+            || try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+          )
       ])
     ])
-    error_message = "every statement on the critical/warning/info topic policies must grant SNS:Publish to an approved service principal, scoped by aws:SourceAccount"
+    error_message = "every topic-policy statement must grant SNS:Publish to an approved service principal, and every CloudWatch statement must carry the aws:SourceAccount guard"
   }
 
   # CloudWatch alarms reach all three tiers; that is what the alarms in this
@@ -134,12 +142,39 @@ run "eventbridge_can_publish_to_the_paging_tiers" {
         aws_sns_topic_policy.warning[0].policy,
         ] : anytrue([
           for s in jsondecode(p).Statement :
-          try(s.Principal.Service, "") == "events.amazonaws.com"
-          && s.Action == "SNS:Publish"
-          && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+          try(s.Principal.Service, "") == "events.amazonaws.com" && s.Action == "SNS:Publish"
       ])
     ])
-    error_message = "the critical and warning topics must admit events.amazonaws.com for SNS:Publish, scoped by aws:SourceAccount — the kill-switch bus routes governance events to them"
+    error_message = "the critical and warning topics must admit events.amazonaws.com for SNS:Publish — the kill-switch bus routes governance events to them"
+  }
+
+  # The load-bearing half. AWS: "You can't use Condition blocks in Amazon SNS
+  # topic policies for EventBridge." A condition here never evaluates true, so
+  # the statement never allows, the rule still reports success, and the page is
+  # dropped with nothing but an unalarmed FailedInvocations counter to show for
+  # it. This asserts nobody re-adds one.
+  assert {
+    condition = alltrue([
+      for p in [
+        aws_sns_topic_policy.critical[0].policy,
+        aws_sns_topic_policy.warning[0].policy,
+        aws_sns_topic_policy.info[0].policy,
+        ] : alltrue([
+          for s in jsondecode(p).Statement :
+          !can(s.Condition)
+          if try(s.Principal.Service, "") == "events.amazonaws.com"
+      ])
+    ])
+    error_message = "an EventBridge statement on an SNS topic policy must carry NO Condition — EventBridge does not populate condition context on this path, so a guard here silently denies every page"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_kms_key.alerts[0].policy).Statement :
+      !can(s.Condition)
+      if try(s.Principal.Service, "") == "events.amazonaws.com"
+    ])
+    error_message = "the EventBridge grant on the alerts CMK must carry no Condition either — an unpopulated key fails closed and drops the message one layer down"
   }
 
   assert {
@@ -148,9 +183,8 @@ run "eventbridge_can_publish_to_the_paging_tiers" {
       s
       if try(s.Principal.Service, "") == "events.amazonaws.com"
       && contains(s.Action, "kms:GenerateDataKey*")
-      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
     ]) == 1
-    error_message = "the alerts CMK must admit events.amazonaws.com for kms:GenerateDataKey*, scoped by aws:SourceAccount, or an EventBridge publish to an SSE-KMS topic is dropped"
+    error_message = "the alerts CMK must admit events.amazonaws.com for kms:GenerateDataKey*, or an EventBridge publish to an SSE-KMS topic is dropped"
   }
 }
 

@@ -76,6 +76,15 @@ resource "aws_kms_key" "alerts" {
       # data key, and without this grant the publish is accepted and then
       # silently dropped — no error surfaces at the rule.
       {
+        # Also unconditioned, for the same reason and one more. AWS does not
+        # document whether EventBridge populates condition context on the KMS
+        # call it makes to encrypt into an SSE-KMS topic, and an unpopulated key
+        # fails closed — the same silent drop as above, one layer down.
+        #
+        # The guard would also buy nothing here: the topic's own resource policy
+        # is the boundary for who may publish, and that policy cannot be
+        # conditioned for this principal at all. A condition on the key cannot
+        # restrict what the topic already admits.
         Sid       = "AllowEventBridgePublish"
         Effect    = "Allow"
         Principal = { Service = "events.amazonaws.com" }
@@ -84,11 +93,6 @@ resource "aws_kms_key" "alerts" {
           "kms:Decrypt",
         ]
         Resource = "*"
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = local.account_id
-          }
-        }
       },
     ]
   })
@@ -152,16 +156,21 @@ resource "aws_sns_topic_policy" "critical" {
         }
       },
       {
+        # No Condition, deliberately. AWS documents that EventBridge does not
+        # populate condition context on the SNS publish path — "You can't use
+        # Condition blocks in Amazon SNS topic policies for EventBridge" — so an
+        # aws:SourceAccount guard here never evaluates true and the statement
+        # never allows. The rule reports success and the message is dropped, with
+        # the only trace an unalarmed FailedInvocations counter: a paging path
+        # that looks installed and delivers nothing.
+        #
+        # The CloudWatch statement above keeps its guard because CloudWatch does
+        # populate it. This is a per-principal fact, not a house style.
         Sid       = "AllowEventBridgeRules"
         Effect    = "Allow"
         Principal = { Service = "events.amazonaws.com" }
         Action    = "SNS:Publish"
         Resource  = aws_sns_topic.critical[0].arn
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = local.account_id
-          }
-        }
       },
     ]
   })
@@ -188,16 +197,21 @@ resource "aws_sns_topic_policy" "warning" {
         }
       },
       {
+        # No Condition, deliberately. AWS documents that EventBridge does not
+        # populate condition context on the SNS publish path — "You can't use
+        # Condition blocks in Amazon SNS topic policies for EventBridge" — so an
+        # aws:SourceAccount guard here never evaluates true and the statement
+        # never allows. The rule reports success and the message is dropped, with
+        # the only trace an unalarmed FailedInvocations counter: a paging path
+        # that looks installed and delivers nothing.
+        #
+        # The CloudWatch statement above keeps its guard because CloudWatch does
+        # populate it. This is a per-principal fact, not a house style.
         Sid       = "AllowEventBridgeRules"
         Effect    = "Allow"
         Principal = { Service = "events.amazonaws.com" }
         Action    = "SNS:Publish"
         Resource  = aws_sns_topic.warning[0].arn
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = local.account_id
-          }
-        }
       },
     ]
   })

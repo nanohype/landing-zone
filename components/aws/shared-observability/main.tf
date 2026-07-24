@@ -60,6 +60,23 @@ resource "aws_kms_key" "alerts" {
         Resource  = "*"
         Condition = { StringEquals = { "aws:SourceOrgID" = var.organization_id } }
       },
+      # CloudWatch alarms are no longer the only publisher. A workload cluster's
+      # agent-platform kill-switch bus routes governance events — a budget
+      # breach, an SLO burn-rate breach — straight to these topics, and an adopt-
+      # mode cluster resolves those targets to THESE central topics rather than
+      # local ones. Without this the publish is accepted and silently dropped.
+      #
+      # Unconditioned, unlike its CloudWatch sibling: AWS does not document
+      # EventBridge populating condition context on this path, and an unpopulated
+      # key fails closed. The topic policy below carries the same asymmetry for
+      # the same reason, and it is the boundary that actually gates publishing.
+      {
+        Sid       = "AllowOrgEventBridgeUseKey"
+        Effect    = "Allow"
+        Principal = { Service = "events.amazonaws.com" }
+        Action    = ["kms:GenerateDataKey*", "kms:Decrypt"]
+        Resource  = "*"
+      },
     ]
   })
 
@@ -85,7 +102,8 @@ resource "aws_sns_topic" "this" {
 
 # Admit CloudWatch alarms from any account in the org to publish, and only this
 # org. This is the topic side of the cross-account grant; the CMK policy is the
-# key side. Both ride aws:SourceOrgID so the fleet grows without an edit here.
+# key side. The CloudWatch grants ride aws:SourceOrgID so the fleet grows without
+# an edit here; the EventBridge grants cannot, for the reason given below.
 resource "aws_sns_topic_policy" "this" {
   for_each = aws_sns_topic.this
 
@@ -93,14 +111,29 @@ resource "aws_sns_topic_policy" "this" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid       = "AllowOrgCloudWatchPublish"
-      Effect    = "Allow"
-      Principal = { Service = "cloudwatch.amazonaws.com" }
-      Action    = "SNS:Publish"
-      Resource  = each.value.arn
-      Condition = { StringEquals = { "aws:SourceOrgID" = var.organization_id } }
-    }]
+    Statement = [
+      {
+        Sid       = "AllowOrgCloudWatchPublish"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = each.value.arn
+        Condition = { StringEquals = { "aws:SourceOrgID" = var.organization_id } }
+      },
+      # The agent-platform kill-switch bus, on an adopt-mode workload cluster,
+      # targets these topics directly. NOT conditioned: AWS documents that
+      # "You can't use Condition blocks in Amazon SNS topic policies for
+      # EventBridge", so an aws:SourceOrgID guard here would never evaluate true
+      # and the statement would never allow — a paging path that looks installed
+      # and delivers nothing.
+      {
+        Sid       = "AllowEventBridgePublish"
+        Effect    = "Allow"
+        Principal = { Service = "events.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = each.value.arn
+      },
+    ]
   })
 }
 
