@@ -401,6 +401,13 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # workspace id to point opencost at Managed Prometheus through a sigv4 proxy.
       "monitoring/amp-endpoint"     = data.aws_ssm_parameter.amp_endpoint[0].value
       "monitoring/amp-workspace-id" = data.aws_ssm_parameter.amp_workspace_id[0].value
+      # Loki + Tempo S3 buckets, read from the SSM parameters cluster-addons publishes. The
+      # addons-observability ApplicationSet injects them as the object-storage backend for logs
+      # and traces, so a cluster's telemetry survives the cluster (Loki and Tempo default to
+      # in-cluster PVCs, which die with the node). Credentials resolve from the collectors' Pod
+      # Identity associations — no static-key Secret.
+      "observability/loki-bucket"  = data.aws_ssm_parameter.loki_bucket[0].value
+      "observability/tempo-bucket" = data.aws_ssm_parameter.tempo_bucket[0].value
       } : {}, var.enable_velero_backup ? {
       # Velero backup bucket, read from the SSM parameter the cluster-addons
       # component publishes. The addons-velero ApplicationSet injects it as the

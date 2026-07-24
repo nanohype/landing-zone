@@ -34,6 +34,24 @@ data "aws_ssm_parameter" "argo_workflows_bucket" {
   name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/argo_workflows_bucket"
 }
 
+# The cluster-addons component publishes the Loki and Tempo bucket names to SSM;
+# cluster-bootstrap republishes them as the observability/loki-bucket and
+# observability/tempo-bucket cluster-Secret annotations, where the addons-observability
+# ApplicationSet injects them as the S3 backend for logs and traces. Gated on
+# enable_managed_monitoring — a monitoring cluster keeps durable logs and traces; a cluster
+# without the stack leaves the annotations off, and the appset falls back to filesystem
+# storage. The live leaves order cluster-addons before cluster-bootstrap so the parameters
+# exist by apply time.
+data "aws_ssm_parameter" "loki_bucket" {
+  count = var.enable_managed_monitoring ? 1 : 0
+  name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/loki_bucket"
+}
+
+data "aws_ssm_parameter" "tempo_bucket" {
+  count = var.enable_managed_monitoring ? 1 : 0
+  name  = "/eks-agent-platform/${var.cluster_name}/cluster-addons/tempo_bucket"
+}
+
 # The dns component publishes this environment's primary domain to SSM;
 # cluster-bootstrap republishes it as the external-dns/domain-filter
 # cluster-Secret annotation so the addons-external-dns ApplicationSet confines
