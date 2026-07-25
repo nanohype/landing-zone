@@ -248,6 +248,21 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-mock-outputs.py
 
+  # Guards installability: no leaf under live/aws/workload-*/ may depend on a unit
+  # outside its own account directory. A terragrunt `dependency` is resolved while the
+  # config is PARSED, so an unapplied cross-account dependency fails `init` — not just
+  # `apply` — and no TF_VAR can bypass it. Neither of the other terragrunt gates can
+  # see that: evaluate renders against mocks by design, and plan green-skips whenever
+  # AWS_ROLE_ARN is unset. So this is the only thing standing between a well-reviewed
+  # change and an un-installable default environment. Cross-account worked examples
+  # live outside workload-*, in live/aws/reference-adopt/.
+  account-local-deps:
+    name: Workload Deps Are Account-Local
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-account-local-deps.sh
+
   # Guards the component smoke tests: every output key a smoke test reads out of
   # outputs.json must be a real output of the component it belongs to. `jq` returns the
   # string "null" for a key that does not exist rather than failing, so without this a

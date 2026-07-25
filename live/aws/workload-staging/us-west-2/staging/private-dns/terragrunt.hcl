@@ -7,24 +7,15 @@ include "envcommon" {
   merge_strategy = "deep"
 }
 
-# profile_id is cross-account (the shared-dns owner runs in the network account) and the path is
-# env-specific, so the dependency lives here rather than in envcommon — the same shape the
-# workload network adopt leaf uses for its shared_network dependency.
-dependency "shared_dns" {
-  config_path = "../../../../network/us-west-2/staging/shared-dns"
-
-  # mock_outputs feed the credential-less CI render; a real plan reads the live output.
-  mock_outputs = {
-    profile_id = "rp-mock000000000001"
-  }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
-}
-
 inputs = {
-  # adopt: associate the shared Profile with this account's cluster VPC (the multi-account path).
-  # The profile_id comes straight from the shared-dns owner leaf's output — a consuming account
-  # never hand-copies it. A single-account startup would instead run dns_mode = create with its own
-  # private_zones; this leaf demonstrates the enterprise adopt shape.
-  dns_mode   = "adopt"
-  profile_id = dependency.shared_dns.outputs.profile_id
+  # create: this account owns its private zone and associates it with its own cluster
+  # VPC (vpc_id comes from the same-account network leaf via envcommon). external-dns
+  # writes service records into it. Nothing outside this account is involved, so the
+  # environment comes up from a standing start.
+  #
+  # The adopt shape — associating a Route53 Profile that the shared-dns owner in the
+  # network account RAM-shares — is at live/aws/reference-adopt/, outside every
+  # workload account. See the README there for why.
+  dns_mode      = "create"
+  private_zones = ["internal.staging.example.com"]
 }

@@ -25,7 +25,8 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
   - **Organization (management account)** — `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`, `org-scp`
 - **Shared modules** under `modules/aws/` — `workload-identity` (EKS Pod Identity role factory), `eks-vpc-endpoints` (the private endpoint set both create-mode `network` and `shared-network` build)
 - **Environments:** development, staging, production; `hub` (fleet/portal control plane); `org` (management account)
-- **Accounts:** workload-development, workload-staging, workload-production, management, `fleet` (hub control plane), `network` (network-owner account for the shared-network/egress-network adopt topology)
+- **Accounts:** workload-development, workload-staging, workload-production, management, `fleet` (hub control plane), `network` (network-owner account for the shared-network/egress-network adopt topology), `reference-adopt` (the worked adopt-mode consumer wiring — documentation that CI renders, never applied)
+- **Installability rule:** a leaf under `live/aws/workload-*/` may not depend on a unit outside its own account directory. A terragrunt `dependency` resolves at config-parse time, so a cross-account dependency with no state fails `init`, not just `apply`, and no `TF_VAR` bypasses it. Enforced by `scripts/check-account-local-deps.sh`; cross-account examples live in `live/aws/reference-adopt/`
 - **Multi-region support:** us-west-2
 - **Dependency chain:** `network → cluster → {cluster-addons, cluster-bootstrap, druid, pipeline, governance, tenant-substrate, observability, secrets, agent-iam}`
 - Standalone (no dependencies): `cost`, `dns`, `backup`, `break-glass`, `service-quotas`, `github-oidc`
