@@ -88,6 +88,38 @@ variable "artifacts_lifecycle_noncurrent_expiration_days" {
   default     = 90
 }
 
+variable "artifacts_backup_policy" {
+  description = <<-EOT
+    BackupPolicy tag value for the model-artifacts and eval-reports buckets, naming a plan key
+    in the backup component (e.g. "daily"). Empty (default) leaves both untagged and out of
+    central backup.
+
+    What the default costs you. Both buckets are versioned, and versioning is the whole
+    durability story without this: it survives an overwrite or a delete of the current object,
+    and nothing else. It does not survive deletion of the bucket, loss of the account, or loss
+    of the region — and model-artifacts holds the sole copies of every tenant's fine-tuned
+    adapters on this cluster while eval-reports holds the record of what scored what. Neither
+    is regenerable from the substrate.
+
+    Set it to bring both into the same durability substrate the tenant datastores use: the plan
+    copies recovery points to the central vault in the backup account's DR region, so the
+    artifacts survive the loss of the account that produced them. Billed — the backup itself,
+    plus the noncurrent versions it retains alongside the lifecycle rule above.
+
+    The AWS Backup S3 prerequisite is met by construction here: both buckets enable versioning
+    unconditionally, so unlike the tenant object stores there is no per-bucket gate to apply.
+  EOT
+  type        = string
+  default     = ""
+
+  # A value matching no plan key selects nothing, so it would read as protected while being
+  # ignored. This root cannot see the backup component's keys, so it asserts the shape only.
+  validation {
+    condition     = var.artifacts_backup_policy == "" || can(regex("^[a-z][a-z0-9-]*$", var.artifacts_backup_policy))
+    error_message = "artifacts_backup_policy must be empty or a lowercase plan key (letters, digits, hyphens) matching a key in the backup component's backup_plans."
+  }
+}
+
 variable "artifacts_access_logs_retention_days" {
   description = "Retention (days) for S3 server-access logs in the artifacts access-logs bucket."
   type        = number

@@ -294,6 +294,49 @@ run "artifact_buckets_are_locked_down" {
 # The region-bearing bucket names are the org's tightest cluster-scoped names and
 # set the clusterName length cap, so the <=63 preconditions must actually fire. A
 # 25-char base overflows only the longest name (model-artifacts, +39 fixed chars).
+# ── artifact buckets are out of central backup unless asked in ──
+#
+# Both buckets are versioned, and versioning is the whole durability story by default:
+# it survives an overwrite or a delete of the current object and nothing else — not the
+# loss of the bucket, the account, or the region. These hold the sole copies of every
+# tenant's adapters and the record of what scored what, so the lever has to exist; central
+# backup is billed, so it must not switch itself on.
+run "artifact_buckets_are_untagged_for_backup_by_default" {
+  command = plan
+
+  assert {
+    condition = (
+      !contains(keys(aws_s3_bucket.model_artifacts.tags), "BackupPolicy") &&
+      !contains(keys(aws_s3_bucket.eval_reports.tags), "BackupPolicy")
+    )
+    error_message = "artifacts_backup_policy defaults to empty, so neither data bucket may carry BackupPolicy — the tag would enrol them in a billed backup plan unannounced"
+  }
+}
+
+run "artifact_buckets_join_central_backup_when_asked" {
+  command = plan
+
+  variables {
+    artifacts_backup_policy = "daily"
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket.model_artifacts.tags["BackupPolicy"] == "daily" &&
+      aws_s3_bucket.eval_reports.tags["BackupPolicy"] == "daily"
+    )
+    error_message = "setting artifacts_backup_policy must tag both data buckets so the central plan's selector picks them up"
+  }
+
+  # The access-logs bucket stays out: it is derived from access to the two buckets it
+  # logs, its own retention rule bounds it, and it is deliberately unversioned — which
+  # AWS Backup requires for S3, so tagging it would promise a backup that fails every job.
+  assert {
+    condition     = !contains(keys(aws_s3_bucket.access_logs.tags), "BackupPolicy")
+    error_message = "the access-logs bucket must never carry BackupPolicy — it is unversioned, so AWS Backup would select it and fail every job"
+  }
+}
+
 run "over_long_cluster_name_fails_length_precondition" {
   command = plan
 

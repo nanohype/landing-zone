@@ -35,9 +35,25 @@ variable "cluster_name" {
 }
 
 variable "backup_policy" {
-  description = "Value of the BackupPolicy tag stamped on every datastore, so the central backup plan's tag selector picks it up. The tag matches an aws_backup_selection key."
+  description = <<-EOT
+    Value of the BackupPolicy tag, matching an aws_backup_selection key in the backup
+    component so the central plan's tag selector picks the resource up.
+
+    Stamped only on the datastore kinds AWS Backup can protect: relational (Aurora),
+    keyValue (DynamoDB), and objectStore (S3, and only when its versioning is Enabled —
+    AWS Backup requires it). The queue, cache and stream kinds are not supported resource
+    types, so they are left untagged rather than carrying a claim the plan can never
+    honour; their real durability is documented per kind in modules/tenant/locals.tf.
+  EOT
   type        = string
   default     = "daily"
+
+  # A value that matches no plan key selects nothing, so it reads as protected while being
+  # ignored. This root cannot see the backup component's keys, so it asserts the shape only.
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]*$", var.backup_policy))
+    error_message = "backup_policy must be a lowercase plan key (letters, digits, hyphens) matching a key in the backup component's backup_plans."
+  }
 }
 
 variable "tenants" {

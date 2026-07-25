@@ -18,6 +18,43 @@ locals {
   tenant_tags = merge(var.tags, { Tenant = var.tenant_id })
   data_tags   = merge(local.tenant_tags, { BackupPolicy = var.backup_policy })
 
+  # The BackupPolicy tag is a claim, and it is only true for resource types AWS
+  # Backup can actually protect. Aurora, DynamoDB and S3 are on the supported-
+  # resource list; SQS, ElastiCache and MSK are not
+  # (docs.aws.amazon.com/aws-backup/latest/devguide/backup-feature-availability.html).
+  #
+  # Tagging an unsupported kind fails silently rather than loudly: the plan's tag
+  # selector simply never matches, so the resource sits there carrying a tag that
+  # reads "protected daily" while nothing ever backs it up. That is the same
+  # failure the object-store versioning gate below exists to prevent, applied to
+  # the kinds where the answer is categorical rather than per-datastore.
+  #
+  # What each ineligible kind's durability actually is:
+  #
+  #   queue  — SQS replicates every message across AZs itself and there is no
+  #            snapshot to restore from. The only durability knob is
+  #            queue.message_retention_seconds (default 4 days).
+  #   cache  — derived data, rebuilt from its source of record. Deliberately
+  #            unprotected, and ElastiCache's own snapshot_retention_limit is
+  #            left at the provider default of 0 for the same reason: a cache
+  #            that needs restoring is a database with the wrong kind declared.
+  #   stream — MSK Serverless durability is the managed replication the service
+  #            performs plus per-topic retention, which producers set through the
+  #            Kafka admin API rather than here. Neither is a restorable snapshot.
+  #
+  # Keyed by kind so adding a datastore kind cannot silently inherit a claim:
+  # the new resource file has to name its key, and a missing one fails at plan.
+  datastore_tags = {
+    relational = local.data_tags
+    keyValue   = local.data_tags
+    # objectStore resolves per-datastore through object_store_tags below —
+    # eligible, but only once versioning is on.
+    objectStore = local.data_tags
+    queue       = local.tenant_tags
+    cache       = local.tenant_tags
+    stream      = local.tenant_tags
+  }
+
   # S3 is the one datastore kind where the BackupPolicy tag is not sufficient on its own.
   # AWS Backup requires S3 Versioning on the bucket
   # (docs.aws.amazon.com/aws-backup/latest/devguide/s3-backups.html), and an object store's
@@ -28,7 +65,7 @@ locals {
   # central backup, deliberately and visibly.
   object_store_tags = {
     for name, d in local.object_stores : name => (
-      d.object_store.versioning ? local.data_tags : local.tenant_tags
+      d.object_store.versioning ? local.datastore_tags["objectStore"] : local.tenant_tags
     )
   }
 
