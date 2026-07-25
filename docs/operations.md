@@ -53,31 +53,40 @@ Order within the org layer is flexible -- these components have no inter-depende
 4. cluster-addons             (depends on cluster)
 5. secrets                    (depends on cluster)
 6. observability              (depends on cluster)
-7. agent-iam                  (depends on cluster; mints the operator role + tenant boundary)
+7. agent-iam                  (depends on cluster + secrets; mints the operator role + tenant boundary)
 8. druid                      (depends on network + cluster)
 9. pipeline                   (depends on network + cluster)
-10. llm                       (depends on network + cluster)
-11. gateway                   (depends on cluster)
-12. rag                       (depends on cluster)
-13. mlops                     (depends on cluster)
-14. governance                (depends on cluster)
-15. tenant-substrate          (depends on network + cluster; provisions each tenant's declared datastores)
-16. cost                      (standalone)
-17. dns                       (standalone)
-18. backup                    (standalone)
-19. break-glass               (standalone)
-20. service-quotas            (standalone)
-21. github-oidc               (standalone)
+10. governance                (depends on cluster)
+11. private-dns               (depends on cluster)
+12. managed-monitoring        (depends on cluster; the environment's own AMP/AMG workspaces)
+13. tenant-substrate          (depends on network + cluster; provisions each tenant's declared datastores)
+14. cost                      (standalone)
+15. dns                       (standalone)
+16. backup                    (standalone)
+17. break-glass               (standalone)
+18. service-quotas            (standalone)
+19. model-import              (standalone; environment+account+region-scoped Bedrock import substrate)
 ```
 
-Steps 3-14 can run in parallel within their dependency tier; `tenant-substrate` (15) provisions a
+Steps 3-12 can run in parallel within their dependency tier; `tenant-substrate` (13) provisions a
 tenant's declared datastores, its `var.tenants` map rendered from the Platform CRs — the operator
-owns the tenant IAM + Pod Identity (see [First-time AWS Deploy](first-deploy-aws.md)). Steps 16-21
+owns the tenant IAM + Pod Identity (see [First-time AWS Deploy](first-deploy-aws.md)). Steps 14-19
 can run at any time.
 
+Every component in that list has a live root in **all three** workload environments, so the
+sequence is the same everywhere and `run --all` resolves it.
+
+`github-oidc` is deliberately not in the sequence: it is applied **once per account**, not once per
+environment, so it carries a single `development` live root and adding siblings would mint the same
+account-level OIDC provider three times.
+
 The cross-account **network-owner** components (`shared-network`, `egress-network`) and the
-**hub** control plane (`managed-monitoring`, `fleet-*`, `portal-*`) deploy from their own
-`live/aws/network/` and `live/aws/fleet/` trees, not the per-environment workload accounts.
+**hub** control plane (`fleet-*`, `portal-*`) deploy from their own `live/aws/network/` and
+`live/aws/fleet/` trees, not the per-environment workload accounts.
+
+`managed-monitoring` deploys from both: each workload environment runs its own for that
+environment's AMP/AMG workspaces, and the hub runs one of its own. It is in the per-environment
+sequence above for that reason.
 
 Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without `COMPONENT`) runs `terragrunt run --all -- apply`, which handles ordering automatically.
 
