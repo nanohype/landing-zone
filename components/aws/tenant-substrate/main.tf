@@ -39,3 +39,42 @@ module "tenant" {
   backup_policy   = var.backup_policy
   tags            = local.tags
 }
+
+# The operator scopes each tenant's Secrets Manager grant to exactly the secret
+# its own Aurora cluster owns, and it cannot compose that ARN itself: RDS derives
+# the managed secret's name from the cluster's AWS-generated resource id
+# (rds!cluster-<id>), so the <env>-<tenant>-<datastore> convention every other
+# grant is scoped by has nothing to bind to here. Without a published ARN the
+# only available scope is the shared rds!cluster-* prefix, which every Aurora
+# cluster in the account matches — no scope at all, and one tenant holding every
+# other tenant's master credentials.
+#
+# The subtree is keyed on the full cluster name, so co-located sibling clusters
+# stay isolated and the path sits inside the /eks-agent-platform/<cluster>/ tree
+# the operator already sweeps. That sweep decodes the keys it knows and ignores
+# the rest, so these parameters are additive to it.
+locals {
+  # Keys come from the declaration rather than from the module's output: the
+  # secret ARN is unknown until apply, and a for_each whose keys depend on an
+  # unknown cannot be planned. The declaration is static, so the key set is too.
+  relational_secret_arns = {
+    for entry in flatten([
+      for tenant, t in var.tenants : [
+        for d in t.datastores : {
+          key = "${tenant}/${d.name}"
+          arn = module.tenant[tenant].datastores[d.name].secret_arn
+        } if d.kind == "relational"
+      ]
+    ]) : entry.key => entry.arn
+  }
+}
+
+resource "aws_ssm_parameter" "master_secret_arn" {
+  for_each = local.relational_secret_arns
+
+  name        = "/eks-agent-platform/${var.cluster_name}/tenant-substrate/${each.key}/master_secret_arn"
+  description = "ARN of the RDS-managed master-user secret for this tenant's Aurora cluster. Read by the eks-agent-platform operator to scope the tenant role's Secrets Manager grant to this one secret."
+  type        = "String"
+  value       = each.value
+  tags        = local.tags
+}

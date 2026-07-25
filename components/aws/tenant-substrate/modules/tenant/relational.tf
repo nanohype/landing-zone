@@ -24,8 +24,12 @@ module "relational" {
   database_name   = "app_${replace(each.key, "-", "_")}"
   master_username = "app_admin"
 
-  # RDS manages the master credential in Secrets Manager; the operator publishes
-  # the resolved secret name into the CR status so the chart reads one place.
+  # RDS manages the master credential in Secrets Manager, under a name it derives
+  # from the cluster's own AWS-generated resource id — so the ARN is knowable only
+  # after apply, never by convention. The parent component publishes it to SSM,
+  # which is what lets the operator scope this tenant's Secrets Manager grant to
+  # this one secret rather than to the rds!cluster-* prefix every Aurora cluster
+  # in the account shares.
   manage_master_user_password = true
 
   vpc_id               = var.vpc_id

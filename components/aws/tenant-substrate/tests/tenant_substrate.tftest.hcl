@@ -242,3 +242,58 @@ run "rejects_unknown_kind" {
 
   expect_failures = [var.tenants]
 }
+
+# ── the operator's scoping contract: one SSM parameter per relational datastore ──
+#
+# The tenant role's Secrets Manager grant is scoped to the ARN published here.
+# RDS names the managed secret from the cluster's own resource id, so there is no
+# convention the operator could scope by instead — if this parameter stops being
+# published the only reachable scope is the rds!cluster-* prefix every Aurora
+# cluster in the account shares, which is how one tenant ends up able to read
+# every other tenant's master credentials. Both directions are asserted: the
+# relational store publishes, and no other kind does.
+run "relational_publishes_its_master_secret_arn_and_no_other_kind_does" {
+  command = plan
+
+  # The mocked provider returns no master_user_secret block, which collapses the
+  # module's `try(...)` to null and makes the parameter unwritable. A real apply
+  # always populates it — manage_master_user_password = true guarantees it — so
+  # the override supplies what RDS would, in the AWS-generated shape the whole
+  # scoping problem stems from.
+  override_module {
+    target = module.tenant.module.relational
+    outputs = {
+      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-alpha-main"
+      cluster_endpoint = "development-alpha-main.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_master_user_secret = [{
+        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+      }]
+    }
+  }
+
+  variables {
+    tenants = {
+      alpha = {
+        datastores = [
+          { name = "main", kind = "relational" },
+          { name = "docs", kind = "objectStore" },
+        ]
+      }
+    }
+  }
+
+  assert {
+    condition     = length(aws_ssm_parameter.master_secret_arn) == 1
+    error_message = "one SSM parameter per relational datastore, and none for any other kind"
+  }
+
+  assert {
+    condition     = contains(keys(aws_ssm_parameter.master_secret_arn), "alpha/main")
+    error_message = "the relational datastore's master-secret ARN is not published"
+  }
+
+  assert {
+    condition     = aws_ssm_parameter.master_secret_arn["alpha/main"].name == "/eks-agent-platform/development-platform/tenant-substrate/alpha/main/master_secret_arn"
+    error_message = "the parameter must sit in the /eks-agent-platform/<cluster>/ subtree the operator sweeps, keyed by tenant and datastore"
+  }
+}
