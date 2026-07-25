@@ -47,6 +47,49 @@ every component).
 | `GITHUB_SHA` | short commit → the `Revision` tag; `"local"` off-CI |
 | `AWS_ROLE_ARN` | the OIDC deploy role CI assumes (repo Variable; unset ⇒ Plan jobs skip green) |
 
+## Input precedence
+
+**An ambient `TF_VAR_*` environment variable beats a leaf's `inputs` value for the same
+variable.** This is the opposite of the natural assumption, and it is load-bearing in two
+directions, so it is worth stating plainly.
+
+The mechanism: terragrunt passes `inputs` to tofu *through* the environment, setting each
+entry as `TF_VAR_<name>`. It does not overwrite a variable already set in the parent process.
+Terragrunt documents the resulting order, highest priority first:
+
+1. explicitly set `TF_VAR_*` environment variables
+2. `inputs` set in `terragrunt.hcl` (including everything merged in from `_envcommon`)
+3. variable defaults in the component
+
+So it is a vendor contract, not a quirk of one version.
+
+### Consequence 1 — an injected `TF_VAR` silently overrides a deliberate leaf value
+
+Anything that exports `TF_VAR_*` onto the terragrunt runner — CI, a day-0 installer, a
+shell — wins over what the committed leaf carefully set for that environment. Injecting a
+value unconditionally is therefore not a no-op when the tree already has an opinion; it
+replaces that opinion silently, with no plan diff to review and nothing in the leaf to
+suggest it happened.
+
+The practical rule for anything that injects: inject a value only when it differs from the
+default, so that "unset" and "set to the default" stay distinguishable. Otherwise a knob
+that looks inert quietly overrides per-environment tuning.
+
+`TERRAGRUNT_ACCOUNT_ID` above is the sanctioned instance of this pattern — the leaf carries a
+placeholder precisely so the environment can win.
+
+### Consequence 2 — no `TF_VAR` can rescue an unapplied `dependency`
+
+A `dependency` block is evaluated while terragrunt *parses* the unit's config, before any
+tofu process exists — and `TF_VAR_*` only ever reaches that process. So an unresolvable
+dependency output fails `terragrunt init` just as hard as `apply`, and there is no
+environment variable that gets past it.
+
+That is why a leaf under `live/aws/workload-*/` may not depend on a unit outside its own
+account directory: such a leaf cannot be brought up at all, regardless of what a caller
+supplies. `scripts/check-account-local-deps.sh` enforces it; cross-account worked examples
+live in `live/aws/reference-adopt/`.
+
 ## Component-specific — `live/_envcommon/aws/<component>.hcl`
 
 Beyond the common inputs, each component declares its own. The ones an operator
@@ -139,7 +182,9 @@ Posture is a fragile, per-run choice, so it is owned by
 [rackctl](https://github.com/rackctl/rackctl), not committed. rackctl's `cluster` phase
 reads `cluster.endpointPublicAccess` and `cluster.endpointAllowlist` from `rackctl.yaml`
 and exports them onto the terragrunt runner as two `TF_VAR`s that layer over the generic
-committed tree:
+committed tree (see [Input precedence](#input-precedence) — an ambient `TF_VAR` wins, which
+is what makes this seam work, and what makes unconditional injection of any *other* knob
+dangerous):
 
 | `TF_VAR` | Carries | Shape |
 |----------|---------|-------|
