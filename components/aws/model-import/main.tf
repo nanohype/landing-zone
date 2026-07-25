@@ -1,22 +1,39 @@
 ################################################################################
-# model-import — account-and-region-scoped substrate for Bedrock Custom Model
-# Import: open-weight models served through the ordinary Bedrock runtime with no
-# GPU nodes (see the open-weights plan). Two resources, both account+region
-# scoped so they outlive any single cluster:
+# model-import — the IMPORT-TIME substrate for Bedrock Custom Model Import:
+# open-weight models served through the ordinary Bedrock runtime with no GPU
+# nodes (see the open-weights plan). Two resources:
 #
 #   - the S3 staging bucket where open-weight files land in Hugging Face format
 #     before an import job copies them into Bedrock's managed storage, and
 #   - the IAM service role Bedrock assumes to read those files during a
 #     CreateModelImportJob.
 #
-# Deliberately cluster-independent. An imported Bedrock model is an
-# account+region resource that outlives any one cluster, so this substrate has
-# no dependency on the cluster or on the secrets CMK (a per-cluster fan-out):
-# tearing a cluster down must not orphan or destroy a model another cluster is
-# serving, and an account-scoped bucket must not be encrypted under a
-# cluster-scoped key. Importing a model is a deliberate, infrequent,
-# account-level act run out of band — the operator does not own it — and a
-# ModelGateway route then references the resulting imported-model ARN.
+# What this component does not own is the imported model. AWS manages and stores
+# imported custom models itself, in AWS-managed storage scoped to the account and
+# encrypted at rest by Bedrock. The S3 URI is read only while the import job runs,
+# and the role's trust is pinned to model-import-job/* below, so it cannot be
+# assumed at inference time at all.
+#
+# So destroying this component removes three things — the ability to run a NEW
+# import, the staged source needed to re-import, and the SSM discovery
+# parameters — and does not affect an already-imported model's availability to
+# anything. That is why the substrate is safe to tear down alongside the
+# environment that created it, and why the import runbook's teardown treats
+# deleting the model and emptying this bucket as two independent acts.
+#
+# Two residual hazards, both real:
+#
+#   - an import job in flight when this is destroyed fails, because the role it
+#     assumed and the source it reads both disappear under it, and
+#   - force_destroy deletes staged weights permanently. They are re-uploadable
+#     from the upstream model, which is what makes the guard acceptable, but
+#     re-staging a large weight set costs time and transfer.
+#
+# Cluster-independent, and staying that way. Nothing here depends on the cluster
+# or on the per-cluster secrets CMK (a per-cluster fan-out), because importing a
+# model is a deliberate, infrequent, account-level act run out of band — the
+# operator does not own it — and a ModelGateway route on any cluster in the
+# account then references the resulting imported-model ARN.
 ################################################################################
 
 data "aws_caller_identity" "current" {}
@@ -26,14 +43,29 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
   partition  = data.aws_partition.current.partition
 
-  # Account+region-scoped names. The bucket carries the account id + region
-  # because S3's namespace is global; the role carries the region because IAM is
-  # account-global and two regions in one account must not mint the same role
-  # name (the region-model collision lesson).
-  staging_bucket   = "${local.account_id}-${var.region}-model-import"
-  import_role_name = "model-import-${var.region}"
+  # Environment+account+region-scoped names. The bucket carries the account id and
+  # region because S3's namespace is global; both names carry the region because
+  # IAM is account-global and two regions in one account must not mint the same
+  # role name (the region-model collision lesson). All of that is unchanged.
+  #
+  # The environment segment is what keeps two environments in ONE account from
+  # colliding, which is not hypothetical — this tree already places several
+  # environments in a single account, and a caller that supplies one account id
+  # for every environment makes it the normal case rather than the exception.
+  # Without the segment a second environment's apply fails
+  # BucketAlreadyOwnedByYou, and its teardown deletes the first environment's
+  # substrate and discovery parameters. Note this is scoping by ENVIRONMENT, not
+  # by cluster: the substrate stays shared by every cluster in an environment,
+  # which is the property the header describes.
+  #
+  # It is also the shape nanohype/standards/resource-naming.json already requires
+  # of an SSM prefix — /<repo>/<environment>/<component>/<key> — which this was
+  # the only component in the org not to follow, and the environment-first bucket
+  # form the cost component's CUR bucket already uses.
+  staging_bucket   = "${var.environment}-${local.account_id}-${var.region}-model-import"
+  import_role_name = "model-import-${var.environment}-${var.region}"
 
-  ssm_prefix = "/eks-agent-platform/model-import"
+  ssm_prefix = "/eks-agent-platform/${var.environment}/model-import"
 
   tags = merge(var.tags, {
     Component = "model-import"
@@ -43,14 +75,20 @@ locals {
 
 ################################################################################
 # Staging bucket. SSE-S3, not a CMK: the files are open-weight models — public
-# data — and the bucket must outlive any cluster, so it must not depend on the
-# per-cluster secrets CMK. Public access blocked; versioned so a re-upload can't
-# silently destroy a prior weight set; non-TLS access denied.
+# data — and the bucket is shared by every cluster in the environment, so it must
+# not depend on any one cluster's secrets CMK. Public access blocked; versioned so
+# a re-upload can't silently destroy a prior weight set; non-TLS access denied.
 ################################################################################
 
 resource "aws_s3_bucket" "staging" {
   bucket = local.staging_bucket
   tags   = local.tags
+
+  # Versioned, so every superseded weight set blocks a delete as well. Guarded in
+  # development only, matching agent-iam and the cost component: that is where the
+  # teardown harnesses run, and outside it a destroy should fail loudly rather
+  # than silently discard a staged weight set someone is mid-import with.
+  force_destroy = var.environment == "development"
 
   lifecycle {
     precondition {
