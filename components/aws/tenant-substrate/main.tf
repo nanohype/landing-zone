@@ -69,6 +69,21 @@ locals {
   }
 }
 
+# The tenant's own key, on the same contract and for the same reason: the ARN is
+# AWS-generated, so the operator cannot compose it and has nothing to scope a KMS
+# grant to without it. One parameter per tenant, whether or not that tenant
+# declares a datastore — the key backs application envelope encryption, which is
+# independent of the datastore vocabulary.
+resource "aws_ssm_parameter" "tenant_kms_key_arn" {
+  for_each = var.tenants
+
+  name        = "/eks-agent-platform/${var.cluster_name}/tenant-substrate/${each.key}/kms_key_arn"
+  description = "ARN of this tenant's customer-managed key. Read by the eks-agent-platform operator to scope the tenant role's KMS grant to the tenant's own key."
+  type        = "String"
+  value       = module.tenant[each.key].kms_key_arn
+  tags        = local.tags
+}
+
 resource "aws_ssm_parameter" "master_secret_arn" {
   for_each = local.relational_secret_arns
 

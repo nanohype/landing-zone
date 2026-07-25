@@ -297,3 +297,80 @@ run "relational_publishes_its_master_secret_arn_and_no_other_kind_does" {
     error_message = "the parameter must sit in the /eks-agent-platform/<cluster>/ subtree the operator sweeps, keyed by tenant and datastore"
   }
 }
+
+# ── every tenant gets its own key, and it reaches the operator ──
+#
+# The key is not a datastore, so it is minted for every tenant regardless of what
+# they declare — a tenant doing envelope encryption in application code needs one
+# whether or not it also has a database. The operator cannot compose a KMS ARN
+# (AWS generates the key id), so without the published parameter there is nothing
+# to scope a grant to except a hand-written policy through extraPolicyArns.
+run "every_tenant_gets_its_own_key_published_for_the_operator" {
+  command = plan
+
+  override_module {
+    target = module.tenant.module.relational
+    outputs = {
+      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-alpha-main"
+      cluster_endpoint = "development-alpha-main.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_master_user_secret = [{
+        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+      }]
+    }
+  }
+
+  variables {
+    tenants = {
+      alpha = { datastores = [{ name = "main", kind = "relational" }] }
+      # No datastores at all — still gets a key, because the key backs
+      # application-side encryption, not a datastore.
+      beta = { datastores = [] }
+    }
+  }
+
+  assert {
+    condition     = length(aws_ssm_parameter.tenant_kms_key_arn) == 2
+    error_message = "every tenant gets a key parameter, including one declaring no datastores"
+  }
+
+  assert {
+    condition     = aws_ssm_parameter.tenant_kms_key_arn["beta"].name == "/eks-agent-platform/development-platform/tenant-substrate/beta/kms_key_arn"
+    error_message = "the key parameter must sit in the subtree the operator sweeps, keyed by tenant"
+  }
+
+}
+
+# Distinctness is asserted on the alias rather than the ARN: a mocked provider
+# hands every aws_kms_key the same placeholder ARN, so comparing ARNs at plan
+# proves nothing. The alias is composed from <environment>-<tenant>, which is
+# known at plan, so it discriminates for the reason that actually matters — each
+# tenant's key is a separate resource named after that tenant.
+run "each_tenant_key_is_named_for_its_own_tenant" {
+  command = plan
+
+  module {
+    source = "./modules/tenant"
+  }
+
+  variables {
+    environment     = "development"
+    account_id      = "123456789012"
+    tenant_id       = "beta"
+    datastores      = []
+    vpc_id          = "vpc-0123456789abcdef0"
+    private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+    cluster_sg_id   = "sg-0123456789abcdef0"
+    backup_policy   = "daily"
+    tags            = {}
+  }
+
+  assert {
+    condition     = aws_kms_alias.tenant.name == "alias/development-beta-tenant"
+    error_message = "the tenant key's alias must be composed from <environment>-<tenant>, so one tenant's key can never be another's"
+  }
+
+  assert {
+    condition     = aws_kms_key.tenant.enable_key_rotation == true
+    error_message = "rotation is free here — nothing pins a key version and both consumers resolve by ARN"
+  }
+}

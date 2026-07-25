@@ -31,6 +31,11 @@ module "relational" {
   # this one secret rather than to the rds!cluster-* prefix every Aurora cluster
   # in the account shares.
   manage_master_user_password = true
+  # Encrypted with the tenant's own key rather than the AWS-managed default, so a
+  # cross-tenant GetSecretValue fails at decrypt even if an IAM statement is ever
+  # over-broad again. AWS does not permit changing this key once RDS is managing
+  # the secret, so it has to be right at create.
+  master_user_secret_kms_key_id = aws_kms_key.tenant.arn
 
   vpc_id               = var.vpc_id
   db_subnet_group_name = aws_db_subnet_group.relational[each.key].name

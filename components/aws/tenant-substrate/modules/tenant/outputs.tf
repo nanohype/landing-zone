@@ -39,3 +39,8 @@ output "datastores" {
     } },
   )
 }
+
+output "kms_key_arn" {
+  description = "ARN of the tenant's own customer-managed key. The parent component publishes it to SSM, where the operator reads it to scope the tenant role's KMS grant — application envelope encryption (GenerateDataKey/Decrypt) and the RDS-managed master secret both resolve to this one key."
+  value       = aws_kms_key.tenant.arn
+}
