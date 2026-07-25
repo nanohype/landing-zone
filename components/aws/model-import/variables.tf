@@ -1,7 +1,5 @@
-# Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
-# tflint-ignore: terraform_unused_declarations
 variable "environment" {
-  description = "Environment name (development, staging, production)"
+  description = "Environment name (development, staging, production). A segment of the staging bucket name, the import role name and the SSM discovery prefix, so two environments sharing one account do not collide."
   type        = string
 
   # Format contract, not a closed enum — same rationale as the other components.
@@ -12,7 +10,7 @@ variable "environment" {
 }
 
 variable "region" {
-  description = "AWS region. The imported model, its staging bucket, and the import service role are all account-and-region-scoped, so the region is part of every derived name."
+  description = "AWS region. The staging bucket and the import service role are region-scoped — S3's namespace is global and IAM's is account-global — so the region is part of every derived name. The imported model itself is stored and managed by Bedrock, not by this component."
   type        = string
 }
 
