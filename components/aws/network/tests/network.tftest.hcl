@@ -15,7 +15,11 @@
 #   adopt (blackhole)  — a 0.0.0.0/0 route with no live target (deleted NAT) fails: the
 #                        preflight asserts the egress target, not just the destination.
 #   mode conflicts     — adopt + a create-mode lever, and create + adopt_* fields, are
-#                        rejected at variable validation, not silently ignored.
+#                        rejected at variable validation, not silently ignored. Covered per
+#                        lever: vpc_cidr, enable_flow_logs, ipam_pool_id. See the note above
+#                        adopt_rejects_vpc_cidr for why nat_gateways carries the same guard
+#                        with no test, and adopt_accepts_max_azs for the input that must
+#                        stay accepted.
 #   ipam netmask range — a netmask below AWS's /28 subnet floor is rejected with the
 #                        variable's own message, not a raw cidrsubnet provider error.
 #   ipam pin day-2     — after apply, a later preview returning a new CIDR does not shift
@@ -183,8 +187,14 @@ run "create_flow_logs_enabled" {
   }
 }
 
-# ── adopt + flow logs: create-mode flow logs stay off in adopt mode (the owner logs) ──
-run "adopt_builds_no_flow_logs" {
+# ── adopt + flow logs: the combination is rejected, not silently ignored ──
+#
+# This asserted the opposite until the guard existed: that adopt mode with
+# enable_flow_logs = true built nothing and that this was correct. It built nothing, but
+# "correct" was wrong — a create-mode lever accepted and discarded is exactly the silent
+# no-op network_mode's contract says this component never permits, and the test was the
+# reason nobody noticed. It now asserts the rejection.
+run "adopt_rejects_flow_logs" {
   command = plan
 
   variables {
@@ -196,9 +206,80 @@ run "adopt_builds_no_flow_logs" {
     enable_flow_logs         = true
   }
 
+  expect_failures = [var.enable_flow_logs]
+}
+
+# ── adopt, levers left alone: the resources are still gated on create mode ──
+#
+# The guards above stop a contradiction being accepted; this proves the gating underneath
+# them is what actually keeps adopt mode from building create-mode infrastructure. Without
+# it, removing a guard would silently start building.
+run "adopt_builds_no_create_mode_infra" {
+  command = plan
+
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+  }
+
   assert {
     condition     = length(module.vpc_flow_logs) == 0
-    error_message = "adopt mode must not build flow logs even with enable_flow_logs = true — the network owner logs the shared VPC"
+    error_message = "adopt mode must not build flow logs — the network owner logs the shared VPC"
+  }
+}
+
+# ── adopt + vpc_cidr: same contract, same rejection ──
+#
+# nat_gateways carries the same adopt-rejecting guard but has NO test here, deliberately.
+# override_data cannot target a resource instance (only a whole resource), so every mocked
+# aws_subnet.adopt_private shares one availability_zone and the adopt preflight forces
+# max_azs = 1 in every adopt run. At max_azs = 1 the only value satisfying the in-between
+# rule is 1 — which is also the adopt sentinel — so any value that trips the adopt guard
+# trips the in-between guard too, and expect_failures cannot tell which fired. A test that
+# passes whether or not the guard exists is worse than none, so the guard is covered by the
+# variable's own comment instead. It is reachable in real use, where max_azs is 3.
+run "adopt_rejects_vpc_cidr" {
+  command = plan
+
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+    vpc_cidr                 = "10.42.0.0/16"
+  }
+
+  expect_failures = [var.vpc_cidr]
+}
+
+# ── max_azs is NOT create-only: adopt uses it, so it must stay accepted ──
+#
+# Guarding max_azs would look consistent with the three above and would be a bug — adopt.tf
+# asserts the adopted private subnets span at least max_azs zones. This test is here so a
+# future consistency pass across these variables fails instead of shipping that.
+run "adopt_accepts_max_azs" {
+  command = plan
+
+  # max_azs = 1 is a NON-DEFAULT value (the default is 3), which is what gives this test its
+  # teeth: a guard of the form `network_mode != "adopt" || max_azs == 3` — the same sentinel
+  # shape the three real guards use — would reject this and fail here. It is also the only
+  # value the mocked provider supports, since override_data cannot vary availability_zone
+  # per subnet instance.
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+  }
+
+  assert {
+    condition     = length(module.vpc) == 0
+    error_message = "adopt mode must not build a VPC; max_azs is a both-modes input and must not be rejected under adopt"
   }
 }
 

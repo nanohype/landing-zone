@@ -144,7 +144,20 @@ carefully:
 | `adopt_public_subnet_ids` | `[]` | adopt, optional (empty = private-only) |
 
 Create-mode levers reject `adopt` mode and vice-versa — a field from the wrong side is a
-contradiction, rejected at variable validation, not silently ignored.
+contradiction, rejected at variable validation, not silently ignored. That holds for
+`vpc_cidr`, `ipam_pool_id`, `ipam_netmask_length` (transitively, via `ipam_pool_id`),
+`nat_gateways`, `enable_flow_logs`, `transit_gateway_id` and `centralized_egress`, and for
+every `adopt_*` input under `create`.
+
+Three inputs are the stated exception, because a guard that cannot exist is worse promised
+than admitted: `enable_s3_gateway_endpoint`, `enable_interface_endpoints` and
+`enable_eks_interface_endpoint` default to `true` — the create-mode "on" value — so there is
+no unset state to distinguish "left alone" from "deliberately set", and rejecting a truthy
+value would reject every adopt leaf's defaults. Under `adopt` they are **inert**: the endpoint
+resources are gated on create mode and the network owner runs endpoints for a shared VPC.
+
+`max_azs` is not an exception and not a create-mode lever — `adopt` uses it to assert the
+adopted private subnets span at least that many zones, so it applies in both modes.
 
 ## Outputs (selected)
 
