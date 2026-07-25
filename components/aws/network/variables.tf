@@ -42,6 +42,18 @@ variable "network_mode" {
   # levers reject adopt mode, the adopt_* inputs reject create mode. Anchoring both halves
   # here instead would make network_mode and the adopt_* variables reference each other and
   # form a validation cycle.
+  #
+  # The contract has one stated exception, because a guard that cannot exist is worse stated
+  # than admitted. enable_s3_gateway_endpoint, enable_interface_endpoints and
+  # enable_eks_interface_endpoint default to TRUE — the create-mode "on" value — so an
+  # adopt-rejecting validation on them would reject every adopt leaf's defaults, and there is
+  # no unset state to distinguish "left alone" from "deliberately on". They are inert under
+  # adopt (their resources are gated on create mode; the owner runs endpoints), and they are
+  # the only inputs here for which "inert" rather than "rejected" is the honest description.
+  #
+  # max_azs is not in that exception list because it is not create-only: adopt mode uses it to
+  # assert the adopted private subnets span at least that many zones (adopt.tf). It is a
+  # both-modes input and must never be given an adopt-rejecting guard.
 }
 
 # --- create-mode inputs -----------------------------------------------------
@@ -49,6 +61,15 @@ variable "vpc_cidr" {
   description = "CIDR block for the VPC (create mode, literal allocation). Mutually exclusive with ipam_pool_id."
   type        = string
   default     = "10.0.0.0/16"
+
+  # adopt mode participates in a VPC it does not own, so its CIDR is the owner's — this input
+  # has nothing to act on. Compared against the default rather than "" because this variable
+  # has a meaningful default: there is no unset state to test, so the default IS the sentinel
+  # (the same shape ipam_pool_id's mutual-exclusion check uses below).
+  validation {
+    condition     = var.network_mode != "adopt" || var.vpc_cidr == "10.0.0.0/16"
+    error_message = "vpc_cidr is a create-mode lever and does not apply when network_mode = adopt — an adopted VPC's CIDR is resolved from the owner. Leave it at its default."
+  }
 }
 
 variable "ipam_pool_id" {
@@ -172,12 +193,27 @@ variable "nat_gateways" {
     condition     = var.nat_gateways == 1 || var.nat_gateways == var.max_azs
     error_message = "nat_gateways must be 1 (a single shared NAT gateway) or equal to max_azs (one NAT gateway per zone). terraform-aws-modules/vpc couples NAT-gateway count to subnet count, so an in-between value like 2 with max_azs = 3 cannot be built and would otherwise silently plan max_azs gateways. Choose 1 for cost or max_azs for per-AZ HA."
   }
+
+  # NAT gateways are create-mode resources; an adopted VPC's egress belongs to its owner. The
+  # default (1) is the sentinel, as with vpc_cidr.
+  validation {
+    condition     = var.network_mode != "adopt" || var.nat_gateways == 1
+    error_message = "nat_gateways is a create-mode lever and does not apply when network_mode = adopt — the network owner runs egress for a shared VPC. Leave it at its default."
+  }
 }
 
 variable "enable_flow_logs" {
   description = "Enable VPC flow logs to CloudWatch (create mode; the owner logs an adopted VPC)"
   type        = bool
   default     = false
+
+  # The description already said the owner logs an adopted VPC; this makes it true rather than
+  # advisory. Setting it under adopt built nothing and reported nothing, which is the silent
+  # no-op network_mode's contract says this component never permits.
+  validation {
+    condition     = var.network_mode != "adopt" || !var.enable_flow_logs
+    error_message = "enable_flow_logs is a create-mode lever and does not apply when network_mode = adopt — the network owner logs a shared VPC. Leave it off."
+  }
 }
 
 variable "enable_s3_gateway_endpoint" {
