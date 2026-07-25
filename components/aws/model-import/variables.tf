@@ -31,3 +31,17 @@ variable "staging_noncurrent_expiration_days" {
   type        = number
   default     = 7
 }
+
+variable "force_destroy_buckets" {
+  description = <<-EOT
+    Allow the staging bucket to be destroyed while it still holds objects, in any environment.
+    Development already allows it unconditionally; this is the opt-in for everywhere else.
+
+    Low stakes here relative to the other components that carry this flag: the bucket holds
+    staged Hugging Face weight files, which are re-uploadable from the upstream model, and the
+    imported model itself is stored by Bedrock and unaffected by anything this component does.
+    The cost of a wrong answer is re-staging, not data loss.
+  EOT
+  type        = bool
+  default     = false
+}

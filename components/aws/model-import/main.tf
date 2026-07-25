@@ -84,11 +84,11 @@ resource "aws_s3_bucket" "staging" {
   bucket = local.staging_bucket
   tags   = local.tags
 
-  # Versioned, so every superseded weight set blocks a delete as well. Guarded in
-  # development only, matching agent-iam and the cost component: that is where the
-  # teardown harnesses run, and outside it a destroy should fail loudly rather
-  # than silently discard a staged weight set someone is mid-import with.
-  force_destroy = var.environment == "development"
+  # Versioned, so every superseded weight set blocks a delete as well. Unconditional in
+  # development, elsewhere opt-in via var.force_destroy_buckets — matching agent-iam and
+  # cluster-addons. Outside a permitted environment a destroy fails loudly rather than
+  # silently discarding a weight set someone may be mid-import with.
+  force_destroy = var.environment == "development" || var.force_destroy_buckets
 
   lifecycle {
     precondition {

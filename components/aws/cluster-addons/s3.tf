@@ -1,23 +1,27 @@
 ################################################################################
 # Addon S3 Buckets
 #
-# Teardown posture, one line per bucket, stated rather than inherited from a
-# module default that a version bump could change:
+# Teardown posture, stated on every bucket rather than inherited from a module
+# default that a version bump could change: force_destroy in development always,
+# and elsewhere only when var.force_destroy_buckets has been applied. That covers
+# velero, loki, tempo and argo-workflows uniformly.
 #
-#   velero          force_destroy = false, always. Cluster backups.
-#   loki, tempo     development only — telemetry, re-emitted by a running cluster.
-#   argo-workflows  development only — workflow artifacts and logs.
+# A still-populated bucket fails BucketNotEmpty, which halts a reverse teardown with
+# the cluster, VPC and NAT gateways standing and billing — so a bucket that refuses
+# to be destroyed does not protect the cluster, it strands it.
 #
-# The development-only expression is the idiom at components/aws/cost/main.tf: a
-# still-populated bucket fails BucketNotEmpty, which halts a reverse teardown
-# with the cluster, VPC and NAT gateways standing and billing, and development is
-# the only environment the teardown harnesses run in.
+# Velero is included, which is worth stating plainly because it holds the cluster's
+# restore points. A cluster here is agent-managed and often short-lived: eks-fleet
+# vends spokes with a ttlDays and a hub reaper deletes them on expiry, so a spoke's
+# own backups are not meant to outlive it. Where they should, velero_backup_policy
+# copies the recovery points into the central vault in the backup account's DR
+# region — and then emptying this bucket is not a loss. That is the mechanism for
+# durable cluster backups; refusing to delete a local copy never was.
 #
-# prevent_destroy is not available here — a lifecycle block is not valid on a
-# module block — so velero's protection is the explicit false below plus the
-# absence of any override. If that ever needs to be a hard guarantee rather than
-# a default, the bucket has to become a first-party aws_s3_bucket resource, the
-# shape fleet-hub and portal-hub use for their crown-jewel state buckets.
+# What keeps the opt-in honest is that force_destroy only takes effect once an apply
+# has landed it in state, so permitting a destroy and performing one are necessarily
+# two separate acts. There is no single command that empties a populated bucket in an
+# environment that has not already said yes.
 ################################################################################
 
 locals {
@@ -39,7 +43,11 @@ locals {
   # object stores: AWS Backup requires S3 Versioning, so a tagged unversioned bucket is
   # selected and then fails every job, reading as covered while unprotected.
   velero_backup_enabled = var.velero_backup_policy != ""
-  velero_tags           = local.velero_backup_enabled ? merge(local.tags, { BackupPolicy = var.velero_backup_policy }) : local.tags
+
+  # Teardown gate for every bucket in this file, velero included. Development is
+  # unconditional; elsewhere it is opt-in. See var.force_destroy_buckets.
+  bucket_force_destroy = var.environment == "development" || var.force_destroy_buckets
+  velero_tags          = local.velero_backup_enabled ? merge(local.tags, { BackupPolicy = var.velero_backup_policy }) : local.tags
 
   # Longest TTL any Velero schedule sets, mirrored from
   # eks-gitops/addons/operations/velero/values.yaml — `weekly` carries
@@ -68,11 +76,12 @@ module "velero_bucket" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 
-  # Never force-destroyed, in any environment. This holds the cluster's restore
-  # points; a teardown that empties it removes the thing that would have made the
-  # teardown recoverable. A destroy here is meant to fail on BucketNotEmpty so
-  # deleting backups stays a deliberate, separate act.
-  force_destroy = false
+  # Deleting restore points is never a side effect: in development, and elsewhere only
+  # once var.force_destroy_buckets has been applied. Both are deliberate — a cluster
+  # with a ttlDays is declared disposable, and its backups are disposable with it. If
+  # they should not be, velero_backup_policy puts the durable copy in the central vault
+  # first, and then emptying this bucket costs nothing.
+  force_destroy = local.bucket_force_destroy
 
   server_side_encryption_configuration = {
     rule = {
@@ -167,7 +176,7 @@ module "loki_bucket" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 
-  force_destroy = var.environment == "development"
+  force_destroy = local.bucket_force_destroy
 
   server_side_encryption_configuration = {
     rule = {
@@ -204,7 +213,7 @@ module "tempo_bucket" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 
-  force_destroy = var.environment == "development"
+  force_destroy = local.bucket_force_destroy
 
   server_side_encryption_configuration = {
     rule = {
@@ -242,7 +251,7 @@ module "argo_workflows_bucket" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 
-  force_destroy = var.environment == "development"
+  force_destroy = local.bucket_force_destroy
 
   server_side_encryption_configuration = {
     rule = {
