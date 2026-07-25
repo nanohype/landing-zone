@@ -167,6 +167,7 @@ teardown() {
   # Destroy substrate in reverse dependency order (agent-iam depends on secrets;
   # both depend on cluster). cluster-bootstrap is in-cluster only (no billable AWS)
   # + finalizer-prone, so it dies with the cluster.
+  local destroy_failed=""
   for c in agent-iam secrets cluster network; do
     log "destroy $c"
     if ! tg "$c" destroy -auto-approve >/dev/null 2>&1; then
@@ -175,7 +176,13 @@ teardown() {
       echo "  destroy $c failed — clearing lock + VPC blockers, retrying"
       clear_lock "$c"
       [ "$c" = network ] && reap_vpc_blockers
-      tg "$c" destroy -auto-approve >/dev/null 2>&1 || echo "  (destroy $c still failing — verify in console)"
+      if ! tg "$c" destroy -auto-approve >/dev/null 2>&1; then
+        # A destroy that fails twice is a run result, not a note. It used to be
+        # echoed and swallowed, so a BucketNotEmpty on agent-iam printed one soft
+        # line and the run still reported PASSED.
+        echo "  (destroy $c still failing — verify in console)"
+        destroy_failed="${destroy_failed}${destroy_failed:+ }$c"
+      fi
     fi
   done
   reap_cluster_orphans
@@ -183,16 +190,29 @@ teardown() {
   # Assert zero-billable: a failed/partial destroy must FAIL LOUDLY, not just
   # report (a mid-teardown network drop once left a cluster up silently). Every
   # check is scoped to THIS run's tag/name so it never flags other infra.
+  #
+  # S3 is in the set because the buckets are what a teardown actually wedges on:
+  # agent-iam's three and cluster-addons' four all derive from the same
+  # <cluster>-<account>-<region>- prefix, and a versioned or still-populated one
+  # fails BucketNotEmpty. Leaving S3 out meant the one resource class that halts
+  # the reverse teardown was the one class the assertion could not see.
   log "zero-billable check (us-$REGION)"
-  local eks nat eip vpc ebs leak="" r
+  local eks nat eip vpc ebs s3 leak="" r
   eks=$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" --query 'cluster.name' --output text 2>/dev/null || true)
   nat=$(aws ec2 describe-nat-gateways --region "$REGION" --filter Name=tag:Project,Values=landing-zone "Name=tag:Environment,Values=$ENVIRONMENT" Name=state,Values=available,pending --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null | tr '\t' ' ')
   eip=$(aws ec2 describe-addresses --region "$REGION" --filters Name=tag:Project,Values=landing-zone "Name=tag:Environment,Values=$ENVIRONMENT" --query 'Addresses[].PublicIp' --output text 2>/dev/null | tr '\t' ' ')
   vpc=$(aws ec2 describe-vpcs --region "$REGION" --filters Name=tag:Project,Values=landing-zone "Name=tag:Environment,Values=$ENVIRONMENT" Name=isDefault,Values=false --query 'Vpcs[].VpcId' --output text 2>/dev/null | tr '\t' ' ')
   ebs=$(aws ec2 describe-volumes --region "$REGION" --filters "Name=tag-key,Values=kubernetes.io/cluster/$CLUSTER" --query 'Volumes[].VolumeId' --output text 2>/dev/null | tr '\t' ' ')
-  echo "  EKS: ${eks:-clean}"; echo "  NAT: ${nat:-clean}"; echo "  EIP: ${eip:-clean}"; echo "  VPC: ${vpc:-clean}"; echo "  EBS: ${ebs:-clean}"
-  for r in "$eks" "$nat" "$eip" "$vpc" "$ebs"; do if [ -n "$r" ] && [ "$r" != "None" ]; then leak=1; fi; done
+  s3=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, '${CLUSTER}-${E2E_ACCOUNT_ID}-${REGION}-')].Name" --output text 2>/dev/null | tr '\t' ' ')
+  echo "  EKS: ${eks:-clean}"; echo "  NAT: ${nat:-clean}"; echo "  EIP: ${eip:-clean}"; echo "  VPC: ${vpc:-clean}"; echo "  EBS: ${ebs:-clean}"; echo "  S3:  ${s3:-clean}"
+  for r in "$eks" "$nat" "$eip" "$vpc" "$ebs" "$s3"; do if [ -n "$r" ] && [ "$r" != "None" ]; then leak=1; fi; done
   rm -rf "$WORK"
+  if [ -n "$destroy_failed" ]; then
+    echo -e "\n\033[1;31m!!! DESTROY FAILED after retry: $destroy_failed !!!\033[0m" >&2
+    echo "    A component that will not destroy leaves everything below it in the" >&2
+    echo "    reverse order standing. Check the console before re-running." >&2
+    RESULT="FAILED"
+  fi
   if [ -n "$leak" ]; then
     echo -e "\n\033[1;31m!!! BILLABLE RESOURCES REMAIN — MANUAL CLEANUP REQUIRED (see above) !!!\033[0m" >&2
     echo "    Re-run 'task e2e' (teardown is idempotent) or clear them in the console." >&2
