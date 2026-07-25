@@ -4,10 +4,11 @@
 # datastore name that would overflow a service's identifier limit — ElastiCache's
 # 40-char replication_group_id, S3's 63-char bucket name — is rejected by the
 # component's `tenants` validation before any resource is composed, and so is a
-# tenant key that doubles the environment token or an unknown kind. (2) Every
-# datastore the module mints carries the BackupPolicy tag the central backup plan
-# selects on, a redrive-configured queue gets its dead-letter queue, and a Retain
-# datastore gets the AWS-level deletion backstop.
+# tenant key that doubles the environment token or an unknown kind. (2) The
+# BackupPolicy tag the central backup plan selects on lands on exactly the
+# datastore kinds AWS Backup can protect and on none of the others, a
+# redrive-configured queue gets its dead-letter queue, and a Retain datastore
+# gets the AWS-level deletion backstop.
 #
 # Runs at command = plan against a mocked AWS provider (no account, no network).
 
@@ -81,6 +82,36 @@ run "every_kind_provisions_and_is_backup_tagged" {
     condition     = aws_s3_bucket.object_store["obj"].tags["BackupPolicy"] == "daily"
     error_message = "the S3 bucket must carry BackupPolicy=daily"
   }
+  # (Aurora is composed through the upstream rds-aurora module rather than a direct
+  # aws_rds_cluster resource, so its tags are not addressable here.)
+
+  # ...and withheld from the kinds AWS Backup cannot protect. SQS, ElastiCache and MSK are
+  # absent from the supported-resource table, so the plan's tag selector never matches them:
+  # the tag would not fail a job, it would silently select nothing while reading as
+  # "protected daily" to anyone auditing the account.
+  assert {
+    condition     = !contains(keys(aws_sqs_queue.queue["q"].tags), "BackupPolicy")
+    error_message = "an SQS queue must NOT carry BackupPolicy — AWS Backup does not support SQS, so the tag would claim protection nothing delivers"
+  }
+  assert {
+    condition     = !contains(keys(aws_sqs_queue.dlq["q"].tags), "BackupPolicy")
+    error_message = "a dead-letter queue must NOT carry BackupPolicy either — same unsupported resource type as the queue it drains"
+  }
+  assert {
+    condition     = !contains(keys(aws_elasticache_replication_group.cache["ca"].tags), "BackupPolicy")
+    error_message = "an ElastiCache replication group must NOT carry BackupPolicy — AWS Backup does not support ElastiCache, and a cache is rebuilt from its source of record"
+  }
+  assert {
+    condition     = !contains(keys(aws_msk_serverless_cluster.stream["st"].tags), "BackupPolicy")
+    error_message = "an MSK Serverless cluster must NOT carry BackupPolicy — AWS Backup does not support MSK; stream durability is managed replication plus per-topic retention"
+  }
+
+  # Withholding the backup claim must not cost the ineligible kinds their identity: the
+  # tenant tags drive cost attribution and are unrelated to durability.
+  assert {
+    condition     = aws_elasticache_replication_group.cache["ca"].tags["Tenant"] == "t1"
+    error_message = "withholding BackupPolicy must not drop the tenant tags"
+  }
 
   # a Retain datastore (the default policy) gets the AWS-level deletion backstop.
   assert {
@@ -149,7 +180,7 @@ run "unversioned_object_store_is_not_backup_tagged" {
   }
   assert {
     condition     = aws_dynamodb_table.key_value["kv"].tags["BackupPolicy"] == "daily"
-    error_message = "the versioning gate is S3-only; other datastore kinds keep BackupPolicy unconditionally"
+    error_message = "the versioning gate is S3-only; it must not withhold BackupPolicy from the other eligible kinds"
   }
 }
 

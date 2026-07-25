@@ -50,5 +50,5 @@ resource "aws_msk_serverless_cluster" "stream" {
     }
   }
 
-  tags = local.data_tags
+  tags = local.datastore_tags["stream"]
 }

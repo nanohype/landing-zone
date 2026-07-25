@@ -65,5 +65,5 @@ module "relational" {
   backup_retention_period = each.value.relational.backup_retention_days
   deletion_protection     = each.value.relational.deletion_protection
 
-  tags = local.data_tags
+  tags = local.datastore_tags["relational"]
 }

@@ -19,7 +19,7 @@ resource "aws_sqs_queue" "dlq" {
   message_retention_seconds   = each.value.queue.message_retention_seconds
   sqs_managed_sse_enabled     = true
 
-  tags = local.data_tags
+  tags = local.datastore_tags["queue"]
 }
 
 resource "aws_sqs_queue" "queue" {
@@ -37,5 +37,5 @@ resource "aws_sqs_queue" "queue" {
     maxReceiveCount     = each.value.queue.max_receive_count
   }) : null
 
-  tags = local.data_tags
+  tags = local.datastore_tags["queue"]
 }

@@ -47,5 +47,5 @@ resource "aws_dynamodb_table" "key_value" {
   # destroy is blocked until the protection is explicitly cleared.
   deletion_protection_enabled = each.value.deletion_policy == "Retain"
 
-  tags = local.data_tags
+  tags = local.datastore_tags["keyValue"]
 }

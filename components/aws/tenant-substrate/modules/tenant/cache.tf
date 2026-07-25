@@ -57,5 +57,5 @@ resource "aws_elasticache_replication_group" "cache" {
 
   apply_immediately = var.environment != "production"
 
-  tags = local.data_tags
+  tags = local.datastore_tags["cache"]
 }

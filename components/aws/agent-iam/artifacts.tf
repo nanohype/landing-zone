@@ -51,6 +51,22 @@ locals {
   eval_reports_bucket    = "${var.cluster_name}-${local.account_id}-${var.region}-eval-reports"
   access_logs_bucket     = "${var.cluster_name}-${local.account_id}-${var.region}-access-logs"
   artifacts_ssm_prefix   = "/eks-agent-platform/${var.cluster_name}/model-artifacts"
+
+  # Tags for the two data buckets. The BackupPolicy tag is opt-in (see
+  # var.artifacts_backup_policy): central backup is billed, so it is not switched on
+  # unannounced — but versioning alone does not survive losing the bucket, the account, or
+  # the region, and these hold the sole copies of every tenant's adapters and the record of
+  # what scored what.
+  #
+  # No versioning gate here, unlike tenant-substrate's object stores: AWS Backup requires S3
+  # Versioning, and both buckets enable it unconditionally, so the prerequisite holds by
+  # construction rather than per-bucket choice.
+  #
+  # The access-logs bucket is deliberately excluded: it is derived from access to the two
+  # buckets it logs, and its own retention rule already bounds it.
+  artifacts_data_tags = var.artifacts_backup_policy != "" ? merge(local.tags, {
+    BackupPolicy = var.artifacts_backup_policy
+  }) : local.tags
 }
 
 ################################################################################
@@ -133,7 +149,7 @@ resource "aws_s3_bucket_policy" "access_logs" {
 
 resource "aws_s3_bucket" "model_artifacts" {
   bucket = local.model_artifacts_bucket
-  tags   = local.tags
+  tags   = local.artifacts_data_tags
 
   # Versioned, so every noncurrent version blocks a delete too. Development-only
   # — outside it these are the sole copies of every tenant's adapters.
@@ -209,7 +225,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "model_artifacts" {
 
 resource "aws_s3_bucket" "eval_reports" {
   bucket = local.eval_reports_bucket
-  tags   = local.tags
+  tags   = local.artifacts_data_tags
 
   # Versioned, same reasoning as model-artifacts. Eval reports are regenerable by
   # re-running the eval, but only if the model they scored still exists.
