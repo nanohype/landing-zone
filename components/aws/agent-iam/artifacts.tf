@@ -24,20 +24,29 @@
 # cap (12 chars of base in us-west-2, fewer in a longer region); the
 # preconditions below assert every derived name against S3's 63-char limit.
 #
-# Teardown posture: force_destroy in development only, the idiom already used at
-# components/aws/cost/main.tf. agent-iam sits on the core apply chain, so it is
-# on every automated teardown path — scripts/e2e.sh destroys it on every run —
+# Teardown posture: force_destroy unconditionally in development, and elsewhere only
+# when var.force_destroy_buckets says so. agent-iam sits on the core apply chain, so
+# it is on every automated teardown path — scripts/e2e.sh destroys it on every run —
 # and a versioned or still-populated bucket fails BucketNotEmpty, which halts a
-# reverse teardown with the cluster, VPC and NAT gateways still standing and
-# billing. Development is the only environment those harnesses run in.
+# reverse teardown with the cluster, VPC and NAT gateways still standing and billing.
 #
-# Outside development the guard stays off deliberately, and the asymmetry is the
-# point: model-artifacts holds the sole copies of every tenant's adapters on this
-# cluster, so a staging or production destroy must fail loudly rather than
-# quietly succeed. Deleting them is then an explicit act, not a side effect.
+# The opt-in is not a convenience. A cluster here is agent-managed and often
+# short-lived (eks-fleet vends spokes with a ttlDays and reaps them on expiry), so a
+# teardown is an ordinary lifecycle event. What keeps it honest is that force_destroy
+# only takes effect once an apply has landed it in state: allowing the destroy and
+# performing it are necessarily two separate acts, so no single command reaches a
+# populated production bucket.
+#
+# Default-off outside development still matters, because model-artifacts holds the
+# sole copies of every tenant's adapters on this cluster. A destroy that has not been
+# explicitly permitted fails loudly rather than quietly succeeding.
 ################################################################################
 
 locals {
+  # Teardown gate, shared by all three buckets below. Development is unconditional because it is
+  # where the teardown harnesses run; elsewhere it is opt-in via var.force_destroy_buckets.
+  bucket_force_destroy = var.environment == "development" || var.force_destroy_buckets
+
   model_artifacts_bucket = "${var.cluster_name}-${local.account_id}-${var.region}-model-artifacts"
   eval_reports_bucket    = "${var.cluster_name}-${local.account_id}-${var.region}-eval-reports"
   access_logs_bucket     = "${var.cluster_name}-${local.account_id}-${var.region}-access-logs"
@@ -59,7 +68,7 @@ resource "aws_s3_bucket" "access_logs" {
   # Log delivery is continuous, so this bucket is never empty at teardown even
   # though its objects self-expire below. See the header for why the guard is
   # development-only.
-  force_destroy = var.environment == "development"
+  force_destroy = local.bucket_force_destroy
 
   lifecycle {
     precondition {
@@ -128,7 +137,7 @@ resource "aws_s3_bucket" "model_artifacts" {
 
   # Versioned, so every noncurrent version blocks a delete too. Development-only
   # — outside it these are the sole copies of every tenant's adapters.
-  force_destroy = var.environment == "development"
+  force_destroy = local.bucket_force_destroy
 
   lifecycle {
     precondition {
@@ -204,7 +213,7 @@ resource "aws_s3_bucket" "eval_reports" {
 
   # Versioned, same reasoning as model-artifacts. Eval reports are regenerable by
   # re-running the eval, but only if the model they scored still exists.
-  force_destroy = var.environment == "development"
+  force_destroy = local.bucket_force_destroy
 
   lifecycle {
     precondition {

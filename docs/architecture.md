@@ -236,6 +236,19 @@ bucket exactly. Set `velero_backup_policy` on `cluster-addons` to a plan key to 
 same substrate: the plan copies its recovery points to the central vault, cross-account and
 cross-region. Default off, because it costs money and no one should discover that on a bill.
 
+**A cluster's own restore points are not meant to outlive it.** Clusters here are agent-managed
+and often short-lived — an eks-fleet `Cluster` with `ttlDays > 0` is tagged `Lifecycle=ephemeral`
+and the hub reaper deletes it on expiry — so a bucket that refuses to be emptied does not protect
+a disposable cluster, it strands one, with the VPC and NAT gateways still billing. Hence
+`force_destroy_buckets` on `agent-iam`, `cluster-addons` (Velero included) and `model-import`:
+unconditional in development, opt-in elsewhere.
+
+The opt-in is inherently two acts rather than one flag, because `force_destroy` has no effect
+until a successful apply has landed it in state. Permitting a destroy and performing one cannot
+be the same command. And the two mechanisms compose in the right order: if cluster state has to
+survive the cluster, `velero_backup_policy` puts the durable copy in the central vault, and only
+then is emptying the local bucket free. Refusing to delete a local copy was never durability.
+
 **S3 needs versioning to be backed up at all.** AWS Backup requires S3 Versioning on the bucket,
 so both producers withhold the `BackupPolicy` tag from an unversioned bucket rather than tagging
 it and letting every backup job fail — a tag that promises protection it cannot deliver is worse

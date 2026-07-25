@@ -93,3 +93,27 @@ variable "artifacts_access_logs_retention_days" {
   type        = number
   default     = 365
 }
+
+variable "force_destroy_buckets" {
+  description = <<-EOT
+    Allow this component's S3 buckets to be destroyed while they still hold objects, in any
+    environment. Development already allows it unconditionally; this is the opt-in for
+    everywhere else.
+
+    It exists because a cluster here is an agent-managed, often short-lived thing — eks-fleet
+    vends spokes with a ttlDays and a hub reaper that deletes them on expiry — so a teardown is
+    an ordinary lifecycle event rather than an emergency. Without this, a reverse teardown of a
+    non-development spoke wedges on BucketNotEmpty and leaves the cluster, VPC and NAT gateways
+    standing and billing, which is the outcome the teardown existed to prevent.
+
+    Deliberately two acts, not one flag: force_destroy has no effect until a successful apply
+    lands it in state, so an operator (or an agent) must apply with this set and only then
+    destroy. There is no single command that reaches a populated production bucket.
+
+    What it exposes: model-artifacts holds the sole copies of every tenant's fine-tuned adapters
+    on this cluster, and eval-reports the reports scoring them. Neither is regenerable from the
+    substrate. Leave it false unless the cluster is genuinely disposable.
+  EOT
+  type        = bool
+  default     = false
+}

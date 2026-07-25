@@ -90,3 +90,27 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "force_destroy_buckets" {
+  description = <<-EOT
+    Allow this component's S3 buckets to be destroyed while they still hold objects, in any
+    environment. Development already allows it unconditionally; this is the opt-in for
+    everywhere else, and it INCLUDES the Velero bucket.
+
+    Velero is included because a cluster here is agent-managed and often short-lived — eks-fleet
+    vends spokes with a ttlDays and a hub reaper deletes them on expiry — so a cluster's own
+    restore points are not meant to outlive it by default. A backup that blocks the teardown of
+    the disposable thing it was protecting is not protection, it is a stuck reaper and a running
+    NAT gateway.
+
+    Deliberately two acts, not one flag: force_destroy has no effect until a successful apply
+    lands it in state, so allowing the destroy and performing it cannot be the same command.
+
+    If cluster state needs to survive the cluster, that is what velero_backup_policy is for —
+    it copies the recovery points to the central vault in the backup account's DR region, so
+    emptying this bucket stops being lossy. Set that first if the restore points matter, then
+    this.
+  EOT
+  type        = bool
+  default     = false
+}
