@@ -203,13 +203,44 @@ Seven multi-tenant components, each accepting a `var.tenants` map:
 |-----------|---------|------|
 | **observability** | CloudWatch alarms (CPU, memory, node count, API errors), dashboards, severity SNS notification topics + their ARNs on the `/eks-agent-platform/` contract | sre |
 | **secrets** | KMS customer-managed keys + Secrets Manager (External Secrets Operator reads them with a `cluster-addons` Pod Identity role) | security |
-| **backup** | AWS Backup plans with configurable schedules/retention, vault lock for production | sre |
+| **backup** | AWS Backup plans with configurable schedules/retention, vault lock for production. Selects by `BackupPolicy` tag — see [What backs up what](#what-backs-up-what) | sre |
 | **break-glass** | Emergency access IAM roles with SNS alerts on assumption | security |
 | **service-quotas** | CloudWatch alarms for service quota utilization | platform |
 | **cost** | AWS Budgets alerts, Cost Anomaly Detection | finops |
 | **dns** | Route53 zones, subdomain delegation, ACM certificates | platform |
 | **github-oidc** | GitHub Actions OIDC provider + repo-scoped (`repo:<org>/<repo>:*`) deploy role — no long-lived keys | platform |
 | **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed on the hub. | *(required input)* |
+
+### What backs up what
+
+There are two backup systems, and the split is forced rather than chosen. Knowing which owns
+what is the difference between "we have backups" and "we have backups of the thing that broke".
+
+| | AWS Backup | Velero |
+|---|---|---|
+| covers | tenant datastores — databases, key-value tables, object stores, streams | Kubernetes API objects and persistent-volume snapshots |
+| selected by | the `BackupPolicy` tag | Velero's own schedules, in-cluster |
+| owned by | `backup` (per account) + `org-backup` (org-wide floor) + `shared-backup` (the central vault) | the `velero` addon, with an S3 bucket from `cluster-addons` |
+| durable copy | a second account, in the DR region, on a multi-region CMK | the cluster's own account and region, unless opted in below |
+
+**AWS Backup cannot cover cluster state.** It has no EKS resource type, so no amount of tagging
+makes it capture a Deployment, a ConfigMap or a CRD. And nothing stamps `BackupPolicy` on the
+EBS volumes behind cluster PVs — the `gp3` StorageClass carries no tag spec — so the volumes are
+not reached either. Velero is the only thing covering that layer. Conversely Velero has no
+visibility into an RDS instance or a DynamoDB table. Neither system is a superset of the other.
+
+**Cluster-state backups do not get the durability the datastores get, by default.**
+`shared-backup` exists because "a backup that lives only in the account it protects is one
+account event away from being gone with the thing it protected" — and that describes the Velero
+bucket exactly. Set `velero_backup_policy` on `cluster-addons` to a plan key to bring it into the
+same substrate: the plan copies its recovery points to the central vault, cross-account and
+cross-region. Default off, because it costs money and no one should discover that on a bill.
+
+**S3 needs versioning to be backed up at all.** AWS Backup requires S3 Versioning on the bucket,
+so both producers withhold the `BackupPolicy` tag from an unversioned bucket rather than tagging
+it and letting every backup job fail — a tag that promises protection it cannot deliver is worse
+than no tag, because it reads as covered. Consequence: suspending versioning on an `objectStore`
+datastore opts it out of central backup.
 
 ### Agent-Platform Layer
 

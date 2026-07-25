@@ -33,6 +33,34 @@ variable "velero_enabled" {
   default     = true
 }
 
+variable "velero_backup_policy" {
+  description = <<-EOT
+    BackupPolicy tag value for the Velero bucket, naming a plan key in the backup component
+    (e.g. "daily"). Empty (default) leaves the bucket untagged and out of central backup.
+
+    Set it to bring cluster-state restore points into the same durability substrate the tenant
+    datastores use: the plan copies recovery points to the central vault in the backup
+    account's DR region, so a cluster's backups survive the loss of the account that produced
+    them. Without it, Velero's restore points live only in the account and region of the
+    cluster they protect.
+
+    Setting this also enables S3 Versioning on the bucket, which AWS Backup requires for S3.
+    Both are billed — the backup itself, and the noncurrent versions Velero's own TTL deletes
+    leave behind (bounded to 7 days here).
+  EOT
+  type        = string
+  default     = ""
+
+  # A tag value that matches no plan key selects nothing, so it would read as protected while
+  # being ignored — the same silent-coverage failure the versioning gate exists to prevent.
+  # This cannot verify the key exists in the backup component (a separate root), so it only
+  # asserts the shape the plan keys use.
+  validation {
+    condition     = var.velero_backup_policy == "" || can(regex("^[a-z][a-z0-9-]*$", var.velero_backup_policy))
+    error_message = "velero_backup_policy must be empty or a lowercase plan key (letters, digits, hyphens) matching a key in the backup component's backup_plans."
+  }
+}
+
 variable "opencost_enabled" {
   description = "Enable OpenCost Pod Identity role"
   type        = bool
