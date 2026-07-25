@@ -23,6 +23,18 @@
 # the tightest cluster-scoped name in the org and sets the clusterName length
 # cap (12 chars of base in us-west-2, fewer in a longer region); the
 # preconditions below assert every derived name against S3's 63-char limit.
+#
+# Teardown posture: force_destroy in development only, the idiom already used at
+# components/aws/cost/main.tf. agent-iam sits on the core apply chain, so it is
+# on every automated teardown path — scripts/e2e.sh destroys it on every run —
+# and a versioned or still-populated bucket fails BucketNotEmpty, which halts a
+# reverse teardown with the cluster, VPC and NAT gateways still standing and
+# billing. Development is the only environment those harnesses run in.
+#
+# Outside development the guard stays off deliberately, and the asymmetry is the
+# point: model-artifacts holds the sole copies of every tenant's adapters on this
+# cluster, so a staging or production destroy must fail loudly rather than
+# quietly succeed. Deleting them is then an explicit act, not a side effect.
 ################################################################################
 
 locals {
@@ -43,6 +55,11 @@ resource "aws_s3_bucket" "access_logs" {
   #checkov:skip=CKV_AWS_21:versioning is intentionally off — this is a server-access-log sink; log records are write-once and regenerable, so versioning adds cost with no recovery value.
   bucket = local.access_logs_bucket
   tags   = local.tags
+
+  # Log delivery is continuous, so this bucket is never empty at teardown even
+  # though its objects self-expire below. See the header for why the guard is
+  # development-only.
+  force_destroy = var.environment == "development"
 
   lifecycle {
     precondition {
@@ -108,6 +125,10 @@ resource "aws_s3_bucket_policy" "access_logs" {
 resource "aws_s3_bucket" "model_artifacts" {
   bucket = local.model_artifacts_bucket
   tags   = local.tags
+
+  # Versioned, so every noncurrent version blocks a delete too. Development-only
+  # — outside it these are the sole copies of every tenant's adapters.
+  force_destroy = var.environment == "development"
 
   lifecycle {
     precondition {
@@ -180,6 +201,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "model_artifacts" {
 resource "aws_s3_bucket" "eval_reports" {
   bucket = local.eval_reports_bucket
   tags   = local.tags
+
+  # Versioned, same reasoning as model-artifacts. Eval reports are regenerable by
+  # re-running the eval, but only if the model they scored still exists.
+  force_destroy = var.environment == "development"
 
   lifecycle {
     precondition {

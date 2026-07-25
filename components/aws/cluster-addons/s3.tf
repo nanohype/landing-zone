@@ -1,6 +1,39 @@
 ################################################################################
 # Addon S3 Buckets
+#
+# Teardown posture, one line per bucket, stated rather than inherited from a
+# module default that a version bump could change:
+#
+#   velero          force_destroy = false, always. Cluster backups.
+#   loki, tempo     development only — telemetry, re-emitted by a running cluster.
+#   argo-workflows  development only — workflow artifacts and logs.
+#
+# The development-only expression is the idiom at components/aws/cost/main.tf: a
+# still-populated bucket fails BucketNotEmpty, which halts a reverse teardown
+# with the cluster, VPC and NAT gateways standing and billing, and development is
+# the only environment the teardown harnesses run in.
+#
+# prevent_destroy is not available here — a lifecycle block is not valid on a
+# module block — so velero's protection is the explicit false below plus the
+# absence of any override. If that ever needs to be a hard guarantee rather than
+# a default, the bucket has to become a first-party aws_s3_bucket resource, the
+# shape fleet-hub and portal-hub use for their crown-jewel state buckets.
 ################################################################################
+
+locals {
+  # Longest TTL any Velero schedule sets, mirrored from
+  # eks-gitops/addons/operations/velero/values.yaml — `weekly` carries
+  # ttl: 2160h, and no per-environment values file overrides either schedule.
+  # This is the number to change here when that one changes there.
+  velero_longest_schedule_ttl_days = 90
+
+  # The bucket's own expiry is only a backstop behind Velero's TTL, so it has to
+  # outlast it. Derived rather than written as a literal: if these two numbers can
+  # drift, they will, and the failure mode is silent — S3 deletes an object while
+  # Velero still advertises it as a valid restore point, so the loss surfaces at
+  # restore time instead of at backup time.
+  velero_backup_expiry_days = local.velero_longest_schedule_ttl_days + 30
+}
 
 # Velero backup storage (conditional)
 module "velero_bucket" {
@@ -15,6 +48,12 @@ module "velero_bucket" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 
+  # Never force-destroyed, in any environment. This holds the cluster's restore
+  # points; a teardown that empties it removes the thing that would have made the
+  # teardown recoverable. A destroy here is meant to fail on BucketNotEmpty so
+  # deleting backups stays a deliberate, separate act.
+  force_destroy = false
+
   server_side_encryption_configuration = {
     rule = {
       apply_server_side_encryption_by_default = {
@@ -28,7 +67,7 @@ module "velero_bucket" {
       id      = "cleanup"
       enabled = true
       expiration = {
-        days = var.environment == "production" ? 90 : 30
+        days = local.velero_backup_expiry_days
       }
     },
   ]
@@ -93,6 +132,8 @@ module "loki_bucket" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 
+  force_destroy = var.environment == "development"
+
   server_side_encryption_configuration = {
     rule = {
       apply_server_side_encryption_by_default = {
@@ -127,6 +168,8 @@ module "tempo_bucket" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+
+  force_destroy = var.environment == "development"
 
   server_side_encryption_configuration = {
     rule = {
@@ -163,6 +206,8 @@ module "argo_workflows_bucket" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+
+  force_destroy = var.environment == "development"
 
   server_side_encryption_configuration = {
     rule = {
