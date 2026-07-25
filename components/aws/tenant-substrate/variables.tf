@@ -29,9 +29,8 @@ variable "cluster_sg_id" {
   type        = string
 }
 
-# tflint-ignore: terraform_unused_declarations
 variable "cluster_name" {
-  description = "Name of the EKS cluster. Declared for envcommon interface uniformity; this component provisions datastores only — the operator owns the Pod Identity association that consumes the cluster name."
+  description = "Name of the EKS cluster. Keys the SSM subtree this component publishes each tenant's RDS-managed master-secret ARN into, matching the /eks-agent-platform/<cluster>/ tree the operator sweeps — so co-located sibling clusters resolve isolated substrates."
   type        = string
 }
 

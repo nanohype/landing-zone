@@ -1,5 +1,5 @@
 output "datastores" {
-  description = "Per-datastore identifiers keyed by datastore name — kind, ARN, connection endpoint, and (relational only) the RDS-managed master-secret ARN. The operator publishes these into the Platform CR status so the tenant chart reads one predictable place."
+  description = "Per-datastore identifiers keyed by datastore name — kind, ARN, connection endpoint, and (relational only) the RDS-managed master-secret ARN. The parent component publishes the relational secret ARNs to SSM, where the operator reads them to scope each tenant's Secrets Manager grant."
   value = merge(
     { for k, m in module.relational : k => {
       kind       = "relational"
