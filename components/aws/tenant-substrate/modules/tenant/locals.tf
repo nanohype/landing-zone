@@ -18,6 +18,20 @@ locals {
   tenant_tags = merge(var.tags, { Tenant = var.tenant_id })
   data_tags   = merge(local.tenant_tags, { BackupPolicy = var.backup_policy })
 
+  # S3 is the one datastore kind where the BackupPolicy tag is not sufficient on its own.
+  # AWS Backup requires S3 Versioning on the bucket
+  # (docs.aws.amazon.com/aws-backup/latest/devguide/s3-backups.html), and an object store's
+  # versioning is a per-datastore choice that may be Suspended. A tagged, unversioned bucket
+  # is selected by the central plan and then fails every backup job, which reads as covered
+  # while being unprotected — so the tag is withheld instead, and the bucket carries the
+  # tenant tags alone. Suspending versioning on an object store therefore opts it out of
+  # central backup, deliberately and visibly.
+  object_store_tags = {
+    for name, d in local.object_stores : name => (
+      d.object_store.versioning ? local.data_tags : local.tenant_tags
+    )
+  }
+
   # DynamoDB requires an attribute definition for every key referenced by the
   # table or any of its indexes. Collect partition + sort + all GSI keys and
   # dedupe by name so the dynamic attribute blocks are unique.

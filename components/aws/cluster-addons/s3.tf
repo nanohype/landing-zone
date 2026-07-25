@@ -21,6 +21,26 @@
 ################################################################################
 
 locals {
+  # Cluster-state backups are the one thing in this repo the central backup substrate does
+  # not reach. AWS Backup has no EKS resource type, so it cannot capture Kubernetes objects
+  # under any tagging — Velero is the only thing that does, and its restore points land in
+  # this bucket, in the same account and region as the cluster they protect. That is exactly
+  # the shape components/aws/shared-backup exists to fix for tenant datastores: "a backup
+  # that lives only in the account it protects is one account event away from being gone
+  # with the thing it protected."
+  #
+  # Setting velero_backup_policy to a plan key in the backup component brings this bucket
+  # into that substrate — the plan copies its recovery points to the central vault in the
+  # backup account's DR region — reusing what already exists rather than building a second
+  # mechanism. Default empty, so nothing changes for an operator who has not opted in and
+  # no backup cost appears unannounced.
+  #
+  # The tag is withheld unless versioning is on, for the same reason as tenant-substrate's
+  # object stores: AWS Backup requires S3 Versioning, so a tagged unversioned bucket is
+  # selected and then fails every job, reading as covered while unprotected.
+  velero_backup_enabled = var.velero_backup_policy != ""
+  velero_tags           = local.velero_backup_enabled ? merge(local.tags, { BackupPolicy = var.velero_backup_policy }) : local.tags
+
   # Longest TTL any Velero schedule sets, mirrored from
   # eks-gitops/addons/operations/velero/values.yaml — `weekly` carries
   # ttl: 2160h, and no per-environment values file overrides either schedule.
@@ -62,6 +82,13 @@ module "velero_bucket" {
     }
   }
 
+  # Versioning is off unless the bucket is opted into central backup, where AWS Backup
+  # requires it. Velero manages its own object lifecycle, so versioning buys nothing on its
+  # own and costs storage on every TTL delete.
+  versioning = {
+    enabled = local.velero_backup_enabled
+  }
+
   lifecycle_rule = [
     {
       id      = "cleanup"
@@ -69,12 +96,20 @@ module "velero_bucket" {
       expiration = {
         days = local.velero_backup_expiry_days
       }
+      # Only meaningful once versioning is on. Velero deletes an expired backup's objects,
+      # which under versioning leaves delete markers and noncurrent versions behind; without
+      # this they accumulate forever and are billed forever. Kept short because a noncurrent
+      # version here is a superseded copy of something Velero already replaced — the durable
+      # copy is the recovery point in the central vault, not the noncurrent object.
+      noncurrent_version_expiration = {
+        noncurrent_days = 7
+      }
     },
   ]
 
   attach_deny_insecure_transport_policy = true
 
-  tags = local.tags
+  tags = local.velero_tags
 }
 
 # Publish the Velero backup bucket name to SSM so cluster-bootstrap can stamp it

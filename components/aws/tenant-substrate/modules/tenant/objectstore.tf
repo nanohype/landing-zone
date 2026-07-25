@@ -17,7 +17,8 @@ resource "aws_s3_bucket" "object_store" {
 
   bucket = local.object_store_buckets[each.key]
 
-  tags = local.data_tags
+  # BackupPolicy only when versioning is Enabled — see object_store_tags in locals.tf.
+  tags = local.object_store_tags[each.key]
 }
 
 resource "aws_s3_bucket_versioning" "object_store" {

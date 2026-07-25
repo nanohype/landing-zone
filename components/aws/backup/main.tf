@@ -152,6 +152,28 @@ resource "aws_iam_role_policy_attachment" "restore" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
 }
 
+# S3 needs its own pair. The two policies above do not cover it: AWS documents that to
+# back up, copy and restore S3 resources the role must additionally carry
+# AWSBackupServiceRolePolicyForS3Backup and ...ForS3Restore
+# (docs.aws.amazon.com/aws-backup/latest/devguide/s3-backups.html). Without them a plan
+# still SELECTS a BackupPolicy-tagged bucket and every S3 backup job fails on
+# permissions — so the tag promises protection the role cannot deliver, which is worse
+# than an untagged bucket because it reads as covered.
+#
+# S3 backup also requires S3 Versioning on the bucket, which is a per-bucket property this
+# component cannot assert. The producers enforce it: tenant-substrate stamps BackupPolicy
+# on an object store only when its versioning is Enabled, and cluster-addons does the same
+# for the velero bucket.
+resource "aws_iam_role_policy_attachment" "s3_backup" {
+  role       = aws_iam_role.backup.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForS3Backup"
+}
+
+resource "aws_iam_role_policy_attachment" "s3_restore" {
+  role       = aws_iam_role.backup.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForS3Restore"
+}
+
 ################################################################################
 # Notifications
 ################################################################################

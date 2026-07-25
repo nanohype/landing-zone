@@ -106,6 +106,53 @@ run "every_kind_provisions_and_is_backup_tagged" {
 }
 
 # ── default policy leaves a queue without a DLQ ──
+# ── an unversioned object store is NOT backup-tagged ──
+#
+# AWS Backup requires S3 Versioning on the bucket, so a BackupPolicy tag on an unversioned
+# bucket is selected by the central plan and then fails every job — it reads as protected
+# while being unprotected. Suspending versioning opts the datastore out of central backup,
+# and the tag has to reflect that or it lies. Every other datastore kind is unaffected.
+run "unversioned_object_store_is_not_backup_tagged" {
+  command = plan
+
+  module {
+    source = "./modules/tenant"
+  }
+
+  variables {
+    environment     = "development"
+    account_id      = "123456789012"
+    tenant_id       = "t1"
+    vpc_id          = "vpc-0123456789abcdef0"
+    private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+    cluster_sg_id   = "sg-0123456789abcdef0"
+    backup_policy   = "daily"
+    tags            = {}
+    datastores = [
+      { name = "kept", kind = "objectStore", object_store = { versioning = true } },
+      { name = "loose", kind = "objectStore", object_store = { versioning = false } },
+      { name = "kv", kind = "keyValue", key_value = { partition_key = { name = "pk", type = "S" } } },
+    ]
+  }
+
+  assert {
+    condition     = aws_s3_bucket.object_store["kept"].tags["BackupPolicy"] == "daily"
+    error_message = "a versioned object store must carry BackupPolicy so the central plan selects it"
+  }
+  assert {
+    condition     = !contains(keys(aws_s3_bucket.object_store["loose"].tags), "BackupPolicy")
+    error_message = "an unversioned object store must NOT carry BackupPolicy — AWS Backup requires S3 Versioning, so the tag would promise protection that cannot be delivered"
+  }
+  assert {
+    condition     = aws_s3_bucket.object_store["loose"].tags["Tenant"] == "t1"
+    error_message = "withholding BackupPolicy must not drop the tenant tags"
+  }
+  assert {
+    condition     = aws_dynamodb_table.key_value["kv"].tags["BackupPolicy"] == "daily"
+    error_message = "the versioning gate is S3-only; other datastore kinds keep BackupPolicy unconditionally"
+  }
+}
+
 run "queue_without_redrive_has_no_dlq" {
   command = plan
 
