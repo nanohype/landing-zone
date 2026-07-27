@@ -26,9 +26,9 @@ output "datastores" {
       secret_arn = null
     } },
     { for k, r in aws_elasticache_replication_group.cache : k => {
-      kind       = "cache"
-      arn        = r.arn
-      endpoint   = r.primary_endpoint_address
+      kind     = "cache"
+      arn      = r.arn
+      endpoint = r.primary_endpoint_address
       # AUTH token secret — transit encryption alone is not a credential.
       secret_arn = aws_secretsmanager_secret.cache_auth[k].arn
     } },
