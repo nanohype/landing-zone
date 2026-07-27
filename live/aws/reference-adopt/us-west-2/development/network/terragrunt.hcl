@@ -49,9 +49,18 @@ inputs = {
   adopt_private_subnet_ids = dependency.shared_network.outputs.private_subnet_ids
   adopt_public_subnet_ids  = dependency.shared_network.outputs.public_subnet_ids
 
-  # No create-mode levers here: nat_gateways, enable_flow_logs, enable_interface_endpoints,
-  # ipam_pool_id, transit_gateway_id, and centralized_egress are all owner-side
-  # concerns the shared-network leaf runs. The last three hard-reject network_mode =
-  # adopt in their variable validations; the rest are simply inert in adopt mode
-  # (their resources are gated on create_mode), so an adopt leaf sets none of them.
+  # No create-mode levers here — all owner-side concerns the shared-network leaf runs.
+  # Split matches components/aws/network/README.md so a reader copying this leaf gets
+  # the same half the component itself documents:
+  #
+  #   hard-reject adopt (variable validation — leave at defaults or plan fails):
+  #     vpc_cidr, ipam_pool_id, nat_gateways, enable_flow_logs, transit_gateway_id,
+  #     centralized_egress
+  #
+  #   inert under adopt (resources gated on create_mode; defaults stay true without
+  #   rejecting, because a truthy guard would reject every adopt leaf's defaults):
+  #     enable_s3_gateway_endpoint, enable_interface_endpoints,
+  #     enable_eks_interface_endpoint
+  #
+  # An adopt leaf sets none of them.
 }
