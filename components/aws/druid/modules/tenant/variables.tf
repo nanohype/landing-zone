@@ -56,6 +56,12 @@ variable "cluster_name" {
   type        = string
 }
 
+variable "force_destroy_buckets" {
+  description = "Opt-in, outside development, to empty S3 buckets on destroy and skip Aurora's final snapshot. Development always allows both."
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply"
   type        = map(string)

@@ -58,6 +58,12 @@ variable "cluster_name" {
   type        = string
 }
 
+variable "force_destroy_buckets" {
+  description = "Opt-in, outside development, to empty data-lake buckets on destroy. Development always allows it."
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply"
   type        = map(string)

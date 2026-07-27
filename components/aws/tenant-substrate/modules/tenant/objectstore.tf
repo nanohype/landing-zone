@@ -17,6 +17,11 @@ resource "aws_s3_bucket" "object_store" {
 
   bucket = local.object_store_buckets[each.key]
 
+  # development always; elsewhere opt-in via force_destroy_buckets. Versioning
+  # defaults Enabled, so without this BucketNotEmpty is stickier than an
+  # unversioned bucket (delete markers count as current versions).
+  force_destroy = local.allow_teardown
+
   # BackupPolicy only when versioning is Enabled — see object_store_tags in locals.tf.
   tags = local.object_store_tags[each.key]
 }

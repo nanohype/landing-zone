@@ -77,6 +77,12 @@ variable "backup_policy" {
   type        = string
 }
 
+variable "force_destroy_buckets" {
+  description = "Opt-in, outside development, to empty object-store buckets on destroy and skip Aurora's final snapshot. Development always allows both."
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags applied to every resource."
   type        = map(string)

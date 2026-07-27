@@ -86,6 +86,28 @@ variable "tenants" {
   }
 }
 
+variable "force_destroy_buckets" {
+  description = <<-EOT
+    Allow this component's S3 data-lake buckets to be emptied on destroy, in any environment.
+    Development already allows it unconditionally; this is the opt-in for everywhere else.
+
+    It exists because a cluster here is an agent-managed, often short-lived thing — eks-fleet
+    vends spokes with a ttlDays and a hub reaper that deletes them on expiry — so a teardown is
+    an ordinary lifecycle event rather than an emergency. Without this, a reverse teardown of a
+    non-development spoke wedges on BucketNotEmpty (curated is versioned) and leaves the
+    cluster, VPC and NAT gateways standing and billing.
+
+    Deliberately two acts, not one flag: force_destroy has no effect until a successful apply
+    lands it in state, so an operator (or an agent) must apply with this set and only then
+    destroy. There is no single command that reaches a populated production curated bucket.
+
+    What it exposes: the tenant's raw / staging / curated lakehouse data. Leave it false
+    unless the cluster is genuinely disposable.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "team" {
   description = "Owning team for this component"
   type        = string

@@ -29,15 +29,16 @@ module "tenant" {
   for_each = var.tenants
   source   = "./modules/tenant"
 
-  environment     = var.environment
-  account_id      = local.account_id
-  tenant_id       = each.key
-  datastores      = each.value.datastores
-  vpc_id          = var.vpc_id
-  private_subnets = var.private_subnet_ids
-  cluster_sg_id   = var.cluster_sg_id
-  backup_policy   = var.backup_policy
-  tags            = local.tags
+  environment           = var.environment
+  account_id            = local.account_id
+  tenant_id             = each.key
+  datastores            = each.value.datastores
+  vpc_id                = var.vpc_id
+  private_subnets       = var.private_subnet_ids
+  cluster_sg_id         = var.cluster_sg_id
+  backup_policy         = var.backup_policy
+  force_destroy_buckets = var.force_destroy_buckets
+  tags                  = local.tags
 }
 
 # The operator scopes each tenant's Secrets Manager grant to exactly the secret

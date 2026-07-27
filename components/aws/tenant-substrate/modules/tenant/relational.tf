@@ -65,5 +65,11 @@ module "relational" {
   backup_retention_period = each.value.relational.backup_retention_days
   deletion_protection     = each.value.relational.deletion_protection
 
+  # Always set one of these so destroy is reachable once deletion_protection is
+  # clear. Development / force_destroy_buckets skip the snapshot; otherwise take
+  # a final snapshot under a stable per-datastore identifier.
+  skip_final_snapshot       = local.allow_teardown
+  final_snapshot_identifier = local.allow_teardown ? null : "${local.prefix}-${each.key}-final"
+
   tags = local.datastore_tags["relational"]
 }

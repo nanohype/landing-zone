@@ -12,11 +12,12 @@ module "tenant" {
   for_each = var.tenants
   source   = "./modules/tenant"
 
-  environment   = var.environment
-  region        = var.region
-  account_id    = local.account_id
-  tenant_id     = each.key
-  tenant_config = each.value
-  cluster_name  = var.cluster_name
-  tags          = local.tags
+  environment           = var.environment
+  region                = var.region
+  account_id            = local.account_id
+  tenant_id             = each.key
+  tenant_config         = each.value
+  cluster_name          = var.cluster_name
+  force_destroy_buckets = var.force_destroy_buckets
+  tags                  = local.tags
 }
