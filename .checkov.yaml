@@ -64,8 +64,9 @@ skip-check:
   - CKV2_AWS_3 # GuardDuty org/region — detector enablement is an org-security decision documented there
   - CKV2_AWS_45 # AWS Config all-resources recorder — scoped recording is the accepted cost posture
   - CKV2_AWS_18 # EFS in AWS Backup plan — model cache is re-hydratable from S3
-  - CKV2_AWS_50 # ElastiCache Multi-AZ — single-node rate-limit cache; loss = cold cache
-  - CKV_AWS_31 # ElastiCache transit encryption/auth — in-VPC rate-limit cache on private subnets only
+  - CKV2_AWS_50 # ElastiCache Multi-AZ — single-node rate-limit cache; loss = cold cache (AUTH + transit encryption still required — see tenant-substrate cache.tf)
+  # CKV_AWS_31 removed: tenant-substrate cache now enables transit encryption + AUTH.
+  # Reaching the security group alone is no longer sufficient to read the cache.
   - CKV_AWS_51 # ECR immutable tags — mutable tags are the model-image retag flow
   - CKV_AWS_382 # SG egress 0.0.0.0/0 — workers need general egress (pulls, AWS APIs) via NAT
   - CKV2_AWS_5 # SG not attached — SGs are consumed by sibling components/tenants at deploy time

@@ -95,7 +95,11 @@ Pods assume IAM roles via EKS Pod Identity — the EKS control plane injects cre
 
 ### Multi-Tenant Pattern
 
-Seven components (`druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`) accept a `var.tenants` map. Each key becomes a separate set of AWS resources via `for_each`. Tenants are isolated at the resource level (separate databases, buckets, queues, IAM roles).
+A few components still accept a `var.tenants` map (`druid`, `pipeline`, `governance`) and mint
+per-tenant resources via `for_each`. The default path for a new Platform tenant is
+**`tenant-substrate`**: declare datastores on the Platform CR; the component provisions them.
+Tenants are isolated at the resource level (separate databases, buckets, queues, caches with AUTH,
+IAM roles).
 
 ### GitOps Boundary
 

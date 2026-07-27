@@ -407,8 +407,8 @@ resource "aws_cloudwatch_metric_alarm" "cluster_failed_node_count" {
 # which also orders creation after them) and owns the SNS action for its tier; the
 # children stay actionless. The critical composite pages once for a hard-down
 # cluster (API 5xx OR failed nodes); the degraded composite raises one ticket for
-# a broadly saturated one (CPU OR memory OR pod restarts). Both resolve to the
-# info tier once on OK. Publishes to local topics in create mode, to the central
+# a broadly saturated one (CPU OR memory). Both resolve to the info tier once on
+# OK. Publishes to local topics in create mode, to the central
 # shared-observability topics in adopt mode — local.topic_arns resolves either.
 ################################################################################
 
