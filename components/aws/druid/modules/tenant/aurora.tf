@@ -11,6 +11,13 @@ locals {
   # length fits 63.
   bucket_prefix = "${local.prefix}-${var.account_id}"
   tenant_tags   = merge(var.tags, { Tenant = var.tenant_id })
+
+  # Teardown posture: development always allows a full destroy; elsewhere it is
+  # opt-in via force_destroy_buckets (same two-act contract as agent-iam). Without
+  # skip_final_snapshot=true OR a final_snapshot_identifier, the provider refuses
+  # the destroy with "final_snapshot_identifier is required when skip_final_snapshot
+  # is false" — which is the wedge that stranded every environment before this local.
+  allow_teardown = var.environment == "development" || var.force_destroy_buckets
 }
 
 resource "aws_db_subnet_group" "this" {
@@ -85,6 +92,12 @@ module "aurora" {
 
   backup_retention_period = var.tenant_config.rds_backup_days
   deletion_protection     = var.tenant_config.deletion_protection
+
+  # Always set one of these so destroy is reachable once deletion_protection is
+  # clear. Development / force_destroy_buckets skip the snapshot; otherwise take
+  # a final snapshot under a stable identifier so a careful teardown still works.
+  skip_final_snapshot       = local.allow_teardown
+  final_snapshot_identifier = local.allow_teardown ? null : "${local.prefix}-aurora-final"
 
   tags = local.tenant_tags
 }

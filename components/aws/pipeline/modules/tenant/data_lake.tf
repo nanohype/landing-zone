@@ -10,6 +10,11 @@ locals {
   # component's `tenants` variable validation asserts the composed length fits 63.
   bucket_prefix = "${local.prefix}-${var.account_id}"
   tenant_tags   = merge(var.tags, { Tenant = var.tenant_id })
+
+  # Teardown posture: development always; elsewhere opt-in via force_destroy_buckets
+  # (same two-act contract as agent-iam). Curated is versioned, so without this
+  # BucketNotEmpty is stickier than an unversioned bucket.
+  allow_teardown = var.environment == "development" || var.force_destroy_buckets
 }
 
 resource "aws_kms_key" "datalake" {
@@ -27,7 +32,8 @@ module "raw_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.bucket_prefix}-raw"
+  bucket        = "${local.bucket_prefix}-raw"
+  force_destroy = local.allow_teardown
 
   block_public_acls       = true
   block_public_policy     = true
@@ -65,7 +71,8 @@ module "staging_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.bucket_prefix}-staging"
+  bucket        = "${local.bucket_prefix}-staging"
+  force_destroy = local.allow_teardown
 
   block_public_acls       = true
   block_public_policy     = true
@@ -98,7 +105,8 @@ module "curated_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.bucket_prefix}-curated"
+  bucket        = "${local.bucket_prefix}-curated"
+  force_destroy = local.allow_teardown
 
   block_public_acls       = true
   block_public_policy     = true

@@ -1,6 +1,13 @@
 locals {
   prefix = "${var.environment}-${var.tenant_id}"
 
+  # Teardown posture: development always allows a full destroy; elsewhere it is
+  # opt-in via force_destroy_buckets (same two-act contract as agent-iam / druid).
+  # Without skip_final_snapshot=true OR a final_snapshot_identifier the provider
+  # refuses Aurora destroy; without force_destroy a versioned objectStore refuses
+  # S3 destroy. Both halves of the wedge land here.
+  allow_teardown = var.environment == "development" || var.force_destroy_buckets
+
   # Group the flat datastore list into a per-kind map keyed by datastore name,
   # so each resource file's for_each is one kind's stores. Datastore names are
   # unique within a Platform (the CR keys them as a listType=map), so the map

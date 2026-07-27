@@ -6,6 +6,10 @@ locals {
   # length fits 63.
   bucket_prefix = "${local.prefix}-${var.account_id}"
   tenant_tags   = merge(var.tags, { Tenant = var.tenant_id })
+
+  # Teardown posture: development always; elsewhere opt-in via force_destroy_buckets
+  # (same two-act contract as agent-iam). Both audit and guardrails are versioned.
+  allow_teardown = var.environment == "development" || var.force_destroy_buckets
 }
 
 resource "aws_kms_key" "audit" {
@@ -24,7 +28,8 @@ module "audit_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 4.0"
 
-  bucket = "${local.bucket_prefix}-audit"
+  bucket        = "${local.bucket_prefix}-audit"
+  force_destroy = local.allow_teardown
 
   block_public_acls       = true
   block_public_policy     = true

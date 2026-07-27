@@ -8,6 +8,9 @@ module "deepstorage_bucket" {
 
   bucket = "${local.bucket_prefix}-deepstorage"
 
+  # development always; elsewhere opt-in via force_destroy_buckets (see aurora.tf).
+  force_destroy = local.allow_teardown
+
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
@@ -31,6 +34,8 @@ module "indexlogs_bucket" {
   version = "~> 4.0"
 
   bucket = "${local.bucket_prefix}-indexlogs"
+
+  force_destroy = local.allow_teardown
 
   block_public_acls       = true
   block_public_policy     = true
@@ -65,6 +70,8 @@ module "msq_bucket" {
   version = "~> 4.0"
 
   bucket = "${local.bucket_prefix}-msq"
+
+  force_destroy = local.allow_teardown
 
   block_public_acls       = true
   block_public_policy     = true
