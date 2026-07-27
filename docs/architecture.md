@@ -37,12 +37,10 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
          +----------------+----------------+
          |                |                |
     +----v------+   +-----v------+  +------v----------+
-    |  druid*   |   |  gateway   |  | cluster-addons  |
-    | pipeline* |   |    rag     |  |cluster-bootstrap|
-    |   llm*    |   |   mlops    |  +-----------------+
-    +-----------+   | governance |
-                    |observability|
-                    |  secrets   |
+    |  druid*   |   | governance |  | cluster-addons  |
+    | pipeline* |   |observability| |cluster-bootstrap|
+    +-----------+   |  secrets   |  +-----------------+
+                    |tenant-sub* |
                     +------------+
 
   * = also depends on network (vpc_id, private_subnet_ids)
@@ -80,10 +78,6 @@ The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resou
 | **cluster-bootstrap** | cluster | cluster_name, cluster_endpoint, cluster_certificate_authority_data |
 | **druid** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name |
 | **pipeline** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name |
-| **llm** | network, cluster | vpc_id, private_subnet_ids, cluster_sg_id, cluster_name |
-| **gateway** | cluster | cluster_sg_id, cluster_name |
-| **rag** | cluster | cluster_sg_id, cluster_name |
-| **mlops** | cluster | cluster_sg_id, cluster_name |
 | **governance** | cluster | cluster_sg_id, cluster_name |
 | **observability** | cluster | cluster_name |
 | **secrets** | cluster | cluster_name |
@@ -185,17 +179,17 @@ the shared-hub blast-radius discussion.
 
 ### Workload Layer
 
-Seven multi-tenant components, each accepting a `var.tenants` map:
+Per-app multi-tenant components still in this tree accept a `var.tenants` map.
+New tenant stateful substrate is **not** a new per-app component: it is declared
+on `Platform.spec.datastores` and provisioned by `tenant-substrate`.
 
 | Component | Per-Tenant Resources | Team |
 |-----------|---------------------|------|
 | **druid** | Aurora MySQL (Serverless v2), MSK cluster, S3 buckets, Secrets Manager, SSM parameters, Pod Identity roles | data-platform |
 | **pipeline** | AWS Batch compute, S3 data lake (raw/staging/curated), Glue catalog, MSK, Step Functions, Pod Identity roles | data-platform |
-| **gateway** | API Gateway v2, WAF with bot control, Cognito user pool, usage plans, Pod Identity roles | platform |
-| **llm** | EFS storage, DynamoDB, SQS queues, S3 model storage, ECR, Secrets Manager, Pod Identity roles | ml-platform |
-| **mlops** | DynamoDB tables, ECR repos, S3 (datasets/artifacts), SQS, Pod Identity roles | ml-platform |
-| **rag** | OpenSearch Serverless, S3 document storage, DynamoDB (conversations), Pod Identity roles | ml-platform |
 | **governance** | S3 audit/guardrail buckets, DynamoDB, EventBridge, Pod Identity roles | security |
+| **tenant-substrate** | Aurora / DynamoDB / S3 / SQS / ElastiCache (TLS + AUTH) / MSK from `Platform.spec.datastores` | per-tenant |
+| **\*-platform** leaves | App-shaped thin leaves (`competitive-intelligence-platform`, `digest-pipeline-platform`, `incident-response-platform`, `slack-knowledge-bot-platform`) that wire a tenant into the substrate | per-app |
 
 ### Operational Layer
 

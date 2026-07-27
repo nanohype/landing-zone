@@ -382,17 +382,6 @@ resource "aws_iam_role_policy" "operator" {
         Resource = "arn:${local.partition}:kms:${var.region}:${local.account_id}:key/*"
       },
       {
-        # The Platform controller calls ensureBucketPolicy() on the model-artifacts
-        # bucket on every reconcile: it reads the current bucket policy and writes
-        # back one granting each Platform's tenant roles access to their own prefix.
-        # The operator's policy carried no S3 statement at all, so every reconcile
-        # failed with AccessDenied on s3:GetBucketPolicy and the Platform never left
-        # phase=Provisioning.
-        #
-        # Bucket-policy verbs only, and only on the two buckets this component owns.
-        # Object-level access is deliberately NOT granted here — the operator brokers
-        # the buckets, it does not read or write their contents; the tenant roles it
-        # writes the policy for do that.
         # Read + lifecycle the per-Platform session role. iam:UpdateRole is required
         # for MaxSessionDuration, which is what spec.attribution.sessionRoleMaxDurationSeconds
         # sets — the operator was failing here with AccessDenied on iam:GetRole
@@ -480,32 +469,35 @@ resource "aws_iam_role_policy" "operator" {
         }
       },
       {
+        # The Platform controller calls ensureBucketPolicy() on the model-artifacts
+        # bucket on every reconcile: it reads the current bucket policy and writes
+        # back one granting each Platform's tenant roles access to their own prefix.
+        # Without these verbs every reconcile failed with AccessDenied on
+        # s3:GetBucketPolicy and the Platform never left phase=Provisioning.
+        #
+        # Bucket-policy verbs only, and only on the model-artifacts bucket this
+        # component owns for the operator to manage. Object-level access is
+        # deliberately NOT granted — the operator brokers the bucket policy, it
+        # does not read or write object contents; the tenant roles it writes the
+        # policy for do that. The eval-reports bucket policy is terraform-owned
+        # and static, so it is intentionally absent from this Resource list.
+        #
+        # DeleteBucketPolicy, not merely Put: when the LAST Platform is finalized,
+        # its statements are the only ones on the bucket — a single-tenant install
+        # has exactly one Platform — so removing them leaves no policy at all. S3
+        # will not let that be expressed as an empty statement list
+        # (MalformedPolicy: Statement is empty!). The operator must therefore
+        # DELETE the policy (see eks-agent-platform platform_kms_s3.go). Without
+        # this permission the finalizer 403s instead of 400s, which is the same
+        # outcome: it retries forever, the Platform hangs in Terminating, and
+        # rackctl destroy stalls on platforms.platform.nanohype.dev did not finalize.
         Sid    = "ArtifactBucketPolicy"
         Effect = "Allow"
         Action = [
           "s3:GetBucketPolicy",
           "s3:PutBucketPolicy",
-          # DeleteBucketPolicy, not merely Put.
-          #
-          # When the LAST Platform is finalized, its statements are the only ones on the
-          # artifacts bucket — a single-tenant install has exactly one Platform — so
-          # removing them leaves no policy at all. S3 will not let that be expressed as
-          # an empty statement list:
-          #
-          #   MalformedPolicy: Could not parse the policy: Statement is empty!
-          #
-          # The operator must therefore DELETE the policy (see
-          # nanohype/eks-agent-platform, platform_kms_s3.go). Without this permission the
-          # finalizer 403s instead of 400s, which is the same outcome: it retries
-          # forever, the Platform hangs in Terminating, the agent-platform Application
-          # never leaves Progressing, and `rackctl destroy` stalls on
-          # `platforms.platform.nanohype.dev did not finalize`.
           "s3:DeleteBucketPolicy",
         ]
-        # model-artifacts only. The operator owns the model-artifacts bucket
-        # policy (ensureBucketPolicy extends it per-tenant); the eval-reports
-        # policy is terraform-owned and static, so the operator must never write
-        # it — granting it here would reintroduce a two-writer policy hazard.
         Resource = [
           aws_s3_bucket.model_artifacts.arn,
         ]

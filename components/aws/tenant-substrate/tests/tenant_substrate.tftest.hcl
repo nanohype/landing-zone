@@ -34,6 +34,15 @@ mock_provider "aws" {
   }
 }
 
+mock_provider "random" {
+  mock_resource "random_password" {
+    defaults = {
+      # ElastiCache AUTH requires 16–128 alphanumeric (or limited symbols).
+      result = "abcdefghijklmnopqrstuvwxyz012345"
+    }
+  }
+}
+
 # ── shared component-level inputs for the validation runs ──
 variables {
   environment        = "development"
@@ -111,6 +120,21 @@ run "every_kind_provisions_and_is_backup_tagged" {
   assert {
     condition     = aws_elasticache_replication_group.cache["ca"].tags["Tenant"] == "t1"
     error_message = "withholding BackupPolicy must not drop the tenant tags"
+  }
+
+  # AUTH + transit encryption: SG membership alone must not be enough to read
+  # a tenant's cache. The AUTH token is stored under the tenant CMK.
+  assert {
+    condition     = aws_elasticache_replication_group.cache["ca"].transit_encryption_enabled
+    error_message = "cache must enable transit encryption"
+  }
+  assert {
+    condition     = aws_elasticache_replication_group.cache["ca"].auth_token != null
+    error_message = "cache must set an AUTH token — without it any principal on the cluster SG can read the cache over TLS"
+  }
+  assert {
+    condition     = aws_secretsmanager_secret.cache_auth["ca"].kms_key_id == aws_kms_key.tenant.arn
+    error_message = "cache AUTH secret must be encrypted with the tenant's own CMK"
   }
 
   # a Retain datastore (the default policy) gets the AWS-level deletion backstop.

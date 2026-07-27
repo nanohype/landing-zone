@@ -1,5 +1,12 @@
 ################################################################################
 # cache -> ElastiCache (Valkey / Redis)
+#
+# Transit encryption alone is not enough: without AUTH, any principal that can
+# open a TCP session to the security group can read and write the cache. The
+# cluster node SG is wide enough that a compromised tenant pod on the same
+# cluster would otherwise reach every co-located tenant's cache. AUTH is the
+# application-layer clamp; the token is minted here and stored under the
+# tenant's CMK so only a role granted that secret can connect.
 ################################################################################
 
 resource "aws_elasticache_subnet_group" "cache" {
@@ -33,6 +40,32 @@ resource "aws_security_group" "cache" {
   }
 }
 
+# 16–128 chars, no specials Redis AUTH rejects. Lifetime of the replication
+# group: rotating requires auth_token_update_strategy and a coordinated app cut.
+resource "random_password" "cache_auth" {
+  for_each = local.cache_stores
+
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "cache_auth" {
+  for_each = local.cache_stores
+
+  name        = "${local.prefix}/${each.key}/auth-token"
+  description = "ElastiCache AUTH token for ${var.tenant_id}/${each.key}. Required on every connection when transit encryption is on."
+  kms_key_id  = aws_kms_key.tenant.arn
+
+  tags = local.tenant_tags
+}
+
+resource "aws_secretsmanager_secret_version" "cache_auth" {
+  for_each = local.cache_stores
+
+  secret_id     = aws_secretsmanager_secret.cache_auth[each.key].id
+  secret_string = random_password.cache_auth[each.key].result
+}
+
 resource "aws_elasticache_replication_group" "cache" {
   for_each = local.cache_stores
 
@@ -54,6 +87,9 @@ resource "aws_elasticache_replication_group" "cache" {
 
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
+  # AUTH token: SG membership is necessary but not sufficient. Without this,
+  # any workload on the cluster node SG could read the cache over TLS.
+  auth_token = random_password.cache_auth[each.key].result
 
   apply_immediately = var.environment != "production"
 

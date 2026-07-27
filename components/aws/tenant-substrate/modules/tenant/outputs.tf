@@ -1,5 +1,5 @@
 output "datastores" {
-  description = "Per-datastore identifiers keyed by datastore name — kind, ARN, connection endpoint, and (relational only) the RDS-managed master-secret ARN. The parent component publishes the relational secret ARNs to SSM, where the operator reads them to scope each tenant's Secrets Manager grant."
+  description = "Per-datastore identifiers keyed by datastore name — kind, ARN, connection endpoint, and secret ARN where one exists (relational master secret, cache AUTH token). The parent publishes relational secret ARNs to SSM for the operator; cache AUTH secrets are tenant Secrets Manager entries the app reaches via directSecretReads."
   value = merge(
     { for k, m in module.relational : k => {
       kind       = "relational"
@@ -29,7 +29,8 @@ output "datastores" {
       kind       = "cache"
       arn        = r.arn
       endpoint   = r.primary_endpoint_address
-      secret_arn = null
+      # AUTH token secret — transit encryption alone is not a credential.
+      secret_arn = aws_secretsmanager_secret.cache_auth[k].arn
     } },
     { for k, r in aws_msk_serverless_cluster.stream : k => {
       kind       = "stream"
