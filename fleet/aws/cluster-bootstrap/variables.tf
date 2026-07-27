@@ -95,13 +95,13 @@ variable "network_mode" {
 }
 
 variable "private_subnet_ids" {
-  description = "Private subnet IDs of the cluster's VPC. Threaded to cluster-bootstrap, which publishes them (Secret annotation + ConfigMap CSV) only in adopt mode — a participant can't discover subnets by tag because RAM hides owner subnet tags. Empty in create mode (auto-discovery by the ELB role tags the cluster stamps)."
+  description = "Private subnet IDs of the cluster's VPC. Threaded to cluster-bootstrap, which in adopt mode publishes them as a Secret annotation (Karpenter via addons-operations-kustomize) and a ConfigMap CSV (Kyverno LB injection). Empty in create mode (tag auto-discovery)."
   type        = list(string)
   default     = []
 }
 
 variable "public_subnet_ids" {
-  description = "Public subnet IDs of the cluster's VPC. Threaded to cluster-bootstrap, which publishes them (Secret annotation + ConfigMap CSV) only in adopt mode so scheme-aware injection can place internet-facing load balancers on public subnets. Empty in create mode."
+  description = "Public subnet IDs of the cluster's VPC. Threaded to cluster-bootstrap, which in adopt mode publishes them as a ConfigMap CSV only (Kyverno internet-facing LB injection). Not a Secret annotation — nothing reads one. Empty in create mode."
   type        = list(string)
   default     = []
 }

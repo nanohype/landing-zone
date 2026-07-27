@@ -60,13 +60,32 @@ variable "observability_tier" {
 }
 
 variable "private_subnet_ids" {
-  description = "Private subnet IDs of the cluster's VPC. Published (as a Secret annotation + a ConfigMap CSV) only in adopt mode, where a load balancer controller can't auto-discover subnets by tag because RAM hides owner subnet tags from participants. Left empty in create mode, where subnets are discovered by the kubernetes.io/role/internal-elb tag the cluster stamps."
+  description = <<-EOT
+    Private subnet IDs of the cluster's VPC. In adopt mode only, published two ways for
+    two different readers:
+
+      - Secret annotation network/private-subnet-ids — read by the eks-gitops
+        addons-operations-kustomize ApplicationSet to seed Karpenter NodePool subnet
+        selectors (an ApplicationSet generator can only see the cluster-registry Secret).
+      - ConfigMap CSV kube-system/network-config.private_subnet_ids — read by the
+        eks-gitops Kyverno inject-adopt-lb-subnets policy for scheme-aware internal LB
+        placement (Kyverno needs an in-cluster resource, not the Secret).
+
+    Left empty in create mode, where subnets are discovered by the kubernetes.io/role/internal-elb
+    tag the cluster stamps (and Karpenter discovers the same way).
+  EOT
   type        = list(string)
   default     = []
 }
 
 variable "public_subnet_ids" {
-  description = "Public subnet IDs of the cluster's VPC. Published (as a Secret annotation + a ConfigMap CSV) only in adopt mode so scheme-aware subnet injection can place internet-facing load balancers on public subnets. Left empty in create mode, where subnets are discovered by the kubernetes.io/role/elb tag the cluster stamps."
+  description = <<-EOT
+    Public subnet IDs of the cluster's VPC. In adopt mode only, published as the ConfigMap
+    CSV kube-system/network-config.public_subnet_ids — read by the eks-gitops Kyverno
+    inject-adopt-lb-subnets policy for scheme-aware internet-facing LB placement. Not
+    published as a Secret annotation: nothing reads one. Left empty in create mode, where
+    subnets are discovered by the kubernetes.io/role/elb tag the cluster stamps.
+  EOT
   type        = list(string)
   default     = []
 }
