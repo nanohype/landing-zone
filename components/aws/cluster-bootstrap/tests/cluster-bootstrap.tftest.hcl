@@ -208,12 +208,11 @@ run "create_mode_publishes_empty_network_config" {
   }
 }
 
-# ── network mode adopt: the Secret carries network_mode=adopt plus both subnet-ID ──
-# annotations, and the network-config ConfigMap carries both populated CSVs — the
-# explicit subnet IDs an adopt cluster's load balancer controller can't discover by
-# tag, because RAM hides owner subnet tags from participant accounts. Both CSVs
-# because scheme-aware injection needs private (internal LB) and public
-# (internet-facing LB) subnets.
+# ── network mode adopt: Secret carries network_mode=adopt + private subnet ──
+# annotation (Karpenter via addons-operations-kustomize), never the public one
+# (nothing reads it). network-config ConfigMap carries both populated CSVs for
+# Kyverno scheme-aware LB injection. Explicit subnet IDs because RAM hides owner
+# subnet tags from participant accounts.
 run "adopt_mode_publishes_both_subnet_csvs" {
   command = plan
 
@@ -230,12 +229,12 @@ run "adopt_mode_publishes_both_subnet_csvs" {
 
   assert {
     condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].annotations["network/private-subnet-ids"] == "subnet-0aaa,subnet-0bbb,subnet-0ccc"
-    error_message = "adopt mode must publish the private subnet IDs as a comma-joined annotation"
+    error_message = "adopt mode must publish the private subnet IDs as a comma-joined Secret annotation for Karpenter"
   }
 
   assert {
-    condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].annotations["network/public-subnet-ids"] == "subnet-0ddd,subnet-0eee,subnet-0fff"
-    error_message = "adopt mode must publish the public subnet IDs as a comma-joined annotation"
+    condition     = !contains(keys(kubernetes_secret_v1.argocd_cluster.metadata[0].annotations), "network/public-subnet-ids")
+    error_message = "adopt mode must NOT publish network/public-subnet-ids on the Secret — Kyverno reads the ConfigMap, and nothing else reads a public annotation"
   }
 
   assert {

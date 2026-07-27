@@ -433,15 +433,16 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # Route53 zone. Absent on the hub, which runs no external-dns.
       "external-dns/domain-filter" = data.aws_ssm_parameter.external_dns_domain_filter[0].value
       } : {}, var.network_mode == "adopt" ? {
-      # Explicit subnet IDs for scheme-aware load balancer subnet injection on an
-      # adopt cluster. RAM hides the owner's subnet tags from participant accounts,
-      # so a load balancer controller here can't auto-discover subnets by the
-      # kubernetes.io/role/{elb,internal-elb} tags a create cluster relies on — the
-      # eks-gitops Kyverno policy reads these annotations to inject the subnets
-      # instead. Absent in create mode (auto-discovery works there). Annotations, not
-      # labels, because a comma-joined subnet-ID list exceeds label-value char rules.
+      # Private subnet IDs for Karpenter node placement on an adopt cluster. The
+      # addons-operations-kustomize ApplicationSet reads this annotation to seed
+      # NodePool subnet selectors — an ApplicationSet generator can only see the
+      # cluster-registry Secret. Kyverno LB subnet injection does NOT read this
+      # (or any Secret annotation); it reads kube-system/network-config below.
+      # Public subnets are ConfigMap-only for the same reason: nothing on the
+      # Secret reads them. Absent in create mode (tag auto-discovery works
+      # there). Annotation, not label, because a comma-joined subnet-ID list
+      # exceeds label-value char rules.
       "network/private-subnet-ids" = join(",", var.private_subnet_ids)
-      "network/public-subnet-ids"  = join(",", var.public_subnet_ids)
     } : {})
   }
 
