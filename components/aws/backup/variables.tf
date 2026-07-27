@@ -61,10 +61,14 @@ variable "max_retention_days" {
 variable "central_vault_arn" {
   description = <<-EOT
     ARN of the central backup vault (components/aws/shared-backup) every plan rule copies its
-    recovery points to. Empty (default) emits no copy action — the shape before central backup
-    is stood up. When set, each plan without its own copy_action override copies to this vault
-    with the plan's own retention. This is a cross-account value carried to workload leaves as a
-    known input, since the owning account's SSM is not readable from here.
+    recovery points to. Empty emits no copy action. When set, each plan without its own
+    copy_action override copies to this vault with the plan's own retention.
+
+    Live leaves wire this via live/_envcommon/aws/backup.hcl: composed from the backup
+    account catalog, the DR-region region.hcl, and the <env>-central-backup-vault naming
+    convention. Cross-account SSM is not readable from workload accounts, so the ARN is a
+    known input rather than a looked-up one. Empty remains valid for unit tests and for a
+    greenfield account that has not stood up shared-backup yet.
   EOT
   type        = string
   default     = ""
