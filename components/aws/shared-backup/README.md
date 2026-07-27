@@ -60,9 +60,13 @@ Standing up central backup is a multi-account act:
    `live/aws/backup/account.hcl`.
 2. Set the real `o-xxxxxxxxxx` organization id in `live/_envcommon/aws/shared-backup.hcl`.
 3. Apply this component per environment (`live/aws/backup/us-east-1/<env>/shared-backup`).
-4. Wire the resulting `central_vault_arn` into each workload account's `backup` leaf
-   (`central_vault_arn = ...`) so its plan rules begin copying.
+4. Workload `backup` leaves already set `central_vault_arn` via
+   `live/_envcommon/aws/backup.hcl` — composed from `live/aws/backup/account.hcl`,
+   the DR-region region.hcl, and the `<env>-central-backup-vault` naming
+   convention. No per-leaf wiring step: once the vault exists, the next apply
+   of a workload `backup` leaf starts the copy.
 5. Enable cross-account backup at the org level (`org-backup`).
 
-Until the backup account exists, workload `backup` components run with `central_vault_arn`
-unset — a local vault and no copy action, the shape before central backup is stood up.
+Until the backup account and vault exist, the composed ARN still lands on every
+plan rule as a `copy_action`; apply fails loudly against a missing vault rather
+than silently omitting the durable copy.
