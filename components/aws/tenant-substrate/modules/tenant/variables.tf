@@ -9,7 +9,7 @@ variable "account_id" {
 }
 
 variable "tenant_id" {
-  description = "Tenant identifier — the middle token of every datastore's resource name. The component-level tenants validation proves the composed names fit each service's limit."
+  description = "The Platform name (Platform.metadata.name) — the middle token of every datastore's resource name, and the value of the PlatformId tag. Not the owning team, which arrives as the Team tag: the operator scopes its datastore-access ARNs to <env>-<platform>-<datastore>, so any other value here grants the tenant nothing it can reach. The component-level tenants validation proves the composed names fit each service's limit."
   type        = string
 }
 

@@ -22,7 +22,26 @@ locals {
   # Datastore tags carry the tenant identity plus the BackupPolicy selector the
   # central backup plan matches on. Security groups and subnet groups take the
   # tenant tags without BackupPolicy — they hold no data to protect.
-  tenant_tags = merge(var.tags, { Tenant = var.tenant_id })
+  #
+  # PlatformId is the org's tenant-identity tag: the operator stamps it on the
+  # tenant IAM role, org-identity's ABAC is written against it, and the
+  # BudgetPolicy reconciler groups Cost Explorer by it. These datastores are the
+  # per-tenant spend — an IAM role bills nothing — so without it here the whole
+  # attribution chain terminates at a tag no billed resource carries.
+  #
+  # The key is `PlatformId` exactly. Cost Explorer treats tag keys as
+  # case-sensitive and CUR renders this one as `resource_tags_user_platformid`,
+  # so the lowercase form reads like the name to activate and activates nothing.
+  #
+  # The value is the Platform name, which is also what composes local.prefix —
+  # the same `<env>-<platform>-<datastore>` convention the operator's
+  # datastore-access policy scopes its ARNs to. One value, one meaning.
+  #
+  # Team, not Tenant, carries the owning team: it arrives in var.tags from the
+  # component. `Tenant` is deliberately not set here — the operator uses that
+  # key for `Platform.spec.tenant`, the team, so setting it to the platform name
+  # would put two meanings behind one key on resources belonging to one tenant.
+  tenant_tags = merge(var.tags, { PlatformId = var.tenant_id })
   data_tags   = merge(local.tenant_tags, { BackupPolicy = var.backup_policy })
 
   # The BackupPolicy tag is a claim, and it is only true for resource types AWS
