@@ -55,6 +55,81 @@ variables {
   tenants            = {}
 }
 
+# ── cost attribution: PlatformId lands on every billed datastore ──
+#
+# The tag is the whole attribution chain. Cost Explorer and CUR are the only
+# places per-tenant substrate spend can be read, both key on an activated cost
+# allocation tag, and activation is not retroactive — so a kind that silently
+# misses this tag is spend that can never be attributed after the fact, not
+# spend that is attributed late.
+#
+# Asserted against `var.tenant_id` rather than a spelled-out "t1": a literal
+# would keep passing if the module started tagging with the team, the
+# environment, or a constant.
+run "every_billed_datastore_carries_platform_id" {
+  command = plan
+
+  module {
+    source = "./modules/tenant"
+  }
+
+  variables {
+    environment     = "development"
+    account_id      = "123456789012"
+    tenant_id       = "t1"
+    vpc_id          = "vpc-0123456789abcdef0"
+    private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+    cluster_sg_id   = "sg-0123456789abcdef0"
+    backup_policy   = "daily"
+    tags            = {}
+    datastores = [
+      { name = "kv", kind = "keyValue", key_value = { partition_key = { name = "pk", type = "S" } } },
+      { name = "obj", kind = "objectStore" },
+      { name = "q", kind = "queue" },
+      { name = "ca", kind = "cache" },
+      { name = "st", kind = "stream" },
+    ]
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.key_value["kv"].tags["PlatformId"] == var.tenant_id
+    error_message = "the DynamoDB table must carry PlatformId — without it its spend reaches no tenant in Cost Explorer or CUR"
+  }
+  assert {
+    condition     = aws_s3_bucket.object_store["obj"].tags["PlatformId"] == var.tenant_id
+    error_message = "the S3 bucket must carry PlatformId"
+  }
+  assert {
+    condition     = aws_sqs_queue.queue["q"].tags["PlatformId"] == var.tenant_id
+    error_message = "the SQS queue must carry PlatformId"
+  }
+  assert {
+    condition     = aws_elasticache_replication_group.cache["ca"].tags["PlatformId"] == var.tenant_id
+    error_message = "the ElastiCache replication group must carry PlatformId"
+  }
+  assert {
+    condition     = aws_msk_serverless_cluster.stream["st"].tags["PlatformId"] == var.tenant_id
+    error_message = "the MSK Serverless cluster must carry PlatformId"
+  }
+
+  # Case matters. Cost Explorer treats tag keys as case-sensitive and CUR
+  # renders this one as resource_tags_user_platformid, so the lowercase form
+  # reads like the key to activate in Billing and would attribute nothing.
+  assert {
+    condition     = !contains(keys(aws_dynamodb_table.key_value["kv"].tags), "platformid")
+    error_message = "the tag key must be PlatformId exactly — a lowercase key activates nothing in Billing"
+  }
+
+  # `Tenant` belongs to the operator, which sets it to Platform.spec.tenant —
+  # the owning team. Setting it here to the platform name would put two
+  # meanings behind one key across the two layers of one tenant's resources.
+  # The team reaches these resources as the Team tag, from the component.
+  assert {
+    condition     = !contains(keys(aws_dynamodb_table.key_value["kv"].tags), "Tenant")
+    error_message = "the module must not set Tenant — the operator uses that key for the owning team"
+  }
+}
+
 # ── positive: one datastore of every kind provisions, tagged for backup ──
 run "every_kind_provisions_and_is_backup_tagged" {
   command = plan
@@ -118,7 +193,7 @@ run "every_kind_provisions_and_is_backup_tagged" {
   # Withholding the backup claim must not cost the ineligible kinds their identity: the
   # tenant tags drive cost attribution and are unrelated to durability.
   assert {
-    condition     = aws_elasticache_replication_group.cache["ca"].tags["Tenant"] == "t1"
+    condition     = aws_elasticache_replication_group.cache["ca"].tags["PlatformId"] == "t1"
     error_message = "withholding BackupPolicy must not drop the tenant tags"
   }
 
@@ -199,7 +274,7 @@ run "unversioned_object_store_is_not_backup_tagged" {
     error_message = "an unversioned object store must NOT carry BackupPolicy — AWS Backup requires S3 Versioning, so the tag would promise protection that cannot be delivered"
   }
   assert {
-    condition     = aws_s3_bucket.object_store["loose"].tags["Tenant"] == "t1"
+    condition     = aws_s3_bucket.object_store["loose"].tags["PlatformId"] == "t1"
     error_message = "withholding BackupPolicy must not drop the tenant tags"
   }
   assert {
