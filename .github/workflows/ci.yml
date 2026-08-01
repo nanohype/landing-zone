@@ -263,6 +263,17 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./scripts/check-account-local-deps.sh
 
+  # The architecture doc's component inventory must be the components that
+  # exist, both directions. A documented component that is gone sends a reader
+  # to a missing directory; a component no table names is quieter and worse,
+  # because the doc reads as complete.
+  architecture-components:
+    name: Architecture Doc Matches The Tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-architecture-components.sh
+
   # Guards the component smoke tests: every output key a smoke test reads out of
   # outputs.json must be a real output of the component it belongs to. `jq` returns the
   # string "null" for a key that does not exist rather than failing, so without this a

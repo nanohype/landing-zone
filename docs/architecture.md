@@ -110,6 +110,7 @@ Components deployed once in the management account to establish cross-account go
 | **org-cost** | Organization budget, cost categories, anomaly detection, CUR 2.0 export |
 | **org-networking** | Transit Gateway + RAM sharing, IPAM, Route53 Resolver rules |
 | **org-scp** | Service Control Policies on OUs/accounts |
+| **org-backup** | Delegated backup administrator + an organization backup policy, so coverage is a property of the org rather than of each account remembering |
 
 ### Network Layer
 
@@ -179,17 +180,17 @@ the shared-hub blast-radius discussion.
 
 ### Workload Layer
 
-Per-app multi-tenant components still in this tree accept a `var.tenants` map.
-New tenant stateful substrate is **not** a new per-app component: it is declared
-on `Platform.spec.datastores` and provisioned by `tenant-substrate`.
+Multi-tenant components take a `var.tenants` map and provision an isolated set of
+resources per tenant. A tenant's stateful substrate is a declaration rather than a
+component: it is written on `Platform.spec.datastores` and provisioned by
+`tenant-substrate`, so adding a tenant edits a map, not the tree.
 
 | Component | Per-Tenant Resources | Team |
 |-----------|---------------------|------|
 | **druid** | Aurora MySQL (Serverless v2), MSK cluster, S3 buckets, Secrets Manager, SSM parameters, Pod Identity roles | data-platform |
 | **pipeline** | AWS Batch compute, S3 data lake (raw/staging/curated), Glue catalog, MSK, Step Functions, Pod Identity roles | data-platform |
 | **governance** | S3 audit/guardrail buckets, DynamoDB, EventBridge, Pod Identity roles | security |
-| **tenant-substrate** | Aurora / DynamoDB / S3 / SQS / ElastiCache (TLS + AUTH) / MSK from `Platform.spec.datastores` | per-tenant |
-| **\*-platform** leaves | App-shaped thin leaves (`competitive-intelligence-platform`, `digest-pipeline-platform`, `incident-response-platform`, `slack-knowledge-bot-platform`) that wire a tenant into the substrate | per-app |
+| **tenant-substrate** | Aurora / DynamoDB / S3 / SQS / ElastiCache (TLS + AUTH) / MSK from `Platform.spec.datastores`, each tagged `PlatformId` for cost attribution | per-tenant |
 
 ### Operational Layer
 
@@ -204,6 +205,10 @@ on `Platform.spec.datastores` and provisioned by `tenant-substrate`.
 | **dns** | Route53 zones, subdomain delegation, ACM certificates | platform |
 | **github-oidc** | GitHub Actions OIDC provider + repo-scoped (`repo:<org>/<repo>:*`) deploy role — no long-lived keys | platform |
 | **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed on the hub. | *(required input)* |
+| **private-dns** | Private hosted zones for a workload account, `create` or `adopt` mode, associated to the shared Route53 profile | platform |
+| **shared-dns** | Owner side of private DNS: the hosted zones plus the Route53 profile the workload accounts adopt | platform |
+| **shared-backup** | Owner side of central backup — the destination vault a workload account's plan copies into, in a second account and the DR region. See [What backs up what](#what-backs-up-what) | sre |
+| **shared-observability** | Fleet-wide destination for alarm delivery, so a spoke's alarms reach one place rather than each account's own topic | sre |
 
 ### What backs up what
 
@@ -262,7 +267,8 @@ declaration — there is no per-app substrate component.
 | Component | What it provisions | Team |
 |-----------|--------------------|------|
 | **agent-iam** | Operator IRSA role (mints tenant roles under `/eks-agent-platform/tenants/`, boundary-gated), tenant permissions boundary + baseline policy, model-artifacts + eval-reports S3 buckets, operator SSM parameters | platform |
-| **tenant-substrate** | Per-tenant Aurora / DynamoDB / S3 / SQS / ElastiCache / MSK provisioned from `Platform.spec.datastores` (`var.tenants` rendered from the Platform CRs) — datastores + security groups only; the tenant IAM is the operator's | per-tenant |
+| **tenant-substrate** | Per-tenant Aurora / DynamoDB / S3 / SQS / ElastiCache / MSK provisioned from `Platform.spec.datastores` (`var.tenants` rendered from the Platform CRs) — datastores + security groups only; the tenant IAM is the operator's. Each store carries `PlatformId` so its spend reaches a tenant in Cost Explorer and CUR | per-tenant |
+| **model-import** | Import-time substrate for Bedrock Custom Model Import: the S3 staging bucket open-weight files land in, and the role Bedrock assumes to read them. Open-weight models then serve through the ordinary Bedrock runtime, with no GPU nodes | platform |
 
 ### Fleet & Portal Layer
 
