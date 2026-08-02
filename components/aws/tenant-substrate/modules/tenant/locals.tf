@@ -33,15 +33,32 @@ locals {
   # case-sensitive and CUR renders this one as `resource_tags_user_platformid`,
   # so the lowercase form reads like the name to activate and activates nothing.
   #
-  # The value is the Platform name, which is also what composes local.prefix —
-  # the same `<env>-<platform>-<datastore>` convention the operator's
-  # datastore-access policy scopes its ARNs to. One value, one meaning.
+  # The value is cluster-qualified — `<cluster>-<platform>` — and NOT the bare
+  # Platform name, even though the bare name is what composes local.prefix.
+  #
+  # The two are scoped differently on purpose. A resource NAME only has to be
+  # unique among resources, and `<env>-<platform>-<datastore>` already is. This
+  # tag is an attribution key read out of a Cost and Usage Report, and a CUR
+  # covers an entire ACCOUNT: every environment's rows land in one table. The
+  # platform contract also allows two co-located clusters to host a Platform of
+  # the same name — the operator's tenant role is cluster-keyed for exactly that
+  # reason — so a bare name is one tag value standing for two different tenants.
+  # Their spend sums, each BudgetPolicy reads the pair's total as its own, and at
+  # 120% the kill switch suspends whichever one it was pointed at.
+  #
+  # It must render the same string as the operator's platformCostID
+  # (eks-agent-platform/operators/internal/controller/budget_reconcile.go), which
+  # is what the reconciler both stamps on tenant IAM roles and filters CUR by. An
+  # IAM role bills nothing, so these datastores are the rows that actually carry
+  # the tag into CUR — if the two expressions disagree, the reconciler's query is
+  # valid, green, and empty.
   #
   # Team, not Tenant, carries the owning team: it arrives in var.tags from the
   # component. `Tenant` is deliberately not set here — the operator uses that
   # key for `Platform.spec.tenant`, the team, so setting it to the platform name
   # would put two meanings behind one key on resources belonging to one tenant.
-  tenant_tags = merge(var.tags, { PlatformId = var.tenant_id })
+  platform_id = "${var.cluster_name}-${var.tenant_id}"
+  tenant_tags = merge(var.tags, { PlatformId = local.platform_id })
   data_tags   = merge(local.tenant_tags, { BackupPolicy = var.backup_policy })
 
   # The BackupPolicy tag is a claim, and it is only true for resource types AWS

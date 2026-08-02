@@ -78,6 +78,7 @@ run "every_billed_datastore_carries_platform_id" {
     environment     = "development"
     account_id      = "123456789012"
     tenant_id       = "t1"
+    cluster_name    = "development-platform"
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"
@@ -93,32 +94,55 @@ run "every_billed_datastore_carries_platform_id" {
   }
 
   assert {
-    condition     = aws_dynamodb_table.key_value["kv"].tags["PlatformId"] == var.tenant_id
+    condition     = aws_dynamodb_table.key_value["kv"].tags["PlatformId"] == "${var.cluster_name}-${var.tenant_id}"
     error_message = "the DynamoDB table must carry PlatformId — without it its spend reaches no tenant in Cost Explorer or CUR"
   }
   assert {
-    condition     = aws_s3_bucket.object_store["obj"].tags["PlatformId"] == var.tenant_id
+    condition     = aws_s3_bucket.object_store["obj"].tags["PlatformId"] == "${var.cluster_name}-${var.tenant_id}"
     error_message = "the S3 bucket must carry PlatformId"
   }
   assert {
-    condition     = aws_sqs_queue.queue["q"].tags["PlatformId"] == var.tenant_id
+    condition     = aws_sqs_queue.queue["q"].tags["PlatformId"] == "${var.cluster_name}-${var.tenant_id}"
     error_message = "the SQS queue must carry PlatformId"
   }
   assert {
-    condition     = aws_elasticache_replication_group.cache["ca"].tags["PlatformId"] == var.tenant_id
+    condition     = aws_elasticache_replication_group.cache["ca"].tags["PlatformId"] == "${var.cluster_name}-${var.tenant_id}"
     error_message = "the ElastiCache replication group must carry PlatformId"
   }
   assert {
-    condition     = aws_msk_serverless_cluster.stream["st"].tags["PlatformId"] == var.tenant_id
+    condition     = aws_msk_serverless_cluster.stream["st"].tags["PlatformId"] == "${var.cluster_name}-${var.tenant_id}"
     error_message = "the MSK Serverless cluster must carry PlatformId"
   }
 
   # Case matters. Cost Explorer treats tag keys as case-sensitive and CUR
-  # renders this one as resource_tags_user_platformid, so the lowercase form
+  # renders this one as resource_tags_user_platform_id, so the lowercase form
   # reads like the key to activate in Billing and would attribute nothing.
   assert {
     condition     = !contains(keys(aws_dynamodb_table.key_value["kv"].tags), "platformid")
     error_message = "the tag key must be PlatformId exactly — a lowercase key activates nothing in Billing"
+  }
+
+  # The value must not be the bare Platform name. A resource NAME only has to be
+  # unique among resources and `<env>-<platform>-<datastore>` already is, but this
+  # tag is read out of a CUR, and a CUR covers a whole ACCOUNT — every
+  # environment's rows land in one table. Two co-located clusters may each host a
+  # Platform called `t1` (the operator's tenant role is cluster-keyed for exactly
+  # that reason), so a bare value is one attribution row standing for two tenants:
+  # their spend sums, both BudgetPolicies read the pair's total as their own, and
+  # at 120% the kill switch suspends whichever it was pointed at.
+  assert {
+    condition     = aws_dynamodb_table.key_value["kv"].tags["PlatformId"] != var.tenant_id
+    error_message = "PlatformId is the bare Platform name — in an account-wide CUR that is one row for every same-named Platform in the account, so each tenant's budget reads the others' spend as its own"
+  }
+
+  # And it must be the CLUSTER, not the environment. Those differ: cluster_name is
+  # `<environment>-<clusterBase>`, so an environment token alone still collides
+  # between sibling clusters in one environment — which is the case the cluster
+  # discriminator exists to cover (nanohype/standards/resource-naming.json,
+  # cluster-scoped-substrate).
+  assert {
+    condition     = startswith(aws_dynamodb_table.key_value["kv"].tags["PlatformId"], "${var.cluster_name}-")
+    error_message = "PlatformId must be qualified by the full cluster name, not by the environment — two clusters in one environment would otherwise share an attribution row"
   }
 
   # `Tenant` belongs to the operator, which sets it to Platform.spec.tenant —
@@ -143,6 +167,7 @@ run "every_kind_provisions_and_is_backup_tagged" {
     environment     = "development"
     account_id      = "123456789012"
     tenant_id       = "t1"
+    cluster_name    = "development-platform"
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"
@@ -194,7 +219,7 @@ run "every_kind_provisions_and_is_backup_tagged" {
   # Withholding the backup claim must not cost the ineligible kinds their identity: the
   # tenant tags drive cost attribution and are unrelated to durability.
   assert {
-    condition     = aws_elasticache_replication_group.cache["ca"].tags["PlatformId"] == "t1"
+    condition     = aws_elasticache_replication_group.cache["ca"].tags["PlatformId"] == "${var.cluster_name}-${var.tenant_id}"
     error_message = "withholding BackupPolicy must not drop the tenant tags"
   }
 
@@ -257,6 +282,7 @@ run "unversioned_object_store_is_not_backup_tagged" {
     environment     = "development"
     account_id      = "123456789012"
     tenant_id       = "t1"
+    cluster_name    = "development-platform"
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"
@@ -278,7 +304,7 @@ run "unversioned_object_store_is_not_backup_tagged" {
     error_message = "an unversioned object store must NOT carry BackupPolicy — AWS Backup requires S3 Versioning, so the tag would promise protection that cannot be delivered"
   }
   assert {
-    condition     = aws_s3_bucket.object_store["loose"].tags["PlatformId"] == "t1"
+    condition     = aws_s3_bucket.object_store["loose"].tags["PlatformId"] == "${var.cluster_name}-${var.tenant_id}"
     error_message = "withholding BackupPolicy must not drop the tenant tags"
   }
   assert {
@@ -298,6 +324,7 @@ run "queue_without_redrive_has_no_dlq" {
     environment     = "development"
     account_id      = "123456789012"
     tenant_id       = "t1"
+    cluster_name    = "development-platform"
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"

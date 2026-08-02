@@ -9,8 +9,18 @@ variable "account_id" {
 }
 
 variable "tenant_id" {
-  description = "The Platform name (Platform.metadata.name) — the middle token of every datastore's resource name, and the value of the PlatformId tag. Not the owning team, which arrives as the Team tag: the operator scopes its datastore-access ARNs to <env>-<platform>-<datastore>, so any other value here grants the tenant nothing it can reach. The component-level tenants validation proves the composed names fit each service's limit."
+  description = "The Platform name (Platform.metadata.name) — the middle token of every datastore's resource name. Not the owning team, which arrives as the Team tag: the operator scopes its datastore-access ARNs to <env>-<platform>-<datastore>, so any other value here grants the tenant nothing it can reach. The component-level tenants validation proves the composed names fit each service's limit. The PlatformId tag is NOT this value alone — it is cluster-qualified, see locals.tf."
   type        = string
+}
+
+variable "cluster_name" {
+  description = "Full EKS cluster name (<environment>-<clusterBase>) whose operator owns these tenants. Qualifies the PlatformId cost-attribution tag so co-located sibling clusters hosting a Platform of the same name do not share one CUR attribution row. Must match the cluster_name the operator runs with."
+  type        = string
+
+  validation {
+    condition     = length(var.cluster_name) > 0
+    error_message = "cluster_name is required: it qualifies the PlatformId tag, and an empty value renders '-<tenant>', which silently attributes every co-located cluster's spend to one row."
+  }
 }
 
 variable "datastores" {
