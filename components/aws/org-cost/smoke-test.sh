@@ -6,6 +6,8 @@ BUDGET_NAME=$(jq -r '.budget_name.value' outputs.json)
 ANOMALY_MONITOR_SERVICE=$(jq -r '.anomaly_monitor_service_arn.value // "null"' outputs.json)
 ANOMALY_MONITOR_ACCOUNT=$(jq -r '.anomaly_monitor_account_arn.value // "null"' outputs.json)
 CUR_BUCKET=$(jq -r '.cur_export_bucket_name.value // "null"' outputs.json)
+CUR_EXPORT_NAME=$(jq -r '.cur_export_name.value // "null"' outputs.json)
+CUR_EXPORT_PREFIX=$(jq -r '.cur_export_prefix.value // "null"' outputs.json)
 
 # --- Org Budget ---
 echo "Checking org budget '${BUDGET_NAME}'..."
@@ -56,6 +58,54 @@ if [[ "$CUR_BUCKET" != "null" ]]; then
     exit 1
   fi
   echo "  CUR export bucket exists"
+fi
+
+# --- CUR 2.0 Export ---
+#
+# The bucket existing says nothing about the export. What matters is the export's own
+# configuration, read back from the service: an export can be HEALTHY, delivering on
+# schedule, into the right bucket, and still be missing the one table configuration that
+# makes its data answerable — and nothing about that is visible from S3.
+#
+# Data Exports is a global service reached through us-east-1; the ARN is always
+# us-east-1 regardless of where this component is applied.
+if [[ "$CUR_EXPORT_NAME" != "null" ]]; then
+  echo "Checking CUR 2.0 export '${CUR_EXPORT_NAME}'..."
+  EXPORT_ARN=$(aws bcm-data-exports list-exports --region us-east-1 \
+    --query "Exports[?ExportName=='${CUR_EXPORT_NAME}'].ExportArn | [0]" --output text 2>/dev/null || echo "None")
+  if [[ "$EXPORT_ARN" == "None" || -z "$EXPORT_ARN" ]]; then
+    echo "FAIL: CUR 2.0 export '${CUR_EXPORT_NAME}' not found"
+    exit 1
+  fi
+  echo "  export exists: ${EXPORT_ARN}"
+
+  EXPORT_JSON=$(aws bcm-data-exports get-export --export-arn "$EXPORT_ARN" --region us-east-1 --output json)
+
+  # The assertion this whole component turns on. A Bedrock model invocation is not a
+  # taggable resource, so no resourceTags/ column is ever populated on one; caller
+  # identity is the only attribution AWS offers, and this table configuration is the
+  # only thing that produces it. Absent, every per-platform cost query returns zero
+  # rows and exits zero.
+  IAM_PRINCIPAL=$(jq -r '.Export.DataQuery.TableConfigurations.COST_AND_USAGE_REPORT.INCLUDE_IAM_PRINCIPAL_DATA // "ABSENT"' <<<"$EXPORT_JSON")
+  if [[ "$IAM_PRINCIPAL" != "TRUE" ]]; then
+    echo "FAIL: export '${CUR_EXPORT_NAME}' has INCLUDE_IAM_PRINCIPAL_DATA=${IAM_PRINCIPAL}"
+    echo "  Without it there is no line_item_iam_principal column and no iamPrincipal/* tag"
+    echo "  columns, so Amazon Bedrock spend cannot be attributed to any platform and every"
+    echo "  budget's billed leg reads zero through a query that succeeds."
+    exit 1
+  fi
+  echo "  caller-identity allocation data is on"
+
+  # And it delivers where the contract says it does. A prefix mismatch produces a table
+  # with no partitions rather than an error.
+  ACTUAL_PREFIX=$(jq -r '.Export.DestinationConfigurations.S3Destination.S3Prefix // "ABSENT"' <<<"$EXPORT_JSON")
+  if [[ "$ACTUAL_PREFIX" != "$CUR_EXPORT_PREFIX" ]]; then
+    echo "FAIL: export delivers under '${ACTUAL_PREFIX}' but the contract publishes '${CUR_EXPORT_PREFIX}'"
+    echo "  A consumer crawling the published prefix finds no objects, registers a table with"
+    echo "  no partitions, and every query against it returns nothing without erroring."
+    exit 1
+  fi
+  echo "  delivers under the published prefix '${ACTUAL_PREFIX}'"
 fi
 
 echo "PASS: all org-cost checks passed"

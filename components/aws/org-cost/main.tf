@@ -1,5 +1,6 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
+data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
@@ -8,6 +9,48 @@ locals {
   tags = merge(var.tags, {
     Component = "org-cost"
     Team      = var.team
+  })
+
+  # The export's identity, defined once. Consumers locate the data at
+  # s3://<bucket>/<prefix>/<export name>/, so all three are contract, and a contract
+  # published from a different expression than the one the resource used is a contract
+  # that can drift silently — the reader finds an empty prefix and reports no spend
+  # rather than an error.
+  cur_export_name   = "org-cur-2-export"
+  cur_export_prefix = "cur"
+
+  # AWS's documented delivery policy, exactly. Data Exports writes objects and nothing
+  # else, so the grant is s3:PutObject on the key space only — not the bucket ARN, and
+  # not s3:GetBucketPolicy, which the service does not need.
+  #
+  # The aws:SourceArn condition is the confused-deputy guard. SourceAccount alone only
+  # says "some service in this account asked", which every export in the account
+  # satisfies equally — including exports owned by a different estate sharing the
+  # account. The ARN is pinned to us-east-1 no matter where this component is applied,
+  # because bcm-data-exports is a global endpoint whose ARNs always carry that region.
+  #
+  # A local rather than an inline argument to the module call so the suite can read it.
+  # Inline, this policy is an untestable expression buried in a module input, and the
+  # first draft of it lost the SourceArn condition with every assertion still green.
+  cur_bucket_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableAWSDataExportsToWriteToS3"
+        Effect    = "Allow"
+        Principal = { Service = "bcm-data-exports.amazonaws.com" }
+        Action    = ["s3:PutObject"]
+        Resource  = ["arn:${data.aws_partition.current.partition}:s3:::org-${local.account_id}-cur-export/*"]
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:bcm-data-exports:us-east-1:${local.account_id}:export/*"
+          }
+        }
+      },
+    ]
   })
 }
 
@@ -199,26 +242,7 @@ module "cur_bucket" {
   ]
 
   attach_policy = true
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowBCMExportDelivery"
-        Effect    = "Allow"
-        Principal = { Service = "bcm-data-exports.amazonaws.com" }
-        Action    = ["s3:PutObject", "s3:GetBucketPolicy"]
-        Resource = [
-          "arn:aws:s3:::org-${local.account_id}-cur-export",
-          "arn:aws:s3:::org-${local.account_id}-cur-export/*",
-        ]
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = local.account_id
-          }
-        }
-      },
-    ]
-  })
+  policy        = local.cur_bucket_policy
 
   tags = merge(local.tags, { Name = "org-cur-export" })
 }
@@ -227,15 +251,43 @@ resource "aws_bcmdataexports_export" "cur" {
   count = var.enable_cur_export ? 1 : 0
 
   export {
-    name = "org-cur-2-export"
+    name = local.cur_export_name
 
     data_query {
       query_statement = "SELECT * FROM COST_AND_USAGE_REPORT"
+      # Every key, not the interesting ones. AWS: "If a value is set for
+      # table_configurations, all configuration values must be set. For the Cost and
+      # Usage Report, BILLING_VIEW_ARN must also be set, in addition to the documented
+      # settings." A partial map is rejected, so the completeness is load-bearing rather
+      # than stylistic.
+      #
+      # And it is one-shot: "Table configurations can't be changed after an export is
+      # created." Getting this wrong is not a diff to fix later — the export has to be
+      # destroyed and recreated, and AWS is explicit that existing exports do not
+      # retroactively gain identity data. That is why the suite asserts each key.
       table_configurations = {
         COST_AND_USAGE_REPORT = {
-          TIME_GRANULARITY                   = "HOURLY"
-          INCLUDE_RESOURCES                  = "TRUE"
-          INCLUDE_SPLIT_COST_ALLOCATION_DATA = "TRUE"
+          BILLING_VIEW_ARN                      = "arn:${data.aws_partition.current.partition}:billing::${local.account_id}:billingview/primary"
+          TIME_GRANULARITY                      = "HOURLY"
+          INCLUDE_RESOURCES                     = "TRUE"
+          INCLUDE_SPLIT_COST_ALLOCATION_DATA    = "TRUE"
+          INCLUDE_MANUAL_DISCOUNT_COMPATIBILITY = "FALSE"
+
+          # Caller identity. This is what puts `line_item_iam_principal` in the export
+          # and surfaces IAM principal tags as `iamPrincipal/<key>` columns, and it is
+          # the only way to attribute Amazon Bedrock spend to anything.
+          #
+          # A model invocation is not a taggable resource, so no `resourceTags/` column
+          # is ever populated on a Bedrock line item — an attribution query filtering on
+          # a resource tag returns nothing, successfully, forever. AWS attributes that
+          # spend by the identity that made the call instead, and states plainly that
+          # "IAM principal identity and tag data requires CUR 2.0 (AWS Data Exports). If
+          # you are using the legacy CUR format, IAM principal fields will not be
+          # available."
+          #
+          # Costs rows: the export multiplies by the number of calling identities per
+          # model. That is the price of the only attribution that works.
+          INCLUDE_IAM_PRINCIPAL_DATA = "TRUE"
         }
       }
     }
@@ -243,7 +295,7 @@ resource "aws_bcmdataexports_export" "cur" {
     destination_configurations {
       s3_destination {
         s3_bucket = module.cur_bucket[0].s3_bucket_id
-        s3_prefix = "cur"
+        s3_prefix = local.cur_export_prefix
         s3_region = local.region
 
         s3_output_configurations {
@@ -294,6 +346,29 @@ resource "aws_ssm_parameter" "cur_export_bucket" {
   name  = "/platform/${var.environment}/cost/cur-export-bucket"
   type  = "String"
   value = module.cur_bucket[0].s3_bucket_id
+  tags  = local.tags
+}
+
+# The rest of the location. A consumer building an Athena table over this export needs
+# all three parts — the data sits at s3://<bucket>/<prefix>/<export name>/ — and
+# publishing only the bucket leaves the other two to be guessed. A guessed prefix does
+# not fail: the crawler finds no objects, registers a table with no partitions, and
+# every query against it returns zero rows and exit status success.
+resource "aws_ssm_parameter" "cur_export_prefix" {
+  count = var.enable_cur_export ? 1 : 0
+
+  name  = "/platform/${var.environment}/cost/cur-export-prefix"
+  type  = "String"
+  value = local.cur_export_prefix
+  tags  = local.tags
+}
+
+resource "aws_ssm_parameter" "cur_export_name" {
+  count = var.enable_cur_export ? 1 : 0
+
+  name  = "/platform/${var.environment}/cost/cur-export-name"
+  type  = "String"
+  value = local.cur_export_name
   tags  = local.tags
 }
 

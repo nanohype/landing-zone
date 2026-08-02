@@ -11,5 +11,4 @@ inputs = {
   monthly_budget_limit     = 2000
   budget_alert_thresholds  = [50, 80, 100]
   enable_anomaly_detection = true
-  enable_cur_report        = false
 }
