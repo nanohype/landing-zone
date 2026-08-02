@@ -17,11 +17,11 @@ Terragrunt provides DRY environment management on top of OpenTofu:
 
 ### Why Components (not a Monolith)
 
-Each component has independent state, independent plan/apply, and independent blast radius. A failed `gateway` apply does not block `observability`. Components can be deployed in parallel where dependencies allow.
+Each component has independent state, independent plan/apply, and independent blast radius. A failed `druid` apply does not block `observability`. Components can be deployed in parallel where dependencies allow.
 
 ### Why Multi-Tenant via `for_each`
 
-The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resources while sharing the same OpenTofu module code. Adding a tenant is a map entry, not a new module call. Resources are named with the tenant key, making them easy to identify and delete. This pattern is currently used in 7 components.
+The `for_each` pattern over a `tenants` map gives each tenant isolated AWS resources while sharing the same OpenTofu module code. Adding a tenant is a map entry, not a new module call. Resources are named with the tenant key, making them easy to identify and delete. This pattern is used in four components: `druid`, `pipeline`, `governance` and `tenant-substrate`.
 
 ## Dependency Graph
 
@@ -238,12 +238,18 @@ cross-region. Default off, because it costs money and no one should discover tha
 **A cluster's own restore points are not meant to outlive it.** Clusters here are agent-managed
 and often short-lived — an eks-fleet `Cluster` with `ttlDays > 0` is tagged `Lifecycle=ephemeral`
 and the hub reaper deletes it on expiry — so a bucket that refuses to be emptied does not protect
-a disposable cluster, it strands one, with the VPC and NAT gateways still billing. Hence
-`force_destroy_buckets` on `agent-iam`, `cluster-addons` (Velero included) and `model-import`:
-unconditional in development, opt-in elsewhere.
+a disposable cluster, it strands one, with the VPC and NAT gateways still billing. Hence `force_destroy_buckets` on
+`agent-iam`, `cluster-addons` (Velero included), `model-import`, `druid`, `pipeline`,
+`governance` and `tenant-substrate`: unconditional in development, opt-in elsewhere.
 
-The opt-in is inherently two acts rather than one flag, because `force_destroy` has no effect
-until a successful apply has landed it in state. Permitting a destroy and performing one cannot
+The lever opens every teardown gate the component has — bucket `force_destroy`, Aurora's final
+snapshot and deletion protection, DynamoDB deletion protection, Secrets Manager's recovery
+window — because AWS spreads those across resources the dependency graph does not join, so a
+partially-gated component empties its data and then wedges on what it still protects.
+`scripts/check-teardown-gates.py` holds that in CI.
+
+The opt-in is inherently two acts rather than one flag, because none of those attributes take
+effect until a successful apply has landed them in state. Permitting a destroy and performing one cannot
 be the same command. And the two mechanisms compose in the right order: if cluster state has to
 survive the cluster, `velero_backup_policy` puts the durable copy in the central vault, and only
 then is emptying the local bucket free. Refusing to delete a local copy was never durability.
@@ -393,10 +399,9 @@ different product team), not set in `_envcommon`.
 
 | Team | Components |
 |------|-----------|
-| **platform** | network, cluster, cluster-addons, cluster-bootstrap, gateway, dns, service-quotas, github-oidc, agent-iam, fleet-hub, fleet-vend, fleet-unwedge, portal-hub, portal-spoke, all org-* |
+| **platform** | network, cluster, cluster-addons, cluster-bootstrap, dns, private-dns, shared-dns, service-quotas, github-oidc, agent-iam, model-import, fleet-hub, fleet-vend, fleet-unwedge, portal-hub, portal-spoke, all org-* |
 | **sre** | observability, backup |
 | **security** | governance, secrets, break-glass |
-| **data-platform** | druid, pipeline |
-| **ml-platform** | llm, mlops, rag |
+| **data-platform** | druid, pipeline, tenant-substrate |
 | **finops** | cost |
 | *(required input)* | managed-monitoring — no `team` default; the caller must supply one |

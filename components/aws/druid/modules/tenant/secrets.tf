@@ -6,6 +6,12 @@ resource "aws_secretsmanager_secret" "aurora_credentials" {
   name        = "druid/${var.environment}/${var.tenant_id}/aurora/credentials"
   description = "Aurora PostgreSQL credentials for Druid tenant ${var.tenant_id}"
 
+  # A deleted secret holds its name for the recovery window and refuses to be re-minted
+  # under it, and this name is deterministic — so the default 30 days turns a permitted
+  # teardown into a month-long block on the re-install that teardown exists to enable.
+  # managed-monitoring reasons the same way about its own cluster-scoped secrets.
+  recovery_window_in_days = local.allow_teardown ? 0 : 30
+
   tags = local.tenant_tags
 }
 
@@ -25,6 +31,12 @@ resource "aws_secretsmanager_secret" "msk_config" {
   name        = "druid/${var.environment}/${var.tenant_id}/msk/config"
   description = "MSK configuration for Druid tenant ${var.tenant_id}"
 
+  # A deleted secret holds its name for the recovery window and refuses to be re-minted
+  # under it, and this name is deterministic — so the default 30 days turns a permitted
+  # teardown into a month-long block on the re-install that teardown exists to enable.
+  # managed-monitoring reasons the same way about its own cluster-scoped secrets.
+  recovery_window_in_days = local.allow_teardown ? 0 : 30
+
   tags = local.tenant_tags
 }
 
@@ -40,6 +52,12 @@ resource "aws_secretsmanager_secret_version" "msk_config" {
 resource "aws_secretsmanager_secret" "s3_config" {
   name        = "druid/${var.environment}/${var.tenant_id}/s3/config"
   description = "S3 bucket configuration for Druid tenant ${var.tenant_id}"
+
+  # A deleted secret holds its name for the recovery window and refuses to be re-minted
+  # under it, and this name is deterministic — so the default 30 days turns a permitted
+  # teardown into a month-long block on the re-install that teardown exists to enable.
+  # managed-monitoring reasons the same way about its own cluster-scoped secrets.
+  recovery_window_in_days = local.allow_teardown ? 0 : 30
 
   tags = local.tenant_tags
 }

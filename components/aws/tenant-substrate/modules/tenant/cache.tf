@@ -56,6 +56,12 @@ resource "aws_secretsmanager_secret" "cache_auth" {
   description = "ElastiCache AUTH token for ${var.tenant_id}/${each.key}. Required on every connection when transit encryption is on."
   kms_key_id  = aws_kms_key.tenant.arn
 
+  # A deleted secret holds its name for the recovery window and refuses to be re-minted
+  # under it, and this name is deterministic — so the default 30 days turns a permitted
+  # teardown into a month-long block on the re-install that teardown exists to enable.
+  # managed-monitoring reasons the same way about its own cluster-scoped secrets.
+  recovery_window_in_days = local.allow_teardown ? 0 : 30
+
   tags = local.tenant_tags
 }
 

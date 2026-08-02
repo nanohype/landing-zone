@@ -29,7 +29,6 @@ variable "tenant_config" {
     rds_max_acu         = number
     rds_backup_days     = number
     msk_enabled         = bool
-    secret_rotation     = bool
     deletion_protection = bool
     index_logs_expiry   = number
     msq_expiry          = number
