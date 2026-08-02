@@ -45,6 +45,28 @@ locals {
   ]
 }
 
+# The ServiceAccounts the eks-gitops druid chart creates, and which pods actually run
+# as. A Pod Identity association binds by (cluster, namespace, ServiceAccount NAME) —
+# it does not fail when the name does not exist, it simply never attaches, and the pod
+# falls back to the node role. So the names below are a contract with a chart in
+# another repo, and getting one wrong is silent: the association is created, the
+# console shows it, and the workload gets AccessDenied on a path nobody is watching.
+#
+# Source of truth: eks-gitops/catalog/druid/chart/templates/serviceaccount.yaml, whose
+# `list "historical" "overlord" "broker" "msk-client"` produces these four. The pods
+# map onto them non-obviously — overlord runs the ingestion path (its StatefulSet plus
+# every task pod), and broker carries the query path for broker, router and
+# coordinator alike — which is why the AWS role names and the ServiceAccount names are
+# not the same words.
+locals {
+  chart_service_accounts = {
+    historical = "druid-historical"
+    ingestion  = "druid-overlord"
+    query      = "druid-broker"
+    msk_client = "druid-msk-client"
+  }
+}
+
 # Historical node role (read-only S3 access)
 module "historical_irsa" {
   source = "../../../../../modules/aws/workload-identity"
@@ -52,7 +74,7 @@ module "historical_irsa" {
   role_name       = "${local.prefix}-historical"
   cluster_name    = var.cluster_name
   namespace       = local.druid_namespace
-  service_account = "druid-historical"
+  service_account = local.chart_service_accounts.historical
 
   policy_statements = [
     {
@@ -76,7 +98,7 @@ module "ingestion_irsa" {
   role_name       = "${local.prefix}-ingestion"
   cluster_name    = var.cluster_name
   namespace       = local.druid_namespace
-  service_account = "druid-ingestion"
+  service_account = local.chart_service_accounts.ingestion
 
   policy_statements = concat(local.s3_policy_statements, var.tenant_config.msk_enabled ? [
     {
@@ -102,7 +124,7 @@ module "query_irsa" {
   role_name       = "${local.prefix}-query"
   cluster_name    = var.cluster_name
   namespace       = local.druid_namespace
-  service_account = "druid-query"
+  service_account = local.chart_service_accounts.query
 
   policy_statements = local.s3_policy_statements
 
@@ -117,7 +139,7 @@ module "msk_client_irsa" {
   role_name       = "${local.prefix}-msk-client"
   cluster_name    = var.cluster_name
   namespace       = local.druid_namespace
-  service_account = "druid-msk-client"
+  service_account = local.chart_service_accounts.msk_client
 
   policy_statements = [
     {

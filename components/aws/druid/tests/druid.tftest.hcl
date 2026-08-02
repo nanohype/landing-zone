@@ -242,3 +242,31 @@ run "rejects_single_az_coverage" {
 
   expect_failures = [terraform_data.az_coverage]
 }
+
+# Pod Identity binds by ServiceAccount NAME, and binds happily to a name that does not
+# exist: the association is created, it shows in the console, and the pod runs on the
+# node role instead — which holds the EKS worker defaults and nothing else, so the
+# workload fails with AccessDenied on deepstorage, indexlogs, MSQ and MSK while every
+# manifest is valid and every Application is Healthy.
+#
+# The names are spelled out here rather than read from the local, because a test that
+# derives them from the thing it is testing asserts nothing. They must match the four
+# the eks-gitops druid chart creates
+# (catalog/druid/chart/templates/serviceaccount.yaml), and the mapping is deliberately
+# not word-for-word: the AWS roles are named for what they do, the ServiceAccounts for
+# the Druid processes that run under them. overlord is the ingestion path (its
+# StatefulSet plus every task pod); broker is the query path (broker, router,
+# coordinator).
+run "pod_identity_binds_the_service_accounts_the_chart_creates" {
+  command = plan
+
+  assert {
+    condition = output.tenant_outputs["t1"].pod_identity_sas == {
+      historical = "druid-historical"
+      ingestion  = "druid-overlord"
+      query      = "druid-broker"
+      msk_client = "druid-msk-client"
+    }
+    error_message = "a Pod Identity association names a ServiceAccount the druid chart does not create — it will attach to nothing and the pod will run on the node role"
+  }
+}
