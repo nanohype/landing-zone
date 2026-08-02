@@ -63,7 +63,6 @@ variable "tenants" {
     rds_max_acu         = optional(number, 8)
     rds_backup_days     = optional(number, 7)
     msk_enabled         = optional(bool, true)
-    secret_rotation     = optional(bool, true)
     deletion_protection = optional(bool, true)
     index_logs_expiry   = optional(number, 30)
     msq_expiry          = optional(number, 1)
@@ -106,9 +105,9 @@ variable "force_destroy_buckets" {
     or drops a production Aurora.
 
     What it exposes: deepstorage holds the tenant's Druid segments — the sole durable copy of
-    that tenant's historical data on this cluster — and the tenant's Aurora cluster, which the
-    permitting apply un-protects via ModifyDBCluster. Leave it false unless the cluster is
-    genuinely disposable.
+    that tenant's historical data on this cluster — and the tenant's Aurora cluster, whose
+    protection the permitting apply clears. Leave it false unless the cluster is genuinely
+    disposable.
   EOT
   type        = bool
   default     = false

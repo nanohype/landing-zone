@@ -77,8 +77,8 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   are gated on the upstream `elbv2.k8s.aws/cluster` resource tag (it can only touch
   resources it created), argo-events' SQS/SNS access is scoped to the account/region
   (not `sqs:*`/`sns:*` on `*`), and each tenant's `kafka-cluster` grant is scoped to
-  that tenant's own MSK cluster/topic/group ARNs. Feature-gated grants (gateway
-  cognito/WAF) are omitted entirely when disabled rather than falling back to `*`.
+  that tenant's own MSK cluster/topic/group ARNs. Feature-gated grants are omitted
+  entirely when disabled rather than falling back to `*`.
 - **Residual** — inline policy scope is the tenant author's responsibility; the
   module does not widen it, but it does not audit it either. Keep `Resource`
   scoped or condition-locked (the checkov gate enforces this at CI).

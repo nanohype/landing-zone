@@ -305,6 +305,20 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-teardown-gates.py
 
+  # A field a tenant can declare that no resource reads is a control an operator can set,
+  # sees accepted, and believes is in force — `object_lock_enabled = true` on a production
+  # audit archive reads as WORM from the schema, the leaf and the docs, and delivers
+  # nothing. Same shape as a dead allow-rule: valid, accepted by every other gate, inert.
+  tenant-schema-readers:
+    name: Tenant Fields Reach A Resource
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-tenant-schema-readers.py
+
   plan:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]

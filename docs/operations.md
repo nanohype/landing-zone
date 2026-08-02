@@ -107,6 +107,10 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 | **evaluate** | Credential-less `terragrunt render` on every live leaf. Catches include/function/dependency-wiring breakage that per-component `tofu validate` cannot see. |
 | **mock-outputs** | Runs `scripts/check-mock-outputs.py` -- cross-checks every dependency `mock_outputs` key against the target component's real `outputs.tf`, so a renamed output fails here instead of resolving to a stale mock. |
 | **smoke-outputs** | Runs `scripts/check-smoke-outputs.py` -- cross-checks every output key a `components/**/smoke-test.sh` reads via `jq` against that component's real `outputs.tf`. `jq` yields the string "null" for a key that does not exist, so a stale read makes the smoke test assert against nothing; this fails the build instead. |
+| **account-local-deps** | Runs `scripts/check-account-local-deps.sh` -- a leaf under `live/aws/workload-*/` may not depend on a unit outside its own account directory. A terragrunt `dependency` resolves at config-parse time, so a cross-account one fails `init`, not just `apply`, and no `TF_VAR` bypasses it. CI cannot otherwise see this: `evaluate` resolves against mocks by design and `plan` green-skips without credentials. |
+| **architecture-components** | Runs `scripts/check-architecture-components.sh` -- the architecture doc's component inventory must be the components that exist, both directions. A documented component that is gone sends a reader to a missing directory; a component no table names is quieter and worse, because the doc reads as complete. |
+| **teardown-gates** | Runs `scripts/check-teardown-gates.py` -- in a component declaring `force_destroy_buckets`, every teardown-gate attribute must resolve permissively when the lever is set, and every protectable resource must carry one. A module without the lever declares why in the script's EXEMPT table. No tflint or checkov rule covers `force_destroy` or `deletion_protection`, and a `tofu test` assert cannot reach a grandchild module's attributes. |
+| **tenant-schema-readers** | Runs `scripts/check-tenant-schema-readers.py` -- every field a `tenants` object type declares must be read by a resource in that component. A field with no reader is a control an operator can set, sees accepted, and believes is in force. |
 | **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan` to show what would change (credential-gated -- skips green when `AWS_ROLE_ARN` is unset). |
 
 ### deploy.yml -- Manual Deploy
@@ -162,7 +166,7 @@ leaf. The other three carry hand-authored sizing maps in their live leaves.
    tenants = {
      new-tenant = {
        # see variables.tf for the full schema and defaults
-       deletion_protection = true
+       msk_enabled = true
      }
    }
    ```
@@ -173,7 +177,10 @@ leaf. The other three carry hand-authored sizing maps in their live leaves.
 
 Removing one tenant while the component stays up is a per-tenant act:
 
-1. Set that tenant's `deletion_protection = false` and apply
+1. Clear that tenant's protection and apply. Which field depends on the component:
+   `druid` and `governance` take `deletion_protection = false`; `tenant-substrate` takes
+   `relational.deletion_protection = false` per relational datastore; `pipeline` has no
+   such gate and needs nothing
 2. Remove the tenant entry from the `tenants` map
 3. Plan and verify the destroy actions
 4. Apply
@@ -183,7 +190,8 @@ Removing one tenant while the component stays up is a per-tenant act:
 Different act, different lever. `force_destroy_buckets` is the operator's declaration that
 this substrate is disposable, and it opens **every** teardown gate the component has at
 once — bucket `force_destroy`, Aurora's final snapshot and deletion protection, DynamoDB
-deletion protection. Development permits all of it unconditionally.
+deletion protection, and Secrets Manager's recovery window. Development permits all of it
+unconditionally.
 
 It is deliberately two acts, not one flag: none of those attributes take effect until an
 apply lands them in state, so permitting a teardown and performing one are separate
@@ -204,7 +212,7 @@ component for the full schema:
 |-----------|------------------|
 | **druid** | `rds_min_acu`, `rds_max_acu`, `rds_backup_days`, `msk_enabled`, `deletion_protection` |
 | **pipeline** | `batch_enabled`, `msk_enabled`, `batch_max_vcpus`, `batch_type` |
-| **governance** | `object_lock_enabled`, `event_bridge_enabled`, `point_in_time_recovery`, `deletion_protection` |
+| **governance** | `event_bridge_enabled`, `point_in_time_recovery`, `deletion_protection` |
 | **tenant-substrate** | per-datastore: `deletion_policy`, plus the `relational` / `keyValue` / `objectStore` / `queue` / `cache` / `stream` blocks the Platform CR declares |
 
 ## Monitoring and Alerting

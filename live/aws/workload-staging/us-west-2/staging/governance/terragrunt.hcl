@@ -11,10 +11,8 @@ inputs = {
   tenants = {
     default = {
       deletion_protection    = true
-      object_lock_enabled    = false
       point_in_time_recovery = true
       lifecycle_ia_days      = 60
-      cost_ttl_days          = 180
     }
   }
 }
