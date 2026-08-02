@@ -52,3 +52,16 @@ output "msk_client_policy_json" {
   description = "Rendered inline IAM policy JSON for the MSK client role (null when msk disabled)."
   value       = try(module.msk_client_irsa[0].role_policy_json, null)
 }
+
+output "pod_identity_service_accounts" {
+  description = <<-EOT
+    The ServiceAccount name each Pod Identity association binds, keyed by role. Published
+    so the binding is assertable: an association naming a ServiceAccount that does not
+    exist is created without error and simply never attaches, so the pod runs on the node
+    role and the failure surfaces only as AccessDenied on a data path.
+
+    The names this must match are produced by eks-gitops
+    catalog/druid/chart/templates/serviceaccount.yaml.
+  EOT
+  value       = local.chart_service_accounts
+}

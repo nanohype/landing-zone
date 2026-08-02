@@ -13,6 +13,7 @@ output "tenant_outputs" {
       msk_bootstrap          = tenant.msk_bootstrap
       ingestion_policy_json  = tenant.ingestion_policy_json
       msk_client_policy_json = tenant.msk_client_policy_json
+      pod_identity_sas       = tenant.pod_identity_service_accounts
     }
   }
 }
