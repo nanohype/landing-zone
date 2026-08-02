@@ -76,82 +76,6 @@ resource "aws_ce_anomaly_subscription" "this" {
 }
 
 ################################################################################
-# CUR Report S3 Bucket
-################################################################################
-
-module "cur_bucket" {
-  source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
-
-  count = var.enable_cur_report ? 1 : 0
-
-  bucket = "${var.environment}-${local.account_id}-cur-reports"
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-
-  server_side_encryption_configuration = {
-    rule = {
-      apply_server_side_encryption_by_default = {
-        sse_algorithm = "AES256"
-      }
-    }
-  }
-
-  lifecycle_rule = [
-    {
-      id      = "transition-to-ia"
-      enabled = true
-      transition = [
-        {
-          days          = 90
-          storage_class = "STANDARD_IA"
-        }
-      ]
-    }
-  ]
-
-  attach_policy = true
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowCURDelivery"
-        Effect    = "Allow"
-        Principal = { Service = "billingreports.amazonaws.com" }
-        Action    = ["s3:GetBucketAcl", "s3:GetBucketPolicy"]
-        Resource  = "arn:aws:s3:::${var.environment}-${local.account_id}-cur-reports"
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = local.account_id
-            "aws:SourceArn"     = "arn:aws:cur:us-east-1:${local.account_id}:definition/*"
-          }
-        }
-      },
-      {
-        Sid       = "AllowCURWrite"
-        Effect    = "Allow"
-        Principal = { Service = "billingreports.amazonaws.com" }
-        Action    = "s3:PutObject"
-        Resource  = "arn:aws:s3:::${var.environment}-${local.account_id}-cur-reports/*"
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = local.account_id
-            "aws:SourceArn"     = "arn:aws:cur:us-east-1:${local.account_id}:definition/*"
-          }
-        }
-      }
-    ]
-  })
-
-  force_destroy = var.environment == "development"
-
-  tags = merge(local.tags, { Name = "${var.environment}-cur-reports" })
-}
-
-################################################################################
 # Cost Alerts SNS Topic — SSE-KMS
 #
 # AWS Cost Anomaly Detection publishes to this topic; SSE-SNS makes SNS call
@@ -230,15 +154,6 @@ resource "aws_ssm_parameter" "budget_limit" {
   name  = "/platform/${var.environment}/cost/budget-limit"
   type  = "String"
   value = tostring(var.monthly_budget_limit)
-  tags  = local.tags
-}
-
-resource "aws_ssm_parameter" "cur_bucket" {
-  count = var.enable_cur_report ? 1 : 0
-
-  name  = "/platform/${var.environment}/cost/cur-bucket"
-  type  = "String"
-  value = module.cur_bucket[0].s3_bucket_id
   tags  = local.tags
 }
 

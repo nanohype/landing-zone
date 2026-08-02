@@ -48,12 +48,6 @@ variable "anomaly_threshold" {
   default     = 100
 }
 
-variable "enable_cur_report" {
-  description = "Enable Cost & Usage Report (typically only one per account)"
-  type        = bool
-  default     = false
-}
-
 variable "team" {
   description = "Owning team for this component"
   type        = string

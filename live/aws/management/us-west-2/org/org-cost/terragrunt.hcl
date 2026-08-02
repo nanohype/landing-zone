@@ -17,7 +17,15 @@ inputs = {
 
   enable_compute_optimizer   = true
   enable_savings_plans_alarm = false
-  enable_cur_export          = false
+
+  # The account's one Cost and Usage Report. A CUR has no filter — it always covers the
+  # whole account — so this belongs to the single org-scoped root rather than to any
+  # per-environment one, and there is exactly one of it.
+  #
+  # It is the billed side of every budget the platform enforces. Consumers read its
+  # location from /platform/org/cost/cur-export-{bucket,prefix,name} and build their own
+  # query layer over it; nothing else in the org defines a CUR.
+  enable_cur_export = true
 
   cost_categories = {
     ByEnvironment = {

@@ -4,7 +4,6 @@ set -euo pipefail
 # Parse outputs
 BUDGET_NAME=$(jq -r '.budget_name.value' outputs.json)
 ANOMALY_MONITOR_ARN=$(jq -r '.anomaly_monitor_arn.value // "null"' outputs.json)
-CUR_BUCKET=$(jq -r '.cur_bucket_name.value // "null"' outputs.json)
 
 # --- Budget ---
 echo "Checking budget '${BUDGET_NAME}'..."
@@ -27,18 +26,6 @@ if [[ "$ANOMALY_MONITOR_ARN" != "null" ]]; then
   echo "  Anomaly monitor exists"
 else
   echo "Skipping anomaly monitor (not enabled)"
-fi
-
-# --- CUR Bucket ---
-if [[ "$CUR_BUCKET" != "null" ]]; then
-  echo "Checking CUR S3 bucket '${CUR_BUCKET}'..."
-  if ! aws s3api head-bucket --bucket "$CUR_BUCKET" 2>/dev/null; then
-    echo "FAIL: CUR bucket '${CUR_BUCKET}' not found"
-    exit 1
-  fi
-  echo "  CUR bucket exists"
-else
-  echo "Skipping CUR bucket (not enabled)"
 fi
 
 echo "PASS: all cost checks passed"
