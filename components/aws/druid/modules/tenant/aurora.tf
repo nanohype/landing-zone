@@ -91,11 +91,22 @@ module "aurora" {
   }
 
   backup_retention_period = var.tenant_config.rds_backup_days
-  deletion_protection     = var.tenant_config.deletion_protection
 
-  # Always set one of these so destroy is reachable once deletion_protection is
-  # clear. Development / force_destroy_buckets skip the snapshot; otherwise take
-  # a final snapshot under a stable identifier so a careful teardown still works.
+  # Every teardown gate moves on one lever. A permitted teardown clears protection
+  # here in the same apply that lands force_destroy on the buckets, so the destroy
+  # that follows reaches both; otherwise the leaf's own pin stands.
+  #
+  # Splitting the two is worse than either posture on its own: the bucket modules
+  # hold no reference to this cluster, so the graph walker destroys them
+  # concurrently. Protection left armed while the snapshot is skipped means the
+  # buckets empty, DeleteDBCluster fails, and the reverse sweep halts above
+  # cluster and network — deepstorage gone, the database still standing, and EKS,
+  # VPC and NAT still billing.
+  deletion_protection = local.allow_teardown ? false : var.tenant_config.deletion_protection
+
+  # Always set one of these so the destroy is reachable. Development /
+  # force_destroy_buckets skip the snapshot; otherwise take a final snapshot under
+  # a stable identifier so a careful teardown still works.
   skip_final_snapshot       = local.allow_teardown
   final_snapshot_identifier = local.allow_teardown ? null : "${local.prefix}-aurora-final"
 

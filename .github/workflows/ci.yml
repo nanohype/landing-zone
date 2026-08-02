@@ -288,6 +288,23 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-smoke-outputs.py
 
+  # Every teardown gate on a component must open on the same lever. AWS spreads the
+  # protections across unrelated resources and nothing in the dependency graph joins
+  # them, so a partially-gated component empties its buckets, fails on the database it
+  # still protects, and halts the reverse sweep with the cluster, VPC and NAT still
+  # billing. No tflint or checkov rule covers force_destroy or deletion_protection, and
+  # a `tofu test` cannot reach a grandchild module's attributes — this is the only gate
+  # that reads the resource bodies.
+  teardown-gates:
+    name: Teardown Gates Move Together
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-teardown-gates.py
+
   plan:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]

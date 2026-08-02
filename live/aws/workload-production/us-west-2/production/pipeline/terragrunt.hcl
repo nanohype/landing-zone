@@ -10,7 +10,6 @@ include "envcommon" {
 inputs = {
   tenants = {
     default = {
-      deletion_protection           = true
       msk_enabled                   = true
       batch_max_vcpus               = 64
       batch_type                    = "FARGATE"

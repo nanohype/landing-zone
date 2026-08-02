@@ -66,9 +66,12 @@ variable "tenants" {
 
 variable "force_destroy_buckets" {
   description = <<-EOT
-    Allow this component's S3 audit and guardrail buckets to be emptied on destroy, in any
-    environment. Development already allows it unconditionally; this is the opt-in for
-    everywhere else.
+    Permit a full teardown of this component in any environment: empty its S3 audit and
+    guardrail buckets, and clear deletion protection on its audit and cost tables. Development
+    already permits both unconditionally; this is the opt-in for everywhere else.
+
+    One lever, every gate. A teardown gate that stays armed while its siblings open does not
+    protect the data — it empties the buckets and then wedges on the tables.
 
     It exists because a cluster here is an agent-managed, often short-lived thing — eks-fleet
     vends spokes with a ttlDays and a hub reaper that deletes them on expiry — so a teardown is
@@ -76,12 +79,13 @@ variable "force_destroy_buckets" {
     non-development spoke wedges on BucketNotEmpty (both buckets are versioned) and leaves the
     cluster, VPC and NAT gateways standing and billing.
 
-    Deliberately two acts, not one flag: force_destroy has no effect until a successful apply
-    lands it in state, so an operator (or an agent) must apply with this set and only then
-    destroy. There is no single command that reaches a populated production audit bucket.
+    Deliberately two acts, not one flag: neither takes effect until a successful apply lands
+    them in state, so an operator (or an agent) must apply with this set and only then destroy.
+    There is no single command that reaches a populated production audit bucket.
 
-    What it exposes: the tenant's audit archive and guardrail artifacts. Leave it false unless
-    the cluster is genuinely disposable.
+    What it exposes: the tenant's audit archive and guardrail artifacts, and the audit and cost
+    tables (which keep point-in-time recovery — that is a separate control and this flag does
+    not touch it). Leave it false unless the cluster is genuinely disposable.
   EOT
   type        = bool
   default     = false

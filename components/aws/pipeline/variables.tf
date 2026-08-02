@@ -59,7 +59,6 @@ variable "cluster_name" {
 variable "tenants" {
   description = "Map of tenant configurations for pipeline infrastructure"
   type = map(object({
-    deletion_protection           = optional(bool, true)
     msk_enabled                   = optional(bool, true)
     batch_enabled                 = optional(bool, true)
     schema_registry_enabled       = optional(bool, true)

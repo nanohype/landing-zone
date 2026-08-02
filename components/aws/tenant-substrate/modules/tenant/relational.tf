@@ -63,11 +63,16 @@ module "relational" {
   }
 
   backup_retention_period = each.value.relational.backup_retention_days
-  deletion_protection     = each.value.relational.deletion_protection
 
-  # Always set one of these so destroy is reachable once deletion_protection is
-  # clear. Development / force_destroy_buckets skip the snapshot; otherwise take
-  # a final snapshot under a stable per-datastore identifier.
+  # Every teardown gate moves on one lever — see objectstore.tf, which gates
+  # force_destroy on the same local. A permitted teardown clears protection here in
+  # the same apply, so the destroy that follows reaches the database as well as the
+  # buckets; otherwise the datastore's own declaration stands.
+  deletion_protection = local.allow_teardown ? false : each.value.relational.deletion_protection
+
+  # Always set one of these so the destroy is reachable. Development /
+  # force_destroy_buckets skip the snapshot; otherwise take a final snapshot under
+  # a stable per-datastore identifier.
   skip_final_snapshot       = local.allow_teardown
   final_snapshot_identifier = local.allow_teardown ? null : "${local.prefix}-${each.key}-final"
 

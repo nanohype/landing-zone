@@ -147,11 +147,15 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 ## Tenant Management
 
-Seven components are multi-tenant (`druid`, `pipeline`, `gateway`, `llm`, `mlops`, `rag`, `governance`).
+Four components are multi-tenant: `druid`, `pipeline`, `governance` and `tenant-substrate`.
+
+`tenant-substrate` is the generic one — its `tenants` map is rendered from the Platform CRs
+by the factory, so a tenant arrives there by declaring `spec.datastores`, not by editing a
+leaf. The other three carry hand-authored sizing maps in their live leaves.
 
 ### Adding a Tenant
 
-1. Identify the component(s) the tenant needs (e.g., `druid`, `pipeline`, `gateway`)
+1. Identify the component(s) the tenant needs (e.g. `druid`, `pipeline`)
 2. Edit the environment's `terragrunt.hcl` for each component
 3. Add an entry to the `tenants` map:
    ```hcl
@@ -167,24 +171,41 @@ Seven components are multi-tenant (`druid`, `pipeline`, `gateway`, `llm`, `mlops
 
 ### Removing a Tenant
 
-1. Set `deletion_protection = false` and apply (for components that support it)
+Removing one tenant while the component stays up is a per-tenant act:
+
+1. Set that tenant's `deletion_protection = false` and apply
 2. Remove the tenant entry from the `tenants` map
 3. Plan and verify the destroy actions
 4. Apply
 
+### Tearing Down a Whole Component
+
+Different act, different lever. `force_destroy_buckets` is the operator's declaration that
+this substrate is disposable, and it opens **every** teardown gate the component has at
+once — bucket `force_destroy`, Aurora's final snapshot and deletion protection, DynamoDB
+deletion protection. Development permits all of it unconditionally.
+
+It is deliberately two acts, not one flag: none of those attributes take effect until an
+apply lands them in state, so permitting a teardown and performing one are separate
+commands. There is no single invocation that reaches a populated production bucket.
+
+Do not gate a subset. AWS spreads these protections across resources the dependency graph
+does not join, so the destroy walks them concurrently — a component whose buckets open
+while its database stays protected empties the data, fails on the database, and halts the
+reverse sweep above cluster and network, leaving EKS, the VPC and the NAT gateways
+billing. `scripts/check-teardown-gates.py` holds that property in CI.
+
 ### Tenant Configuration Reference
 
-Each multi-tenant component has different tenant fields. Check the `variables.tf` in the component for the full schema:
+Each multi-tenant component has different tenant fields. Check the `variables.tf` in the
+component for the full schema:
 
 | Component | Key Tenant Fields |
 |-----------|------------------|
 | **druid** | `rds_min_acu`, `rds_max_acu`, `rds_backup_days`, `msk_enabled`, `deletion_protection` |
-| **pipeline** | `batch_enabled`, `msk_enabled`, `batch_max_vcpus`, `deletion_protection` |
-| **gateway** | `waf_enabled`, `cognito_enabled`, `waf_rate_limit`, `throttle_rate/burst/quota` |
-| **llm** | `efs_performance_mode`, `sqs_visibility_timeout`, `dynamodb_pitr`, `deletion_protection` |
-| **mlops** | `ecr_enabled`, `point_in_time_recovery`, `run_ttl_days`, `deletion_protection` |
-| **rag** | `opensearch_standby_replicas`, `opensearch_dimensions`, `document_versioned`, `deletion_protection` |
+| **pipeline** | `batch_enabled`, `msk_enabled`, `batch_max_vcpus`, `batch_type` |
 | **governance** | `object_lock_enabled`, `event_bridge_enabled`, `point_in_time_recovery`, `deletion_protection` |
+| **tenant-substrate** | per-datastore: `deletion_policy`, plus the `relational` / `keyValue` / `objectStore` / `queue` / `cache` / `stream` blocks the Platform CR declares |
 
 ## Monitoring and Alerting
 
