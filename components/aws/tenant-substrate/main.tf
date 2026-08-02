@@ -32,6 +32,7 @@ module "tenant" {
   environment           = var.environment
   account_id            = local.account_id
   tenant_id             = each.key
+  cluster_name          = var.cluster_name
   datastores            = each.value.datastores
   vpc_id                = var.vpc_id
   private_subnets       = var.private_subnet_ids
