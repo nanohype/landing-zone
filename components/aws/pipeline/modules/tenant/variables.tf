@@ -25,7 +25,6 @@ variable "tenant_id" {
 variable "tenant_config" {
   description = "Tenant configuration"
   type = object({
-    deletion_protection           = bool
     msk_enabled                   = bool
     batch_enabled                 = bool
     schema_registry_enabled       = bool

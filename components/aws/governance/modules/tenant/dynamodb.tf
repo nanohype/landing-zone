@@ -43,7 +43,11 @@ resource "aws_dynamodb_table" "audit" {
     enabled = var.tenant_config.point_in_time_recovery
   }
 
-  deletion_protection_enabled = var.tenant_config.deletion_protection
+  # Every teardown gate moves on one lever — audit_storage.tf and
+  # guardrail_bucket.tf gate force_destroy on the same local. A permitted teardown
+  # clears protection here in the same apply, so the buckets and the tables come
+  # down together instead of the buckets emptying against a table that refuses.
+  deletion_protection_enabled = local.allow_teardown ? false : var.tenant_config.deletion_protection
 
   tags = local.tenant_tags
 }
@@ -83,7 +87,11 @@ resource "aws_dynamodb_table" "cost" {
     enabled = var.tenant_config.point_in_time_recovery
   }
 
-  deletion_protection_enabled = var.tenant_config.deletion_protection
+  # Every teardown gate moves on one lever — audit_storage.tf and
+  # guardrail_bucket.tf gate force_destroy on the same local. A permitted teardown
+  # clears protection here in the same apply, so the buckets and the tables come
+  # down together instead of the buckets emptying against a table that refuses.
+  deletion_protection_enabled = local.allow_teardown ? false : var.tenant_config.deletion_protection
 
   tags = local.tenant_tags
 }

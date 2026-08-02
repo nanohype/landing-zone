@@ -43,9 +43,14 @@ resource "aws_dynamodb_table" "key_value" {
     enabled = each.value.key_value.point_in_time_recovery
   }
 
-  # A Retain datastore also gets the AWS-level backstop, so an accidental
-  # destroy is blocked until the protection is explicitly cleared.
-  deletion_protection_enabled = each.value.deletion_policy == "Retain"
+  # A Retain datastore also gets the AWS-level backstop, so an accidental destroy
+  # is blocked. A permitted teardown clears it: deletion_policy is the datastore's
+  # declaration about its own data, force_destroy_buckets is the operator's
+  # declaration about the whole substrate, and the operator's wins — objectstore.tf
+  # already reads it that way, so a Retain datastore that kept this armed would
+  # protect its table while its bucket emptied, and wedge the reverse sweep. It also
+  # keeps development tearable down unconditionally, which e2e depends on.
+  deletion_protection_enabled = local.allow_teardown ? false : each.value.deletion_policy == "Retain"
 
   tags = local.datastore_tags["keyValue"]
 }

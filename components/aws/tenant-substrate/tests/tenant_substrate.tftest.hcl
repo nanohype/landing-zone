@@ -7,8 +7,9 @@
 # tenant key that doubles the environment token or an unknown kind. (2) The
 # BackupPolicy tag the central backup plan selects on lands on exactly the
 # datastore kinds AWS Backup can protect and on none of the others, a
-# redrive-configured queue gets its dead-letter queue, and a Retain datastore
-# gets the AWS-level deletion backstop.
+# redrive-configured queue gets its dead-letter queue, and every teardown gate
+# moves on one lever — armed together in a protected environment, open together
+# where a teardown is permitted.
 #
 # Runs at command = plan against a mocked AWS provider (no account, no network).
 
@@ -212,10 +213,13 @@ run "every_kind_provisions_and_is_backup_tagged" {
     error_message = "cache AUTH secret must be encrypted with the tenant's own CMK"
   }
 
-  # a Retain datastore (the default policy) gets the AWS-level deletion backstop.
+  # A permitted teardown opens every gate. This run is development, where teardown is
+  # unconditional, so the Retain backstop is clear — the objectStore in this same module
+  # already force-destroys under the same lever, and e2e tears this environment down on
+  # every run. The protected direction is asserted in the run below.
   assert {
-    condition     = aws_dynamodb_table.key_value["kv"].deletion_protection_enabled
-    error_message = "a Retain keyValue datastore must enable DynamoDB deletion protection"
+    condition     = aws_dynamodb_table.key_value["kv"].deletion_protection_enabled == false
+    error_message = "a permitted teardown must clear the keyValue backstop, or the reverse sweep empties the object store and then wedges on the table"
   }
 
   # a redrive budget provisions the dead-letter queue and wires the redrive.
@@ -502,5 +506,44 @@ run "each_tenant_key_is_named_for_its_own_tenant" {
   assert {
     condition     = aws_kms_key.tenant.enable_key_rotation == true
     error_message = "rotation is free here — nothing pins a key version and both consumers resolve by ARN"
+  }
+}
+
+# The protected direction. Staging with the lever unset is the posture a real tenant
+# runs in: the datastore's own declaration stands, and a destroy is refused at the AWS
+# level rather than half-completing. Asserting only the permissive direction would pass
+# on a gate that is wired open unconditionally, which is the failure this pair exists to
+# catch — a gate is only correct if it holds in both directions.
+run "protected_environment_keeps_every_teardown_gate_armed" {
+  command = plan
+
+  module {
+    source = "./modules/tenant"
+  }
+
+  variables {
+    environment           = "staging"
+    force_destroy_buckets = false
+    account_id            = "123456789012"
+    tenant_id             = "t1"
+    vpc_id                = "vpc-0123456789abcdef0"
+    private_subnets       = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+    cluster_sg_id         = "sg-0123456789abcdef0"
+    backup_policy         = "daily"
+    tags                  = {}
+    datastores = [
+      { name = "kv", kind = "keyValue", key_value = { partition_key = { name = "pk", type = "S" } } },
+      { name = "obj", kind = "objectStore" },
+    ]
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.key_value["kv"].deletion_protection_enabled
+    error_message = "a Retain keyValue datastore in a protected environment must keep the DynamoDB backstop"
+  }
+
+  assert {
+    condition     = aws_s3_bucket.object_store["obj"].force_destroy == false
+    error_message = "an object store in a protected environment must not be force-destroyable"
   }
 }

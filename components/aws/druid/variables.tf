@@ -86,9 +86,13 @@ variable "tenants" {
 
 variable "force_destroy_buckets" {
   description = <<-EOT
-    Allow this component's S3 buckets to be emptied on destroy, and skip Aurora's final
-    snapshot, in any environment. Development already allows both unconditionally; this is
-    the opt-in for everywhere else.
+    Permit a full teardown of this component in any environment: empty its S3 buckets, skip
+    Aurora's final snapshot, and clear Aurora's deletion protection. Development already
+    permits all three unconditionally; this is the opt-in for everywhere else.
+
+    One lever, every gate. A teardown gate that stays armed while its siblings open does not
+    protect the data — it destroys the buckets and then wedges on the database, which is
+    strictly worse than either posture on its own.
 
     It exists because a cluster here is an agent-managed, often short-lived thing — eks-fleet
     vends spokes with a ttlDays and a hub reaper that deletes them on expiry — so a teardown is
@@ -96,13 +100,14 @@ variable "force_destroy_buckets" {
     non-development spoke wedges on BucketNotEmpty / missing final_snapshot_identifier and
     leaves the cluster, VPC and NAT gateways standing and billing.
 
-    Deliberately two acts, not one flag: force_destroy and skip_final_snapshot have no effect
-    until a successful apply lands them in state, so an operator (or an agent) must apply with
-    this set and only then destroy. There is no single command that reaches a populated
-    production deepstorage bucket or drops a production Aurora without a final snapshot.
+    Deliberately two acts, not one flag: none of the three take effect until a successful apply
+    lands them in state, so an operator (or an agent) must apply with this set and only then
+    destroy. There is no single command that reaches a populated production deepstorage bucket
+    or drops a production Aurora.
 
     What it exposes: deepstorage holds the tenant's Druid segments — the sole durable copy of
-    that tenant's historical data on this cluster. Leave it false unless the cluster is
+    that tenant's historical data on this cluster — and the tenant's Aurora cluster, which the
+    permitting apply un-protects via ModifyDBCluster. Leave it false unless the cluster is
     genuinely disposable.
   EOT
   type        = bool

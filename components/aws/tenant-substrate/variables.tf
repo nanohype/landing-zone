@@ -194,9 +194,15 @@ variable "tenants" {
 
 variable "force_destroy_buckets" {
   description = <<-EOT
-    Allow this component's S3 object stores to be emptied on destroy, and skip Aurora's
-    final snapshot, in any environment. Development already allows both unconditionally;
-    this is the opt-in for everywhere else.
+    Permit a full teardown of this component in any environment: empty its S3 object stores,
+    skip Aurora's final snapshot, and clear deletion protection on both Aurora and any Retain
+    key-value table. Development already permits all of it unconditionally; this is the opt-in
+    for everywhere else.
+
+    One lever, every gate. deletion_policy is a datastore's declaration about its own data;
+    this flag is the operator's declaration about the whole substrate, and the operator's wins.
+    The alternative is a Retain table that survives while its own objectStore empties around
+    it, wedging the reverse sweep with nothing protected.
 
     It exists because a cluster here is an agent-managed, often short-lived thing — eks-fleet
     vends spokes with a ttlDays and a hub reaper that deletes them on expiry — so a teardown is
@@ -204,14 +210,14 @@ variable "force_destroy_buckets" {
     non-development spoke wedges on BucketNotEmpty / missing final_snapshot_identifier and
     leaves the cluster, VPC and NAT gateways standing and billing.
 
-    Deliberately two acts, not one flag: force_destroy and skip_final_snapshot have no effect
-    until a successful apply lands them in state, so an operator (or an agent) must apply with
-    this set and only then destroy. There is no single command that reaches a populated
-    production object store or drops a production Aurora without a final snapshot.
+    Deliberately two acts, not one flag: none of it takes effect until a successful apply lands
+    it in state, so an operator (or an agent) must apply with this set and only then destroy.
+    There is no single command that reaches a populated production object store or drops a
+    production Aurora.
 
-    What it exposes: every Platform-declared objectStore (versioning defaults Enabled) and
-    every relational Aurora for every tenant on this cluster. Leave it false unless the
-    cluster is genuinely disposable.
+    What it exposes: every Platform-declared objectStore (versioning defaults Enabled), every
+    relational Aurora, and every Retain keyValue table, for every tenant on this cluster. Leave
+    it false unless the cluster is genuinely disposable.
   EOT
   type        = bool
   default     = false
