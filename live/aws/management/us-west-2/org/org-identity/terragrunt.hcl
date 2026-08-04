@@ -175,6 +175,62 @@ inputs = {
             Resource = "*"
           },
           {
+            # Reading a KMS-encrypted log group needs kms:Decrypt on the key
+            # CloudWatch Logs encrypted it with. Without this, every
+            # logs:GetLogEvents above returns AccessDenied on every encrypted
+            # group — which is every group this platform creates — so the
+            # auditor's whole read surface was arranged and never usable.
+            #
+            # Scoped by ALIAS, not key ARN: the key lives in a workload account
+            # this component cannot read at plan time, and the alias is what
+            # carries the meaning. `<environment>-platform-logs` exists only
+            # where that environment set separate_logs_key on its secrets
+            # component.
+            #
+            # Mode-independence is the point, and it is why there is no branch
+            # here. Where logs and data share one key that key is aliased
+            # `<environment>-platform-secrets`, so this statement matches
+            # nothing and the auditor gets no decrypt at all — which is correct,
+            # because decrypt on that key IS decrypt on platform data. The
+            # auditor gains the ability to read logs exactly when, and only
+            # where, reading logs stops implying reading data.
+            Sid      = "AuditorReadSeparatedLogKeys"
+            Effect   = "Allow"
+            Action   = ["kms:Decrypt", "kms:DescribeKey"]
+            Resource = "arn:aws:kms:*:*:key/*"
+            Condition = {
+              "ForAnyValue:StringLike" = {
+                "kms:ResourceAliases" = "alias/*-platform-logs"
+              }
+            }
+          },
+          {
+            # Belt to the braces above. The Allow is already narrow, but an
+            # explicit Deny cannot be overridden by any Allow, so this holds
+            # even if someone later attaches a managed policy or widens a
+            # statement: the auditor may never use the key platform data is
+            # encrypted with.
+            #
+            # Consequence worth knowing rather than discovering: Athena results
+            # and the cost buckets are encrypted with that same data key, so the
+            # `athena:*` grant above can run a query and not read its output.
+            # Auditing spend is FinOps's job, and FinOpsDenyIamKms puts that
+            # permission set under the same constraint.
+            Sid    = "AuditorDenyDataKey"
+            Effect = "Deny"
+            Action = [
+              "kms:Decrypt",
+              "kms:GenerateDataKey*",
+              "kms:ReEncrypt*",
+            ]
+            Resource = "arn:aws:kms:*:*:key/*"
+            Condition = {
+              "ForAnyValue:StringLike" = {
+                "kms:ResourceAliases" = "alias/*-platform-secrets"
+              }
+            }
+          },
+          {
             Sid      = "AuditorDenyDataPlaneSecrets"
             Effect   = "Deny"
             Action   = "secretsmanager:GetSecretValue"

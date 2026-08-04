@@ -444,3 +444,27 @@ run "tenant_baseline_grants_s3_scoped_data_kms" {
     error_message = "tenant baseline must grant kms:Decrypt/GenerateDataKey on the data CMK, confined to S3 via kms:ViaService, so tenants can read/write the SSE-KMS model-artifacts bucket"
   }
 }
+
+# The operator issues no KMS grants. A tenant's access to its own key is an IAM
+# policy the operator writes (tenant-key-access, naming exactly one key ARN), not
+# a grant it creates — so kms:CreateGrant on the operator role authorizes nothing
+# it does, and authorizes plenty it should not.
+#
+# This is the platform's own threat model, entry 3: grant decrypt on the data key
+# to an attacker-controlled tenant role. The statement that used to live here made
+# that reachable, on `key/*`, with no condition narrowing which key. Re-adding it
+# should require deleting this test and explaining why.
+run "operator_cannot_issue_kms_grants" {
+  command = plan
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
+      s if length(setintersection(
+        toset(try(tolist(s.Action), [try(s.Action, "")])),
+        toset(["kms:CreateGrant", "kms:RevokeGrant", "kms:ListGrants"]),
+      )) > 0
+    ]) == 0
+    error_message = "the operator role must hold no kms grant-management action — it makes no KMS call, and CreateGrant on the platform data key is threat-model entry 3 (grant decrypt to an attacker-controlled tenant role)"
+  }
+}
