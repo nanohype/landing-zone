@@ -15,12 +15,49 @@ locals {
     ]
   ])
 
-  # Flatten account assignments: {group}-{ps}-{account} → {group, ps, account_id}
-  account_assignment_map = {
-    for a in var.account_assignments :
-    "${a.group}-${a.permission_set}-${a.account_id}" => a
+  # Accounts by NAME. This component runs in the management account, the one place
+  # ListAccounts resolves, and it already derives its SSO instance rather than taking
+  # an ARN — same idiom: name the thing, look up the identifier.
+  #
+  # Account IDs are deliberately not written down here. They are real identifiers in a
+  # public tree, and a pasted one goes stale in silence the day an account is recreated
+  # — the assignment still applies, to nothing.
+  org_account_ids = {
+    for a in data.aws_organizations_organization.this.accounts : a.name => a.id
   }
+
+  # An auditor is org-wide by nature, and so is anything else that reads every account.
+  # Expressing that as "all accounts" rather than a list means adding an account to the
+  # organization does not silently leave it unaudited.
+  org_wide_assignment_map = merge([
+    for a in var.org_wide_assignments : {
+      for name, id in local.org_account_ids :
+      "${a.group}-${a.permission_set}-${name}" => {
+        group          = a.group
+        permission_set = a.permission_set
+        account_id     = id
+        account_name   = name
+      }
+    }
+  ]...)
+
+  # Named assignments. lookup() with an empty fallback rather than a hard index so a
+  # wrong name reaches the precondition below, which can name it, instead of failing
+  # with an opaque map error.
+  named_assignment_map = {
+    for a in var.account_assignments :
+    "${a.group}-${a.permission_set}-${a.account_name}" => {
+      group          = a.group
+      permission_set = a.permission_set
+      account_id     = lookup(local.org_account_ids, a.account_name, "")
+      account_name   = a.account_name
+    }
+  }
+
+  account_assignment_map = merge(local.org_wide_assignment_map, local.named_assignment_map)
 }
+
+data "aws_organizations_organization" "this" {}
 
 ################################################################################
 # SSO Instance Discovery
@@ -110,6 +147,17 @@ resource "aws_ssoadmin_account_assignment" "this" {
 
   target_id   = each.value.account_id
   target_type = "AWS_ACCOUNT"
+
+  lifecycle {
+    # An assignment naming an account the organization does not have is the failure
+    # this component must not absorb quietly: terraform would be happy, the apply
+    # would be green, and a person who believes they have access would not. Fail the
+    # apply and say which name missed.
+    precondition {
+      condition     = each.value.account_id != ""
+      error_message = "account_assignments names an account that is not in this organization: ${each.value.account_name}. Assignments resolve by account NAME (ids are deliberately not written into this repo). Check the name against `aws organizations list-accounts`, or use org_wide_assignments for a permission set that should reach every account."
+    }
+  }
 }
 
 ################################################################################

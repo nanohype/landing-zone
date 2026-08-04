@@ -310,5 +310,20 @@ inputs = {
     finops          = { description = "Cost and budget operators" }
   }
 
+  # Auditors reach every account, because an auditor that reads one account of several is
+  # not auditing. Expressed org-wide rather than as a list so adding an account to the
+  # organization does not quietly leave it outside the audit surface.
+  #
+  # What this buys depends on the environment: the Auditor permission set can decrypt log
+  # groups only where that environment separated its logs key (secrets.separate_logs_key),
+  # because where one key holds both, decrypt on it is decrypt on platform data and the
+  # permission set's own Deny withholds it.
+  org_wide_assignments = [
+    { group = "auditors", permission_set = "Auditor" },
+  ]
+
+  # Assignments against named accounts. Empty because nothing here needs to reach some
+  # accounts and not others yet — add entries as {group, permission_set, account_name},
+  # never an account id.
   account_assignments = []
 }
