@@ -268,49 +268,61 @@ inputs = {
       })
     }
 
-    # DO NOT ATTACH THIS AS WRITTEN. It denies more than it means to, and the
-    # enforcement it was written to back up never existed.
+    # Deny DIRECT use of the two platform CMKs. Every legitimate use of them is
+    # mediated by a service — Secrets Manager for secrets, CloudWatch Logs for log
+    # groups, S3 for the artifacts, cost and Bedrock-invocation buckets — and
+    # kms:ViaService is populated only on those forward-access sessions. A request
+    # that reaches these keys with ViaService absent is a principal calling KMS
+    # directly with ciphertext it already holds, which is the exfiltration shape and
+    # not any path this platform uses.
     #
-    # The original rationale said this was defense-in-depth atop per-key
-    # encryption-context enforcement the operator applied, "its KMS grants always
-    # set EncryptionContextEquals {PlatformId}". The operator issued those grants
-    # but nothing ever consumed them: S3 supplies its OWN encryption context on
-    # every SSE-KMS call — `aws:s3:arn`, the object ARN, or the bucket ARN under a
-    # Bucket Key — and never a PlatformId pair. The grants could not authorize an
-    # S3 decrypt and were removed in nanohype/eks-agent-platform#168.
+    # This replaces a Deny that keyed on `kms:EncryptionContext:PlatformId` being
+    # null. That condition is null on EVERY S3-mediated decrypt there is, because S3
+    # supplies its own context (`aws:s3:arn`) and never a PlatformId pair — so the
+    # old form would have denied every tenant reading its own artifacts the moment it
+    # was attached. It justified itself by pointing at operator KMS grants that could
+    # not authorize an S3 operation and were removed in
+    # nanohype/eks-agent-platform#168.
     #
-    # So `Null: {"kms:EncryptionContext:PlatformId" = "true"}` is TRUE on every
-    # S3-mediated decrypt there is. Attached to a live OU, this Deny would stop
-    # every tenant reading its own artifacts, every service role reading the
-    # buckets it owns, and AWS Backup reading any of it — on any key carrying the
-    # matching ManagedBy tag.
+    # Scoped by ALIAS, which exists, rather than by ManagedBy=eks-agent-platform,
+    # which no key carries: the operator mints no keys. The two aliases are the
+    # secrets key and — where an environment sets separate_logs_key — the logs key.
     #
-    # It is inert today for two independent reasons: target_ids is empty, and no
-    # key is known to carry ManagedBy=eks-agent-platform (the operator mints no
-    # keys; tenant CMKs come from landing-zone's tenant-substrate and are tagged by
-    # this repo). A control that is safe only because it is switched off and aimed
-    # at nothing is not a control.
+    # Tenant CMKs are deliberately OUT of scope. tenant-substrate aliases them
+    # `<prefix>-tenant`, and a tenant's envelope-encryption pattern is a DIRECT
+    # GenerateDataKey/Decrypt by design (see tenant-key-access), so denying direct
+    # use of those would break the thing they exist for.
     #
-    # Keeping it needs a condition an S3 decrypt can actually satisfy — the
-    # per-object `aws:s3:arn` context, which is only per-tenant when the bucket has
-    # no Bucket Key. Otherwise delete it rather than leave a loaded gun in the tree.
-    DenyKmsDecryptWithoutPlatformContext = {
-      description = "Deny KMS decrypt on platform-managed keys without PlatformId encryption context"
+    # target_ids stays empty. Attaching an SCP is an org-wide act with no undo path
+    # for whoever is locked out, and this repo does not decide that.
+    DenyDirectUseOfPlatformKeys = {
+      description = "Deny direct KMS use of the platform CMKs — service-mediated access only"
       target_ids  = []
       policy = jsonencode({
         Version = "2012-10-17"
         Statement = [
           {
-            Sid      = "DenyDecryptWithoutPlatformContext"
-            Effect   = "Deny"
-            Action   = "kms:Decrypt"
+            Sid    = "DenyDirectUseOfPlatformKeys"
+            Effect = "Deny"
+            Action = [
+              "kms:Decrypt",
+              "kms:GenerateDataKey*",
+              "kms:ReEncrypt*",
+            ]
             Resource = "arn:aws:kms:*:*:key/*"
             Condition = {
-              StringEquals = {
-                "aws:ResourceTag/ManagedBy" = "eks-agent-platform"
+              # Multi-valued key, so ForAnyValue is correct here — a key matches if
+              # ANY of its aliases is one of the platform two.
+              "ForAnyValue:StringLike" = {
+                "kms:ResourceAliases" = [
+                  "alias/*-platform-secrets",
+                  "alias/*-platform-logs",
+                ]
               }
+              # ViaService is populated only on a forward-access session, so its
+              # absence IS the direct call this denies.
               Null = {
-                "kms:EncryptionContext:PlatformId" = "true"
+                "kms:ViaService" = "true"
               }
             }
           },
