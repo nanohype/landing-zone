@@ -370,17 +370,16 @@ resource "aws_iam_role_policy" "operator" {
           }
         }
       },
-      {
-        Sid    = "KMSGrants"
-        Effect = "Allow"
-        Action = [
-          "kms:CreateGrant",
-          "kms:ListGrants",
-          "kms:RevokeGrant",
-          "kms:DescribeKey",
-        ]
-        Resource = "arn:${local.partition}:kms:${var.region}:${local.account_id}:key/*"
-      },
+      # There is deliberately no kms:CreateGrant here. The operator issues no KMS
+      # grants — a tenant's access to its own key is an IAM policy the operator
+      # writes (tenant-key-access, naming exactly one key ARN), not a grant it
+      # creates. The statement that used to sit here covered CreateGrant,
+      # ListGrants, RevokeGrant and DescribeKey on `key/*`: every key in the
+      # region, with no condition narrowing which. Granting decrypt on the
+      # platform data key to an attacker-controlled role was the third entry in
+      # this platform's own threat model, and that permission was the only thing
+      # that made it reachable. Any CreateGrant by the operator role is now
+      # anomalous by construction rather than by convention.
       {
         # Read + lifecycle the per-Platform session role. iam:UpdateRole is required
         # for MaxSessionDuration, which is what spec.attribution.sessionRoleMaxDurationSeconds
