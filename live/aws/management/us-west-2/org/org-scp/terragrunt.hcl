@@ -268,12 +268,32 @@ inputs = {
       })
     }
 
-    # Org-level defense-in-depth atop the per-key encryption-context enforcement
-    # the eks-agent-platform operator already applies (its KMS grants always set
-    # EncryptionContextEquals {PlatformId}). Bites operator-managed data keys
-    # (ManagedBy=eks-agent-platform); the opentofu-managed secrets/logs keys use
-    # a different context key and stay out of scope. Verify the data CMK carries
-    # this ManagedBy value before attaching to a live OU.
+    # DO NOT ATTACH THIS AS WRITTEN. It denies more than it means to, and the
+    # enforcement it was written to back up never existed.
+    #
+    # The original rationale said this was defense-in-depth atop per-key
+    # encryption-context enforcement the operator applied, "its KMS grants always
+    # set EncryptionContextEquals {PlatformId}". The operator issued those grants
+    # but nothing ever consumed them: S3 supplies its OWN encryption context on
+    # every SSE-KMS call — `aws:s3:arn`, the object ARN, or the bucket ARN under a
+    # Bucket Key — and never a PlatformId pair. The grants could not authorize an
+    # S3 decrypt and were removed in nanohype/eks-agent-platform#168.
+    #
+    # So `Null: {"kms:EncryptionContext:PlatformId" = "true"}` is TRUE on every
+    # S3-mediated decrypt there is. Attached to a live OU, this Deny would stop
+    # every tenant reading its own artifacts, every service role reading the
+    # buckets it owns, and AWS Backup reading any of it — on any key carrying the
+    # matching ManagedBy tag.
+    #
+    # It is inert today for two independent reasons: target_ids is empty, and no
+    # key is known to carry ManagedBy=eks-agent-platform (the operator mints no
+    # keys; tenant CMKs come from landing-zone's tenant-substrate and are tagged by
+    # this repo). A control that is safe only because it is switched off and aimed
+    # at nothing is not a control.
+    #
+    # Keeping it needs a condition an S3 decrypt can actually satisfy — the
+    # per-object `aws:s3:arn` context, which is only per-tenant when the bucket has
+    # no Bucket Key. Otherwise delete it rather than leave a loaded gun in the tree.
     DenyKmsDecryptWithoutPlatformContext = {
       description = "Deny KMS decrypt on platform-managed keys without PlatformId encryption context"
       target_ids  = []
