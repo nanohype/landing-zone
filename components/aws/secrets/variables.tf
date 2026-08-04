@@ -36,6 +36,38 @@ variable "enable_key_rotation" {
   default     = true
 }
 
+variable "separate_logs_key" {
+  description = <<-EOT
+    Mint a second CMK for the log path instead of encrypting logs and data with one key.
+
+    Shared (default, false): one key carries every service grant — Secrets Manager, CloudWatch
+    Logs, and Bedrock's invocation-log delivery. `logs_kms_key_arn` and `kms_key_arn` are the
+    same ARN. One key to rotate, one to audit, one bill.
+
+    Separate (true): the log-path grants MOVE off the secrets key onto a second key aliased
+    `<environment>-platform-logs`. The secrets key keeps only the account root and Secrets
+    Manager; the logs key gets CloudWatch Logs and Bedrock. That is what buys the posture where
+    a principal able to read operational logs cannot, by that grant, decrypt platform data —
+    with one key there is no such boundary to hold, whatever a policy says.
+
+    The grants MOVE rather than being copied, deliberately. A logs key that is separate but
+    where the secrets key still admits `logs.<region>.amazonaws.com` would let a log group
+    encrypt with either, which is the appearance of a boundary and none of the substance.
+
+    The consequence of moving them is that a consumer still passing the secrets key where a log
+    group expects one fails at `CreateLogGroup` rather than quietly encrypting logs under the
+    data key — read `logs_kms_key_arn`, which is correct in both modes.
+
+    Flip it per environment, not per fleet: separation is worth its second key where the log
+    reader and the data reader are different people, and is overhead where they are the same
+    one. It is not retroactive. Changing it re-points what NEW objects and log events are
+    encrypted with; everything already written stays under the key that wrote it, and stays
+    readable only to a principal that can still decrypt with that key.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "secrets" {
   description = "Platform secrets to create. Sensitive: secret_string payloads must never surface in plan output, CLI diffs, or CI logs."
   type = map(object({
