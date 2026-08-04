@@ -194,11 +194,24 @@ inputs = {
             # because decrypt on that key IS decrypt on platform data. The
             # auditor gains the ability to read logs exactly when, and only
             # where, reading logs stops implying reading data.
+            # kms:ViaService is what keeps this to LOG reads. The logs key does not
+            # only encrypt log groups: bedrock-account encrypts the Bedrock invocation
+            # bucket with it too, and that bucket holds model prompts and responses —
+            # tenant content, not operational telemetry. This permission set already
+            # carries s3:GetObject on *, so decrypt without ViaService would let an
+            # auditor read those payloads straight out of S3.
+            #
+            # Nothing is lost by the narrowing: bedrock-account delivers invocation
+            # records to CloudWatch as well as S3, so the audit trail stays readable
+            # through the path this condition allows.
             Sid      = "AuditorReadSeparatedLogKeys"
             Effect   = "Allow"
             Action   = ["kms:Decrypt", "kms:DescribeKey"]
             Resource = "arn:aws:kms:*:*:key/*"
             Condition = {
+              StringLike = {
+                "kms:ViaService" = "logs.*.amazonaws.com"
+              }
               "ForAnyValue:StringLike" = {
                 "kms:ResourceAliases" = "alias/*-platform-logs"
               }
