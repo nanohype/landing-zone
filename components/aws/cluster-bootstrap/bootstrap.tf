@@ -362,10 +362,6 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # Opts this cluster into the eks-agent-platform operator ApplicationSet.
       # Disable to install the operator out of band (see enable_agent_platform).
       "eks-agent-platform/enabled" = "true"
-      } : {}, var.enable_accelerators ? {
-      # Opts this cluster into the GPU/accelerator ApplicationSet (gpu-operator,
-      # nvidia-dra-driver). Off by default so non-GPU shapes skip GPU addons.
-      "eks-agent-platform/accelerators" = "true"
       } : {}, var.enable_managed_monitoring ? {
       # Opts this cluster into the opencost ApplicationSet, which gates on this
       # dedicated label rather than eks-agent-platform/enabled. opencost queries

@@ -105,7 +105,7 @@ variable "cilium_operator_replicas" {
 variable "argocd_chart_version" {
   description = "ArgoCD Helm chart version"
   type        = string
-  default     = "10.1.3"
+  default     = "10.2.3"
 }
 
 variable "argocd_server_replicas" {
@@ -172,11 +172,6 @@ variable "enable_managed_monitoring" {
   default     = false
 }
 
-variable "enable_accelerators" {
-  description = "Label this cluster eks-agent-platform/accelerators=true so the accelerators ApplicationSet (gpu-operator, nvidia-dra-driver) targets it. Opt-in (default false) so non-GPU shapes skip GPU addons entirely — a GPU driver on a cluster with no GPU nodes can't pull (nvcr.io needs an NGC key) and has nothing to schedule on."
-  type        = bool
-  default     = false
-}
 
 variable "enable_eval_runtime" {
   description = "Republish the eval-runner IRSA wiring (role ARN + reports bucket) as cluster-Secret annotations, read from the SSM parameters the eks-agent-platform eval-runtime component writes under /eks-agent-platform/<env>/eval-runtime/. Requires that component to have applied first. Default false; the eks-gitops operator ApplicationSet tolerates the annotations being absent (eval simply gets no IRSA), so leave it off on clusters without eval-runtime."
