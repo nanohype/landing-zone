@@ -98,6 +98,22 @@ module "eks" {
       # addon takes no service_account_role_arn — that annotates the SA for
       # IRSA/web-identity, which a Pod-Identity-only role can't satisfy and the
       # controller crashloops on.
+      #
+      # extraVolumeTags is what makes a dynamically provisioned volume
+      # attributable. A PVC-created volume is not in terraform state and carries
+      # only what the driver stamps on it, so without this it reaches EC2 with no
+      # cluster tag at all — and the teardown sweep that looks for volumes tagged
+      # kubernetes.io/cluster/<name> finds none, reports "no orphans", and leaves
+      # every one of them behind. Nothing fails; the volumes simply keep billing
+      # after the cluster is gone.
+      #
+      # The ownership value is `owned` rather than `shared`: these volumes belong
+      # to exactly this cluster and are safe to delete with it, which is the claim
+      # the sweep acts on. Subnets use `shared` (subnet_tags.tf) because a subnet
+      # legitimately outlives any one cluster.
+      configuration_values = jsonencode({
+        controller = { extraVolumeTags = local.ebs_csi_volume_tags }
+      })
     }
     # Pod Identity is the platform-wide identity path: pods obtain role credentials from
     # the agent's local endpoint, not via AssumeRoleWithWebIdentity against STS. The

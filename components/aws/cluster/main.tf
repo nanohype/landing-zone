@@ -17,6 +17,26 @@ locals {
     Component = "cluster"
     Team      = var.team
   })
+
+  # What the EBS CSI driver stamps on every volume it provisions from a PVC.
+  #
+  # Such a volume is not in terraform state and carries only what the driver
+  # puts on it, so without this it reaches EC2 with no cluster tag at all — and
+  # the teardown sweep, which filters on kubernetes.io/cluster/<name>, finds
+  # none, reports no orphans, and leaves every one of them billing after the
+  # cluster is gone. Nothing fails at any point.
+  #
+  # `owned`, not `shared`: these volumes belong to exactly this cluster and are
+  # safe to delete with it, which is the claim the sweep acts on. Subnets carry
+  # `shared` (subnet_tags.tf) because a subnet legitimately outlives a cluster.
+  #
+  # Hoisted out of the addon's configuration_values so a test can assert it. The
+  # module's cluster_addons OUTPUT is unknown at plan time, so an assertion
+  # reading it passes whether or not the input is set — which is exactly what the
+  # first draft of that test did.
+  ebs_csi_volume_tags = merge(local.tags, {
+    "kubernetes.io/cluster/${local.cluster_name}" = "owned"
+  })
 }
 
 ################################################################################
