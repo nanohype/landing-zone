@@ -45,6 +45,20 @@ variable "delegated_admin_account_id" {
     condition     = !var.register_delegated_admin || can(regex("^[0-9]{12}$", var.delegated_admin_account_id))
     error_message = "delegated_admin_account_id must be a 12-digit account id when register_delegated_admin is true."
   }
+
+  # 666666666666 is the documented stand-in for "the backup account does not
+  # exist yet" (components/aws/shared-backup/README.md step 1, and
+  # live/aws/backup/account.hcl). It is a well-formed 12-digit id, so the shape
+  # check above accepts it and the apply reaches AWS, which rejects it as an
+  # account that is not in the organization — an error that names neither the
+  # placeholder nor the step that was skipped.
+  #
+  # Refusing it here is the same posture the other account-owning components
+  # take: state the precondition rather than let the provider discover it.
+  validation {
+    condition     = var.delegated_admin_account_id != "666666666666"
+    error_message = "delegated_admin_account_id is still the 666666666666 placeholder. Provision the dedicated backup account and set its real id in live/aws/backup/account.hcl — see components/aws/shared-backup/README.md."
+  }
 }
 
 variable "target_ids" {

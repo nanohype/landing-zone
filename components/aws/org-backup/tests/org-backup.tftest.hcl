@@ -103,3 +103,21 @@ run "rejects_delegated_admin_without_account" {
 
   expect_failures = [var.delegated_admin_account_id]
 }
+
+# The placeholder is a well-formed 12-digit id, so the shape validation accepts
+# it. Without this, an apply against an unprovisioned backup account reaches AWS
+# and comes back as "account not in organization" — an error naming neither the
+# placeholder nor the setup step that was skipped.
+run "rejects_the_unprovisioned_backup_account_placeholder" {
+  command = plan
+
+  variables {
+    environment                = "production"
+    region                     = "us-east-1"
+    team                       = "platform"
+    register_delegated_admin   = true
+    delegated_admin_account_id = "666666666666"
+  }
+
+  expect_failures = [var.delegated_admin_account_id]
+}

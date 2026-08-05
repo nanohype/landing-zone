@@ -217,3 +217,35 @@ run "system_node_disk_floor_enforced" {
     var.system_node_disk_size,
   ]
 }
+
+# ── Invariant: dynamically provisioned volumes are attributable ──
+#
+# A PVC-created EBS volume is not in terraform state and carries only what the
+# CSI driver stamps on it. Without extraVolumeTags it reaches EC2 with no cluster
+# tag, and the teardown sweep — which filters on kubernetes.io/cluster/<name> —
+# finds nothing, reports no orphans, and leaves every volume billing after the
+# cluster is gone. Nothing fails, which is why this needs an assertion rather
+# than a runbook step.
+#
+# The assertion reads the LOCAL, not module.eks.cluster_addons — that output is
+# unknown at plan time, so a condition reading it passes whether or not the input
+# is set. The first draft of this test did exactly that and survived deleting the
+# whole configuration_values block.
+#
+# What this pair cannot see on its own is the addon ceasing to consume the local.
+# tflint closes that: terraform_unused_declarations reports
+# `local.ebs_csi_volume_tags is declared but not used`, verified by disconnecting
+# it. The value is asserted here; that it is wired is asserted by lint.
+run "ebs_csi_stamps_the_cluster_tag_on_dynamic_volumes" {
+  command = plan
+
+  assert {
+    condition     = can(local.ebs_csi_volume_tags["kubernetes.io/cluster/${local.cluster_name}"])
+    error_message = "the aws-ebs-csi-driver addon must set controller.extraVolumeTags carrying kubernetes.io/cluster/<name>; without it a dynamically provisioned volume is invisible to the orphan sweep that filters on exactly that tag"
+  }
+
+  assert {
+    condition     = local.ebs_csi_volume_tags["kubernetes.io/cluster/${local.cluster_name}"] == "owned"
+    error_message = "the ownership value must be `owned`, not `shared` — the sweep deletes on that claim, and a volume this cluster alone created is safe to delete with it"
+  }
+}
