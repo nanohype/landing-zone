@@ -70,11 +70,36 @@ module "relational" {
   # buckets; otherwise the datastore's own declaration stands.
   deletion_protection = local.allow_teardown ? false : each.value.relational.deletion_protection
 
-  # Always set one of these so the destroy is reachable. Development /
-  # force_destroy_buckets skip the snapshot; otherwise take a final snapshot under
-  # a stable per-datastore identifier.
-  skip_final_snapshot       = local.allow_teardown
-  final_snapshot_identifier = local.allow_teardown ? null : "${local.prefix}-${each.key}-final"
+  # Always set one of these so the destroy is reachable, and let the datastore's
+  # own declaration reach the snapshot rather than only the operator's lever.
+  #
+  # deletionPolicy lands on this axis, not on deletion_protection above. Joining
+  # it to protection would read `deletion_policy == "Retain" || deletion_protection`,
+  # and since Retain is the default that short-circuits true — a tenant setting
+  # relational.deletionProtection = false would see it accepted and not in force.
+  # On this axis the two are independent and both must open: `deletionPolicy: Delete`
+  # alone still does not drop a protected database, which is the two-act contract
+  # restated at the datastore level.
+  #
+  # The identifier carries a random suffix because a manual cluster snapshot
+  # outlives its cluster and is removed only explicitly. A stable name meant the
+  # second create/destroy cycle of the same environment+tenant+datastore failed
+  # DeleteDBCluster with DBClusterSnapshotAlreadyExistsFault, wedging the destroy
+  # above the cluster — and eks-fleet vends TTL'd spokes, so repeat cycles under
+  # one name are the ordinary case rather than an edge.
+  skip_final_snapshot       = local.allow_teardown || each.value.deletion_policy == "Delete"
+  final_snapshot_identifier = local.allow_teardown || each.value.deletion_policy == "Delete" ? null : "${local.prefix}-${each.key}-final-${random_id.relational_final[each.key].hex}"
 
   tags = local.datastore_tags["relational"]
+}
+
+# The final snapshot's disambiguator. Destroy-time only, so changing it never
+# touches a running cluster; it exists so the identifier is unique per created
+# cluster rather than per name, which is what makes a second create/destroy cycle
+# of the same datastore reach its destroy instead of colliding with the snapshot
+# the first one left behind.
+resource "random_id" "relational_final" {
+  for_each = local.relational_stores
+
+  byte_length = 4
 }

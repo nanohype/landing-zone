@@ -1,0 +1,18 @@
+# The tenants this environment provisions substrate for.
+#
+# A Platform CR declares WHAT stores a tenant needs; it carries no environment,
+# because the same CR is applied to whichever cluster runs the app. This file is
+# the other half — WHICH environments provision those stores. Adding a tenant
+# here is the whole act; what it gets is read from its own CR.
+#
+# Each name resolves to <tenant>/platform.yaml in the org checkout, and must
+# match that Platform's metadata.name — the tenant key composes into every AWS
+# resource name the module builds.
+#
+# Rendered by scripts/render-tenants.py into tenants.generated.json, which the
+# leaf reads. CI re-renders and fails on drift.
+tenants:
+  - competitive-intelligence
+  - digest-pipeline
+  - incident-response
+  - slack-knowledge-bot
