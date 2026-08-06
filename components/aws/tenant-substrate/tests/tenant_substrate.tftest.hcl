@@ -675,3 +675,51 @@ run "the_rendered_development_map_is_accepted_and_provisions_every_declared_stor
     error_message = "the four CRs declare one cache store"
   }
 }
+
+# deletionPolicy: Delete reaches the resource, in a protected environment.
+#
+# The run above proves a Retain datastore keeps its backstop where the operator's
+# lever is closed. This is the other half — that the datastore's own declaration
+# can open the gate that its kind actually has, without the operator's lever and
+# without touching any other datastore's protection.
+#
+# keyValue is the kind asserted because it is the one whose lever is a plain
+# argument on a first-party resource. relational's lever is an input to the
+# upstream rds-aurora module and is not reachable from a plan assertion; its
+# polarity is held by scripts/check-teardown-gates.py, which reads the expression
+# statically and fails when it stops opening on the lever.
+run "a_delete_datastore_opens_its_own_gate_without_the_operator_lever" {
+  command = plan
+
+  module {
+    source = "./modules/tenant"
+  }
+
+  variables {
+    environment           = "staging"
+    force_destroy_buckets = false
+    account_id            = "123456789012"
+    tenant_id             = "t1"
+    vpc_id                = "vpc-0123456789abcdef0"
+    private_subnets       = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+    cluster_sg_id         = "sg-0123456789abcdef0"
+    backup_policy         = "daily"
+    tags                  = {}
+    datastores = [
+      { name = "gone", kind = "keyValue", deletion_policy = "Delete", key_value = { partition_key = { name = "pk", type = "S" } } },
+      { name = "kept", kind = "keyValue", key_value = { partition_key = { name = "pk", type = "S" } } },
+    ]
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.key_value["gone"].deletion_protection_enabled == false
+    error_message = "a Delete datastore must drop its own backstop even in a protected environment — otherwise deletionPolicy is a declaration the API accepts and nothing honours"
+  }
+
+  # And it reaches only its own. A per-datastore declaration that leaked across
+  # the for_each would disarm a sibling that never asked for it.
+  assert {
+    condition     = aws_dynamodb_table.key_value["kept"].deletion_protection_enabled
+    error_message = "a sibling datastore that did not declare Delete must keep its backstop"
+  }
+}
