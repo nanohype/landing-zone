@@ -1,3 +1,6 @@
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+
 locals {
   # Key on the full cluster name (<environment>-<clusterName>) so the addon roles match
   # this cluster's AMP/AMG resources (which already key on var.cluster_name) and don't
@@ -141,6 +144,143 @@ resource "aws_iam_role_policy" "grafana_workspace_cloudwatch" {
   })
 }
 
+# ── Athena / CUR data source ────────────────────────────────────────────────
+#
+# The finance board reads cost out of the ACCOUNT cost pipeline's Athena
+# workgroup, not a per-cluster one: one place the number comes from, N Grafana
+# workspaces reading it.
+#
+# Read by PATH, not by name, and that is the whole design. A
+# `data "aws_ssm_parameter"` for a name that does not exist fails the plan, so a
+# hard read here would make managed-monitoring unappliable on any account where
+# the cost pipeline has not been applied — which is every account today.
+# `get_parameters_by_path` on an absent subtree answers with an empty set and
+# exit 0 (verified against the live account), so the presence of the substrate
+# decides whether the datasource exists. No knob, no ARN-list input, and nothing
+# to keep in sync: wiring appears when the pipeline it reads does.
+data "aws_ssm_parameters_by_path" "cost_pipeline" {
+  path            = "/eks-agent-platform/org/cost-pipeline"
+  with_decryption = true
+}
+
+locals {
+  # Map the flat name/value pair lists back into something addressable.
+  cost_params = zipmap(
+    [for n in data.aws_ssm_parameters_by_path.cost_pipeline.names : basename(n)],
+    data.aws_ssm_parameters_by_path.cost_pipeline.values,
+  )
+
+  # Every value the grant needs, or none of them. A partially-published subtree
+  # is not a half-working datasource — it is a policy naming an empty ARN, which
+  # IAM accepts and which then denies at query time with nothing to read.
+  cost_required = ["athena_workgroup", "athena_database_arn", "athena_results_bucket_arn", "cur_bucket_arn", "data_kms_key_arn"]
+  cost_ready    = length([for k in local.cost_required : k if try(local.cost_params[k], "") != ""]) == length(local.cost_required)
+
+  athena_data_source = local.cost_ready ? ["ATHENA"] : []
+}
+
+resource "aws_iam_role_policy" "grafana_workspace_athena" {
+  count = local.cost_ready ? 1 : 0
+
+  name = "athena-data-source"
+  role = aws_iam_role.grafana_workspace.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # Scoped to the one workgroup the account's cost pipeline owns. Grafana
+        # lists workgroups to populate its datasource picker, which needs the
+        # unscoped List; everything that reads or runs is bound to this one.
+        Sid    = "RunCostQueries"
+        Effect = "Allow"
+        Action = [
+          "athena:StartQueryExecution",
+          "athena:StopQueryExecution",
+          "athena:GetQueryExecution",
+          "athena:GetQueryResults",
+          "athena:GetQueryResultsStream",
+          "athena:GetWorkGroup",
+          "athena:GetDataCatalog",
+          "athena:GetDatabase",
+          "athena:GetTableMetadata",
+          "athena:ListDatabases",
+          "athena:ListTableMetadata",
+        ]
+        Resource = [
+          "arn:${data.aws_partition.current.partition}:athena:${var.region}:${data.aws_caller_identity.current.account_id}:workgroup/${local.cost_params["athena_workgroup"]}",
+          "arn:${data.aws_partition.current.partition}:athena:${var.region}:${data.aws_caller_identity.current.account_id}:datacatalog/AwsDataCatalog",
+        ]
+      },
+      {
+        Sid      = "ListWorkgroupsForThePicker"
+        Effect   = "Allow"
+        Action   = ["athena:ListWorkGroups", "athena:ListDataCatalogs"]
+        Resource = "*"
+      },
+      {
+        # Glue holds the table metadata Athena plans against. Scoped to the
+        # cost database and its tables — the catalog grant is unavoidable
+        # because Glue models the account catalog as its own resource.
+        Sid    = "ReadCostTableMetadata"
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabase",
+          "glue:GetDatabases",
+          "glue:GetTable",
+          "glue:GetTables",
+          "glue:GetPartition",
+          "glue:GetPartitions",
+        ]
+        Resource = [
+          "arn:${data.aws_partition.current.partition}:glue:${var.region}:${data.aws_caller_identity.current.account_id}:catalog",
+          local.cost_params["athena_database_arn"],
+          "${replace(local.cost_params["athena_database_arn"], ":database/", ":table/")}/*",
+        ]
+      },
+      {
+        # Read the CUR Parquet, and read AND WRITE the results bucket. The write
+        # is not optional and is the step people forget: Athena stages every
+        # result object in the workgroup's output location before Grafana can
+        # read a single row, so a read-only grant fails at the write with an
+        # error naming the bucket rather than the missing permission.
+        Sid    = "ReadCurWriteResults"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+        ]
+        Resource = [
+          local.cost_params["cur_bucket_arn"],
+          "${local.cost_params["cur_bucket_arn"]}/*",
+          local.cost_params["athena_results_bucket_arn"],
+          "${local.cost_params["athena_results_bucket_arn"]}/*",
+        ]
+      },
+      {
+        Sid      = "WriteQueryResults"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:AbortMultipartUpload"]
+        Resource = ["${local.cost_params["athena_results_bucket_arn"]}/*"]
+      },
+      {
+        # Both buckets are SSE-KMS under the pipeline's data key. Without this
+        # the failure is the one cost-access already documents: the query plans,
+        # runs, and dies at the result write with an opaque AccessDenied.
+        Sid    = "UseThePipelineDataKey"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey",
+        ]
+        Resource = [local.cost_params["data_kms_key_arn"]]
+      },
+    ]
+  })
+}
+
 resource "aws_grafana_workspace" "this" {
   name                     = "${var.cluster_name}-amg"
   account_access_type      = var.amg_account_access_type
@@ -148,7 +288,7 @@ resource "aws_grafana_workspace" "this" {
   permission_type          = "SERVICE_MANAGED"
   role_arn                 = aws_iam_role.grafana_workspace.arn
 
-  data_sources = ["PROMETHEUS", "CLOUDWATCH"]
+  data_sources = concat(["PROMETHEUS", "CLOUDWATCH"], local.athena_data_source)
 
   tags = local.tags
 }
