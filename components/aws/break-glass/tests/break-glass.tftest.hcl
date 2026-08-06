@@ -72,10 +72,14 @@ mock_provider "aws" {
 }
 
 variables {
-  environment                 = "development"
-  region                      = "us-west-2"
-  team                        = "platform"
-  trusted_account_ids         = ["123456789012"]
+  environment = "development"
+  region      = "us-west-2"
+  team        = "platform"
+  # A different account from the mocked self (123456789012), which is the point:
+  # break-glass exists to survive THIS account's IAM being broken, so a principal
+  # inside it cannot serve. Also not the 123456789012 placeholder the variable now
+  # refuses.
+  trusted_account_ids         = ["444455556666"]
   enable_permissions_boundary = true
   max_session_duration        = 3600
 }
@@ -106,7 +110,7 @@ run "trust_scoped_to_trusted_roots_never_wildcard" {
       for s in jsondecode(aws_iam_role.break_glass.assume_role_policy).Statement :
       s if try(s.Effect, "") == "Allow"
       && try(s.Action, "") == "sts:AssumeRole"
-      && try(s.Principal.AWS, null) == ["arn:aws:iam::123456789012:root"]
+      && try(s.Principal.AWS, null) == ["arn:aws:iam::444455556666:root"]
     ]) == 1
     error_message = "break-glass trust Principal.AWS must be exactly the trusted accounts' root ARNs, never \"*\""
   }
@@ -213,4 +217,31 @@ run "boundary_attached_and_session_bounded" {
     condition     = aws_iam_role.break_glass.max_session_duration == 3600
     error_message = "break-glass max_session_duration must equal the bounded value passed in (3600s)"
   }
+}
+
+# INVARIANT 5 — the role must trust somebody real, and the component says so at plan
+# time rather than minting an AdministratorAccess role nobody can assume.
+#
+# Both refusals matter for the same reason: the failure is invisible. AWS either
+# rejects a trust policy naming an unallocated account or accepts one that resolves
+# to nothing, and in both cases the role exists, reads as configured, and cannot be
+# assumed — discovered during the emergency it exists for.
+run "rejects_an_empty_trust_list" {
+  command = plan
+
+  variables {
+    trusted_account_ids = []
+  }
+
+  expect_failures = [var.trusted_account_ids]
+}
+
+run "rejects_the_unprovisioned_management_account_placeholder" {
+  command = plan
+
+  variables {
+    trusted_account_ids = ["123456789012"]
+  }
+
+  expect_failures = [var.trusted_account_ids]
 }
