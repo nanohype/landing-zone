@@ -58,6 +58,7 @@ run "athena_grant_can_write_its_own_query_results" {
     values = {
       names = [
         "/eks-agent-platform/org/cost-pipeline/athena_workgroup",
+        "/eks-agent-platform/org/cost-pipeline/athena_database",
         "/eks-agent-platform/org/cost-pipeline/athena_database_arn",
         "/eks-agent-platform/org/cost-pipeline/athena_results_bucket_arn",
         "/eks-agent-platform/org/cost-pipeline/cur_bucket_arn",
@@ -65,6 +66,7 @@ run "athena_grant_can_write_its_own_query_results" {
       ]
       values = [
         "org-123456789012-us-west-2-cost",
+        "org_123456789012_us_west_2_cost",
         "arn:aws:glue:us-west-2:123456789012:database/org_123456789012_us_west_2_cost",
         "arn:aws:s3:::org-123456789012-us-west-2-cost-athena-123456789012",
         "arn:aws:s3:::org-123456789012-cur-export",
@@ -114,6 +116,17 @@ run "athena_grant_can_write_its_own_query_results" {
     condition     = contains(aws_grafana_workspace.this.data_sources, "ATHENA")
     error_message = "ATHENA must be in the workspace data_sources or Grafana has no datasource to attach the grant to"
   }
+
+  # And the datasource still cannot query without the values, which reach
+  # eks-gitops only through this secret — a GrafanaDatasource cannot read SSM.
+  assert {
+    condition = alltrue([
+      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_WORKGROUP"] == "org-123456789012-us-west-2-cost",
+      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_DATABASE"] == "org_123456789012_us_west_2_cost",
+      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_RESULTS_LOCATION"] == "s3://org-123456789012-us-west-2-cost-athena-123456789012/grafana/",
+    ])
+    error_message = "the endpoints secret must carry the workgroup, database and results location; the datasource has no other way to reach them"
+  }
 }
 
 # The half that matters for every account today: nothing has applied the cost
@@ -145,5 +158,16 @@ run "no_cost_pipeline_means_no_athena_wiring_and_a_clean_apply" {
   assert {
     condition     = contains(aws_grafana_workspace.this.data_sources, "PROMETHEUS")
     error_message = "an absent cost pipeline must not take the AMP datasource down with it"
+  }
+
+  # The keys stay present and empty rather than disappearing. The ExternalSecret
+  # in eks-gitops names each one, and a key missing from the payload fails that
+  # sync — which would take the AMP endpoints down with it.
+  assert {
+    condition = alltrue([
+      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_WORKGROUP"] == "",
+      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["AMP_QUERY_URL"] != "",
+    ])
+    error_message = "the Athena keys must stay present-and-empty when the cost pipeline is absent; dropping them fails the ExternalSecret that also carries AMP_QUERY_URL"
   }
 }

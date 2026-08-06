@@ -173,7 +173,12 @@ locals {
   # Every value the grant needs, or none of them. A partially-published subtree
   # is not a half-working datasource — it is a policy naming an empty ARN, which
   # IAM accepts and which then denies at query time with nothing to read.
-  cost_required = ["athena_workgroup", "athena_database_arn", "athena_results_bucket_arn", "cur_bucket_arn", "data_kms_key_arn"]
+  # The ARN is what the IAM grant scopes to; the NAME is what the Grafana
+  # datasource queries. Both are required, because a readiness check covering
+  # only one lets the other be empty — and an Athena datasource pointed at an
+  # empty database name is a panel that renders an error, not a panel that is
+  # absent.
+  cost_required = ["athena_workgroup", "athena_database", "athena_database_arn", "athena_results_bucket_arn", "cur_bucket_arn", "data_kms_key_arn"]
   cost_ready    = length([for k in local.cost_required : k if try(local.cost_params[k], "") != ""]) == length(local.cost_required)
 
   athena_data_source = local.cost_ready ? ["ATHENA"] : []
@@ -351,9 +356,22 @@ resource "aws_secretsmanager_secret" "monitoring_endpoints" {
 
 resource "aws_secretsmanager_secret_version" "monitoring_endpoints" {
   secret_id = aws_secretsmanager_secret.monitoring_endpoints.id
+  # The Athena keys ride the same secret the AMP endpoints do, because they
+  # answer the same question for the same consumer: a GrafanaDatasource in
+  # eks-gitops cannot read SSM, so every account-specific value it needs arrives
+  # through this secret and the ExternalSecret that syncs it.
+  #
+  # Empty strings rather than omitted keys when the cost pipeline is absent. The
+  # ExternalSecret names each key explicitly and fails to sync a key that is not
+  # in the payload, which would take the AMP endpoints down with it — so the
+  # shape stays constant and the Athena datasource simply has nothing to point
+  # at, which is the state it is already gated on.
   secret_string = jsonencode({
-    AMP_QUERY_URL        = aws_prometheus_workspace.this.prometheus_endpoint
-    AMP_REMOTE_WRITE_URL = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
+    AMP_QUERY_URL           = aws_prometheus_workspace.this.prometheus_endpoint
+    AMP_REMOTE_WRITE_URL    = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
+    ATHENA_WORKGROUP        = try(local.cost_params["athena_workgroup"], "")
+    ATHENA_DATABASE         = try(local.cost_params["athena_database"], "")
+    ATHENA_RESULTS_LOCATION = local.cost_ready ? "s3://${replace(local.cost_params["athena_results_bucket_arn"], "arn:${data.aws_partition.current.partition}:s3:::", "")}/grafana/" : ""
   })
 }
 
