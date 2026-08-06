@@ -1,0 +1,184 @@
+{
+  "competitive-intelligence": {
+    "datastores": [
+      {
+        "kind": "relational",
+        "name": "main"
+      }
+    ]
+  },
+  "digest-pipeline": {
+    "datastores": [
+      {
+        "kind": "relational",
+        "name": "main"
+      },
+      {
+        "kind": "objectStore",
+        "name": "voice-baseline"
+      },
+      {
+        "kind": "objectStore",
+        "name": "raw-aggregations"
+      }
+    ]
+  },
+  "incident-response": {
+    "datastores": [
+      {
+        "key_value": {
+          "global_secondary_indexes": [
+            {
+              "name": "slack-channel-index",
+              "partition_key": {
+                "name": "channel_id",
+                "type": "S"
+              }
+            }
+          ],
+          "partition_key": {
+            "name": "incident_id",
+            "type": "S"
+          }
+        },
+        "kind": "keyValue",
+        "name": "incidents"
+      },
+      {
+        "key_value": {
+          "global_secondary_indexes": [
+            {
+              "name": "by-timestamp",
+              "partition_key": {
+                "name": "timestamp",
+                "type": "S"
+              },
+              "sort_key": {
+                "name": "incident_id",
+                "type": "S"
+              }
+            }
+          ],
+          "partition_key": {
+            "name": "incident_id",
+            "type": "S"
+          },
+          "sort_key": {
+            "name": "audit_id",
+            "type": "S"
+          },
+          "ttl_attribute": "ttl"
+        },
+        "kind": "keyValue",
+        "name": "audit"
+      },
+      {
+        "key_value": {
+          "partition_key": {
+            "name": "external_user_id",
+            "type": "S"
+          },
+          "ttl_attribute": "ttl"
+        },
+        "kind": "keyValue",
+        "name": "id-cache"
+      },
+      {
+        "kind": "objectStore",
+        "name": "archive"
+      },
+      {
+        "kind": "queue",
+        "name": "events",
+        "queue": {
+          "fifo": true,
+          "max_receive_count": 3
+        }
+      },
+      {
+        "kind": "queue",
+        "name": "nudges",
+        "queue": {
+          "fifo": true,
+          "max_receive_count": 3
+        }
+      },
+      {
+        "kind": "queue",
+        "name": "sla",
+        "queue": {
+          "fifo": true,
+          "max_receive_count": 3
+        }
+      }
+    ]
+  },
+  "slack-knowledge-bot": {
+    "datastores": [
+      {
+        "kind": "relational",
+        "name": "main"
+      },
+      {
+        "key_value": {
+          "partition_key": {
+            "name": "userId",
+            "type": "S"
+          },
+          "sort_key": {
+            "name": "provider",
+            "type": "S"
+          },
+          "ttl_attribute": "ttl"
+        },
+        "kind": "keyValue",
+        "name": "tokens"
+      },
+      {
+        "key_value": {
+          "partition_key": {
+            "name": "userId",
+            "type": "S"
+          },
+          "sort_key": {
+            "name": "timestamp",
+            "type": "S"
+          },
+          "ttl_attribute": "ttl"
+        },
+        "kind": "keyValue",
+        "name": "audit"
+      },
+      {
+        "key_value": {
+          "partition_key": {
+            "name": "slackUserId",
+            "type": "S"
+          },
+          "ttl_attribute": "ttl"
+        },
+        "kind": "keyValue",
+        "name": "id-cache"
+      },
+      {
+        "cache": {
+          "engine": "redis"
+        },
+        "kind": "cache",
+        "name": "cache"
+      },
+      {
+        "kind": "objectStore",
+        "name": "archive"
+      },
+      {
+        "kind": "queue",
+        "name": "events",
+        "queue": {
+          "fifo": true,
+          "max_receive_count": 3
+        }
+      }
+    ]
+  }
+}

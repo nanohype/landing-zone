@@ -574,3 +574,104 @@ run "protected_environment_keeps_every_teardown_gate_armed" {
     error_message = "an object store in a protected environment must not be force-destroyable"
   }
 }
+
+# The rendered map, not a fixture.
+#
+# Every other run in this file feeds a hand-written tenants map, which proves the
+# module's behaviour but says nothing about whether the thing a Platform CR
+# actually renders into is accepted. This run reads the committed
+# tenants.generated.json for development — the same file the leaf reads — so the
+# four real tenants and their eighteen datastores are planned here.
+#
+# What it is really asserting is the variable boundary. tenant-substrate refuses
+# a tenant key that repeats the environment token, an unknown kind, a keyValue
+# store with no partition key, and five separate composed-name length budgets
+# (cache 40, objectStore 63, queue 80, relational 63, stream 64) whose inputs
+# include the environment and tenant tokens. A CR whose datastore name is three
+# characters too long for its kind fails HERE, on a plan with no credentials,
+# rather than at apply against a real account.
+run "the_rendered_development_map_is_accepted_and_provisions_every_declared_store" {
+  command = plan
+
+  # Same reason as the run above: the mocked provider returns no
+  # master_user_secret block, and a real apply always populates it.
+  override_module {
+    target = module.tenant.module.relational
+    outputs = {
+      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-rendered-main"
+      cluster_endpoint = "development-rendered-main.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_master_user_secret = [{
+        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+      }]
+    }
+  }
+
+  variables {
+    tenants = jsondecode(file("../../../live/aws/workload-development/us-west-2/development/tenant-substrate/tenants.generated.json"))
+  }
+
+  # The renderer produced something, and this run is not passing over an empty
+  # map — which is exactly what it looked like before the renderer existed.
+  assert {
+    condition     = length(keys(var.tenants)) == 4
+    error_message = "expected four rendered tenants, got ${length(keys(var.tenants))} — a render that drops a tenant would otherwise pass every assertion below"
+  }
+
+  assert {
+    condition     = length(flatten([for t in values(var.tenants) : t.datastores])) == 18
+    error_message = "expected eighteen rendered datastores, got ${length(flatten([for t in values(var.tenants) : t.datastores]))}"
+  }
+
+  # One customer-managed key per tenant, published for the operator to scope its
+  # KMS grant to. Four tenants, four keys, whether or not each declares a store.
+  assert {
+    condition     = length(aws_ssm_parameter.tenant_kms_key_arn) == 4
+    error_message = "one key parameter per tenant"
+  }
+
+  # Three relational stores across three different tenants, each publishing the
+  # AWS-generated master-secret ARN the operator cannot compose.
+  assert {
+    condition     = length(aws_ssm_parameter.master_secret_arn) == 3
+    error_message = "expected three relational master-secret parameters, got ${length(aws_ssm_parameter.master_secret_arn)}"
+  }
+
+  # The datastore identifiers the operator reads back. Asserting the count per
+  # kind is what catches a renderer that emitted a store the module then skipped
+  # because its kind or config block did not survive the case conversion.
+  assert {
+    condition = length([
+      for t, stores in output.tenant_datastores : 1
+      if length(keys(stores)) > 0
+    ]) == 4
+    error_message = "every tenant must publish at least one datastore identifier"
+  }
+
+  assert {
+    condition = length(flatten([
+      for t, stores in output.tenant_datastores : [for k, v in stores : v if v.kind == "keyValue"]
+    ])) == 6
+    error_message = "the four CRs declare six keyValue stores"
+  }
+
+  assert {
+    condition = length(flatten([
+      for t, stores in output.tenant_datastores : [for k, v in stores : v if v.kind == "objectStore"]
+    ])) == 4
+    error_message = "the four CRs declare four objectStore stores"
+  }
+
+  assert {
+    condition = length(flatten([
+      for t, stores in output.tenant_datastores : [for k, v in stores : v if v.kind == "queue"]
+    ])) == 4
+    error_message = "the four CRs declare four queue stores"
+  }
+
+  assert {
+    condition = length(flatten([
+      for t, stores in output.tenant_datastores : [for k, v in stores : v if v.kind == "cache"]
+    ])) == 1
+    error_message = "the four CRs declare one cache store"
+  }
+}

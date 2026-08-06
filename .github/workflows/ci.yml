@@ -280,6 +280,67 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./scripts/check-foreign-placeholders.py
 
+  # A tenant declares its stateful substrate once, in its Platform CR, and two
+  # consumers read that declaration — the operator for IAM, this repo for the
+  # resources. tenants.generated.json is the rendered second half, committed so a
+  # plan is reproducible without reaching four other repos at plan time. Which
+  # means it can go stale: a CR that adds a datastore and a substrate that never
+  # heard about it disagree silently, and the tenant gets an IAM grant on an ARN
+  # that names nothing. Re-rendering here and failing on any difference is what
+  # makes the committed file trustworthy rather than a snapshot of some past
+  # moment.
+  #
+  # The tenant repos are checked out for their platform.yaml alone.
+  tenant-substrate-render:
+    name: Rendered Substrate Matches The Platform CRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nanohype/competitive-intelligence
+          path: tenant-crs/competitive-intelligence
+          sparse-checkout: platform.yaml
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nanohype/digest-pipeline
+          path: tenant-crs/digest-pipeline
+          sparse-checkout: platform.yaml
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nanohype/incident-response
+          path: tenant-crs/incident-response
+          sparse-checkout: platform.yaml
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nanohype/slack-knowledge-bot
+          path: tenant-crs/slack-knowledge-bot
+          sparse-checkout: platform.yaml
+          sparse-checkout-cone-mode: false
+      - run: pip install --quiet pyyaml
+      - name: re-render every environment that selects tenants
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r sel; do
+            env_name=$(basename "$(dirname "$(dirname "$sel")")")
+            found=1
+            echo "::group::render check — $env_name"
+            ./scripts/render-tenants.py \
+              --environment "$env_name" \
+              --source-root tenant-crs \
+              --check
+            echo "::endgroup::"
+          done < <(git ls-files 'live/aws/*/*/*/tenant-substrate/tenants.selection.yaml' | sort)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no tenants.selection.yaml found — this gate checked nothing."
+            echo "::error::An environment that provisions tenant substrate must name its tenants there."
+            exit 1
+          fi
+
   # The architecture doc's component inventory must be the components that
   # exist, both directions. A documented component that is gone sends a reader
   # to a missing directory; a component no table names is quieter and worse,
