@@ -105,11 +105,18 @@ run "vault_lock_is_governance_not_compliance" {
 
 # When a central vault is wired, every plan rule copies its recovery points to it — the
 # resilience win that moves the durable copy out of the account holding the data.
+#
+# The destination account here is a plausible id, deliberately NOT the
+# 666666666666 placeholder this test used to pin. That placeholder means "the
+# backup account has not been provisioned", and a test asserting a copy_action
+# to it reads as proof the wiring works against an account that cannot exist —
+# which is exactly the reading that let live leaves compose a destination from
+# it. _envcommon now refuses to compose an ARN while the placeholder stands.
 run "plan_rules_copy_to_central_vault" {
   command = plan
 
   variables {
-    central_vault_arn = "arn:aws:backup:us-east-1:666666666666:backup-vault:development-central-backup-vault"
+    central_vault_arn = "arn:aws:backup:us-east-1:444455556666:backup-vault:development-central-backup-vault"
   }
 
   assert {
@@ -117,7 +124,7 @@ run "plan_rules_copy_to_central_vault" {
       for plan in aws_backup_plan.this : anytrue([
         for rule in plan.rule : anytrue([
           for ca in rule.copy_action :
-          ca.destination_vault_arn == "arn:aws:backup:us-east-1:666666666666:backup-vault:development-central-backup-vault"
+          ca.destination_vault_arn == "arn:aws:backup:us-east-1:444455556666:backup-vault:development-central-backup-vault"
         ])
       ])
     ])

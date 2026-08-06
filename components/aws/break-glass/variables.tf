@@ -25,8 +25,29 @@ variable "team" {
 }
 
 variable "trusted_account_ids" {
-  description = "AWS account IDs allowed to assume the break-glass role"
+  description = <<-EOT
+    AWS account IDs allowed to assume the break-glass role. Every entry becomes
+    an `arn:<partition>:iam::<id>:root` principal on the role's trust policy,
+    MFA-gated.
+
+    No default, and both an empty list and the documented management-account
+    placeholder are refused, because either produces the same outcome: an
+    AdministratorAccess role that nobody can assume, on the one control whose
+    entire purpose is to work when everything else does not. A role that reads
+    as configured and is not is worse than an absent one — the absence is at
+    least visible before the emergency.
+  EOT
   type        = list(string)
+
+  validation {
+    condition     = length(var.trusted_account_ids) > 0
+    error_message = "trusted_account_ids is empty, so this break-glass role would trust nobody and be assumable by nobody. Name the account that holds your emergency operators — break-glass exists to survive THIS account's IAM being broken, so a principal inside it cannot serve."
+  }
+
+  validation {
+    condition     = !contains(var.trusted_account_ids, "123456789012")
+    error_message = "trusted_account_ids still carries 123456789012, the placeholder for a management account that has not been provisioned. AWS would accept a trust policy naming it or reject it outright, and either way nobody can assume the role. Replace it with the real account id — see the component README."
+  }
 }
 
 variable "notification_emails" {

@@ -263,6 +263,23 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./scripts/check-account-local-deps.sh
 
+  # Every account id in this tree is a placeholder, and that is correct for a
+  # public repo — root.hcl resolves a leaf's OWN account from
+  # TERRAGRUNT_ACCOUNT_ID, so it never reaches AWS.
+  #
+  # A FOREIGN id has no such path. There is one TERRAGRUNT_ACCOUNT_ID and it
+  # cannot express "and the backup account is X", so a foreign placeholder is not
+  # a stand-in that gets replaced at deploy time — it is a literal that reaches
+  # AWS. Two shipped that way: every workload backup plan copied to a vault in an
+  # account not in the organization, and every break-glass leaf trusted an
+  # unprovisioned account on an AdministratorAccess role.
+  foreign-placeholders:
+    name: Appliable Leaves Name No Foreign Placeholder
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-foreign-placeholders.py
+
   # The architecture doc's component inventory must be the components that
   # exist, both directions. A documented component that is gone sends a reader
   # to a missing directory; a component no table names is quieter and worse,
