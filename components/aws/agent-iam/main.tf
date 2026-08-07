@@ -502,6 +502,28 @@ resource "aws_iam_role_policy" "operator" {
         ]
       },
       {
+        # A tenant declaring the eventBridgeScheduler capability gets a schedule
+        # group of its own, because the group — not a name prefix — is what makes
+        # its grant exact: a schedule ARN is schedule/<group>/<name>, so naming
+        # the group matches a whole path segment, while a prefix inside the shared
+        # `default` group spans any tenant whose name is a hyphen-prefix of
+        # another's.
+        #
+        # Create and read only. Deleting a schedule group deletes every schedule
+        # in it, and those are written by the tenant at runtime — the same reason
+        # this role holds no delete on any datastore. Scoped by name prefix to the
+        # environment, which is as narrow as it can be: the tenant token is not
+        # known when this policy is written.
+        Sid    = "TenantScheduleGroup"
+        Effect = "Allow"
+        Action = [
+          "scheduler:GetScheduleGroup",
+          "scheduler:CreateScheduleGroup",
+          "scheduler:TagResource",
+        ]
+        Resource = "arn:${local.partition}:scheduler:${var.region}:${local.account_id}:schedule-group/${var.environment}-*"
+      },
+      {
         Sid    = "SSMRead"
         Effect = "Allow"
         Action = [
