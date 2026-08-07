@@ -401,9 +401,18 @@ ROLE=$(kubectl get platform "$TENANT" -n eks-agent-platform -o jsonpath='{.statu
 RN="${ROLE##*/}"
 [ "$(aws iam list-role-policies --role-name "$RN" --query 'length(PolicyNames)' --output text)" = "0" ] ||
   die "tenant role $RN has inline policies (expected none)"
-aws iam get-role --role-name "$RN" --query 'Role.PermissionsBoundary.PermissionsBoundaryArn' --output text | grep -q boundary ||
-  die "tenant role $RN missing permissions boundary"
-echo "  tenant role $RN: permissions boundary set, zero inline policies"
+# The boundary is checked by identity, not by presence. `grep -q boundary` would
+# pass on any boundary whose ARN contains that word — including a wrong one, or
+# one broader than the ceiling agent-iam mints. The isolation guarantee is that
+# the tenant role is bounded by THIS policy, so the assertion reads the ARN
+# agent-iam published and compares it exactly.
+EXPECTED_BOUNDARY=$(tg agent-iam output -raw tenant_permissions_boundary_arn 2>/dev/null)
+[ -n "$EXPECTED_BOUNDARY" ] ||
+  die "agent-iam published no tenant_permissions_boundary_arn — nothing to compare against, so this check would assert nothing"
+ACTUAL_BOUNDARY=$(aws iam get-role --role-name "$RN" --query 'Role.PermissionsBoundary.PermissionsBoundaryArn' --output text)
+[ "$ACTUAL_BOUNDARY" = "$EXPECTED_BOUNDARY" ] ||
+  die "tenant role $RN boundary is '${ACTUAL_BOUNDARY}', expected '${EXPECTED_BOUNDARY}'"
+echo "  tenant role $RN: bounded by $EXPECTED_BOUNDARY, zero inline policies"
 
 log "VALIDATE cloudgov platform audit"
 (cd "$CLOUDGOV_DIR" && go build -o "$WORK/cloudgov" .)
