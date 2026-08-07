@@ -11,12 +11,18 @@ include "envcommon" {
 # admin/SSO creds; outputs deploy_role_arn for the AWS_ROLE_ARN / E2E_AWS_ROLE_ARN
 # repo vars when/if the GitHub Actions CI path is adopted.
 #
-# Trust defaults to environment-gated deploys + tag pushes
-# (allowed_subject_claims = ["environment:*", "ref:refs/tags/*"]). If the adopted CI
-# assumes this role from a NON-environment context on main — the scheduled drift job,
-# the e2e job (no job-level `environment:`), or the ci-push plan — add
-# "ref:refs/heads/main" to allowed_subject_claims here, or gate those jobs behind a
-# GitHub Environment.
+# Trust stays environment-gated deploys + tag pushes
+# (allowed_subject_claims = ["environment:*", "ref:refs/tags/*"]). The e2e job
+# declares `environment: e2e`, so its token presents
+# repo:nanohype/landing-zone:environment:e2e and matches the first claim. Any CI
+# job that needs this role from a NON-environment context on main — the scheduled
+# drift job, the ci-push plan — takes the same route: give it a GitHub Environment.
+# Adding "ref:refs/heads/main" here would work and is deliberately not done, because
+# it hands every workflow on main a role that can provision and destroy EKS and IAM.
+#
+# The account already has the GitHub Actions OIDC provider (AWS allows one per
+# issuer), so this component references it rather than creating a second.
 inputs = {
-  github_repos = ["landing-zone"]
+  github_repos         = ["landing-zone"]
+  create_oidc_provider = false
 }
