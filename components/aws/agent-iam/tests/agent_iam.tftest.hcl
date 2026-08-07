@@ -468,3 +468,49 @@ run "operator_cannot_issue_kms_grants" {
     error_message = "the operator role must hold no kms grant-management action — it makes no KMS call, and CreateGrant on the platform data key is threat-model entry 3 (grant decrypt to an attacker-controlled tenant role)"
   }
 }
+
+# ── the operator may create a tenant's schedule group, and may never delete one ──
+#
+# The group is the isolation boundary on EventBridge Scheduler: a schedule ARN is
+# schedule/<group>/<name>, so scoping a tenant's grant to its own group is an
+# exact match on a path segment, where a name prefix inside the shared `default`
+# group spans any tenant whose name is a hyphen-prefix of another's.
+#
+# Delete is withheld for the same reason it is withheld on every datastore:
+# deleting a schedule group deletes every schedule inside it, and those are the
+# tenant's, written at runtime. A group outlives its Platform and costs nothing.
+run "operator_can_create_but_never_delete_a_schedule_group" {
+  command = plan
+
+  variables {
+    environment = "development"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
+      s if try(s.Sid, "") == "TenantScheduleGroup"
+    ]) == 1
+    error_message = "the operator role must carry exactly one TenantScheduleGroup statement — without it every CreateSchedule a tenant issues fails ResourceNotFound into the tenant's own log"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
+      s.Resource == "arn:aws:scheduler:us-west-2:123456789012:schedule-group/development-*"
+      if try(s.Sid, "") == "TenantScheduleGroup"
+    ])
+    error_message = "the schedule-group grant must be scoped to this environment's groups, not to every group in the account"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
+      s if length(setintersection(
+        toset(try(tolist(s.Action), [try(s.Action, "")])),
+        toset(["scheduler:DeleteScheduleGroup", "scheduler:DeleteSchedule"]),
+      )) > 0
+    ]) == 0
+    error_message = "the operator role must hold no schedule or schedule-group delete — deleting a group deletes every schedule in it, and those are the tenant's runtime state"
+  }
+}
