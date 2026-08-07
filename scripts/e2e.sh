@@ -25,6 +25,9 @@ ACCOUNT_DIR="${E2E_ACCOUNT_DIR:-workload-development}"
 CLUSTER="${E2E_CLUSTER:-development-platform}"
 TENANT="${E2E_TENANT:-e2e-smoke}"
 TENANTS_REPO="${E2E_TENANTS_REPO:-git@github.com:nanohype/tenants.git}"
+# The tenant map tenant-substrate reads. Tracked, and rewritten for the duration
+# of this run — see the preflight refusal and the teardown restore.
+TENANTS_MAP_REL="live/aws/$ACCOUNT_DIR/$REGION/$ENVIRONMENT/tenant-substrate/tenants.generated.json"
 # Only when AWS_PROFILE is UNSET (local runs), fall back to the documented
 # workload-<env> SSO profile name — which is what ACCOUNT_DIR already holds. In CI
 # it's set empty so the OIDC env credentials are used instead of a named profile.
@@ -36,6 +39,7 @@ EAP_DIR="${E2E_EKS_AGENT_PLATFORM_DIR:-$(cd "$LZ_DIR/../eks-agent-platform" 2>/d
 CLOUDGOV_DIR="${E2E_CLOUDGOV_DIR:-$(cd "$LZ_DIR/../cloudgov" 2>/dev/null && pwd || echo /nonexistent)}"
 BASE="$LZ_DIR/live/aws/$ACCOUNT_DIR/$REGION/$ENVIRONMENT"
 WORK="$(mktemp -d)"
+TENANTS_MAP="$LZ_DIR/$TENANTS_MAP_REL"
 RESULT="FAILED"
 
 log() { echo -e "\n\033[1;36m=== $* ===\033[0m"; }
@@ -168,7 +172,14 @@ teardown() {
   # both depend on cluster). cluster-bootstrap is in-cluster only (no billable AWS)
   # + finalizer-prone, so it dies with the cluster.
   local destroy_failed=""
-  for c in agent-iam secrets cluster network; do
+  # tenant-substrate first: it depends on cluster + secrets, so destroying it
+  # after them strands its resources behind a deleted VPC and a deleted CMK.
+  # cluster-bootstrap before cluster: its resources live INSIDE the cluster, so
+  # the kubernetes provider needs the apiserver still reachable. It also mints a
+  # github_repository_deploy_key on the tenants repo — the one thing it creates
+  # that destroying the cluster does not remove, so skipping its destroy leaves a
+  # credential on a private repo behind on every run.
+  for c in tenant-substrate cluster-bootstrap agent-iam secrets cluster network; do
     log "destroy $c"
     if ! tg "$c" destroy -auto-approve >/dev/null 2>&1; then
       # Usual causes: a stale state lock (interrupted run) or orphaned EKS SGs/ENIs
@@ -197,15 +208,35 @@ teardown() {
   # fails BucketNotEmpty. Leaving S3 out meant the one resource class that halts
   # the reverse teardown was the one class the assertion could not see.
   log "zero-billable check (us-$REGION)"
-  local eks nat eip vpc ebs s3 leak="" r
+  local eks nat eip vpc ebs s3 ddb rds cache msk sqs leak="" r
   eks=$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" --query 'cluster.name' --output text 2>/dev/null || true)
   nat=$(aws ec2 describe-nat-gateways --region "$REGION" --filter Name=tag:Project,Values=landing-zone "Name=tag:Environment,Values=$ENVIRONMENT" Name=state,Values=available,pending --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null | tr '\t' ' ')
   eip=$(aws ec2 describe-addresses --region "$REGION" --filters Name=tag:Project,Values=landing-zone "Name=tag:Environment,Values=$ENVIRONMENT" --query 'Addresses[].PublicIp' --output text 2>/dev/null | tr '\t' ' ')
   vpc=$(aws ec2 describe-vpcs --region "$REGION" --filters Name=tag:Project,Values=landing-zone "Name=tag:Environment,Values=$ENVIRONMENT" Name=isDefault,Values=false --query 'Vpcs[].VpcId' --output text 2>/dev/null | tr '\t' ' ')
   ebs=$(aws ec2 describe-volumes --region "$REGION" --filters "Name=tag-key,Values=kubernetes.io/cluster/$CLUSTER" --query 'Volumes[].VolumeId' --output text 2>/dev/null | tr '\t' ' ')
   s3=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, '${CLUSTER}-${E2E_ACCOUNT_ID}-${REGION}-')].Name" --output text 2>/dev/null | tr '\t' ' ')
+  # The datastore kinds tenant-substrate provisions. Every one of these is
+  # billable and none was visible to this check before the run applied the
+  # component that creates them. Scoped by the <env>-<tenant>- name prefix the
+  # module composes, so a foreign estate in the same account is never flagged.
+  local pfx="${ENVIRONMENT}-${TENANT}-"
+  ddb=$(aws dynamodb list-tables --region "$REGION" --query "TableNames[?starts_with(@, '${pfx}')]" --output text 2>/dev/null | tr '\t' ' ')
+  rds=$(aws rds describe-db-clusters --region "$REGION" --query "DBClusters[?starts_with(DBClusterIdentifier, '${pfx}')].DBClusterIdentifier" --output text 2>/dev/null | tr '\t' ' ')
+  cache=$(aws elasticache describe-replication-groups --region "$REGION" --query "ReplicationGroups[?starts_with(ReplicationGroupId, '${pfx}')].ReplicationGroupId" --output text 2>/dev/null | tr '\t' ' ')
+  msk=$(aws kafka list-clusters-v2 --region "$REGION" --query "ClusterInfoList[?starts_with(ClusterName, '${pfx}')].ClusterName" --output text 2>/dev/null | tr '\t' ' ')
+  sqs=$(aws sqs list-queues --region "$REGION" --queue-name-prefix "$pfx" --query 'QueueUrls' --output text 2>/dev/null | tr '\t' ' ')
   echo "  EKS: ${eks:-clean}"; echo "  NAT: ${nat:-clean}"; echo "  EIP: ${eip:-clean}"; echo "  VPC: ${vpc:-clean}"; echo "  EBS: ${ebs:-clean}"; echo "  S3:  ${s3:-clean}"
-  for r in "$eks" "$nat" "$eip" "$vpc" "$ebs" "$s3"; do if [ -n "$r" ] && [ "$r" != "None" ]; then leak=1; fi; done
+  echo "  DDB: ${ddb:-clean}"; echo "  RDS: ${rds:-clean}"; echo "  CACHE: ${cache:-clean}"; echo "  MSK: ${msk:-clean}"; echo "  SQS: ${sqs:-clean}"
+  for r in "$eks" "$nat" "$eip" "$vpc" "$ebs" "$s3" "$ddb" "$rds" "$cache" "$msk" "$sqs"; do if [ -n "$r" ] && [ "$r" != "None" ]; then leak=1; fi; done
+  # Put the committed tenant map back. The preflight refused to start if it
+  # carried uncommitted work, so this cannot discard anything.
+  if [ -n "${TENANTS_MAP_REL:-}" ]; then
+    git -C "$LZ_DIR" checkout -- "$TENANTS_MAP_REL" 2>/dev/null || true
+    if ! git -C "$LZ_DIR" diff --quiet -- "$TENANTS_MAP_REL" 2>/dev/null; then
+      echo -e "\n\033[1;31m!!! $TENANTS_MAP_REL NOT RESTORED — restore it by hand !!!\033[0m" >&2
+      RESULT="FAILED"
+    fi
+  fi
   rm -rf "$WORK"
   if [ -n "$destroy_failed" ]; then
     echo -e "\n\033[1;31m!!! DESTROY FAILED after retry: $destroy_failed !!!\033[0m" >&2
@@ -239,7 +270,7 @@ aws logs delete-log-group --log-group-name "/aws/eks/$CLUSTER/cluster" --region 
   echo "  reaped orphaned log group /aws/eks/$CLUSTER/cluster" || true
 # Clear any stale state locks from a prior interrupted run so this apply isn't
 # blocked waiting on a lock that will never release on its own.
-for c in network cluster secrets cluster-bootstrap agent-iam; do clear_lock "$c"; done
+for c in network cluster secrets cluster-bootstrap agent-iam tenant-substrate; do clear_lock "$c"; done
 echo "  account $acct OK; region $REGION clean; tenant=$TENANT"
 
 # --- 1. substrate -----------------------------------------------------------
@@ -249,6 +280,15 @@ log "ACCOUNT + BACKEND"
 # in a tracked file, and there is no restore-on-teardown that could fail and leak it.
 export TERRAGRUNT_ACCOUNT_ID="$E2E_ACCOUNT_ID"
 "$LZ_DIR/scripts/init-backend-aws.sh" "$E2E_ACCOUNT_ID" "$REGION"
+
+# tenant-substrate reads its tenant map from a TRACKED file in this leaf, and
+# this run replaces it with a one-tenant map of its own before applying. Refuse
+# if that file already carries uncommitted work: the teardown restores it with
+# `git checkout`, which would silently discard whatever was there. The refusal is
+# what makes the restore safe, rather than the restore being careful.
+if ! git -C "$LZ_DIR" diff --quiet -- "$TENANTS_MAP_REL" 2>/dev/null; then
+  die "$TENANTS_MAP_REL has uncommitted changes — refusing to overwrite and restore it"
+fi
 
 log "APPLY network"; tg network apply -auto-approve
 log "APPLY cluster (~15-25m)"; tg cluster apply -auto-approve
@@ -267,6 +307,33 @@ TF_VAR_tenants_repo_url="$TENANTS_REPO" TF_VAR_enable_agent_platform=true \
 # KMS ARN into real SSE-KMS + IAM config.
 log "APPLY secrets"; tg secrets apply -auto-approve
 log "APPLY agent-iam"; tg agent-iam apply -auto-approve
+
+# tenant-substrate provisions every stateful store a tenant declares, and until
+# now the run neither applied nor destroyed it — so the teardown's zero-billable
+# check could not have seen an Aurora cluster or a cache even if one had been
+# left standing.
+#
+# It applies against a map rendered from THIS RUN'S OWN tenant, not the
+# environment's. The committed development map names the four real tenant apps
+# and eighteen datastores; applying that here would provision them, and the
+# destroy below would then delete them. The e2e tenant declares one keyValue
+# store — enough to exercise create, tag, grant and destroy end to end, at
+# DynamoDB on-demand prices rather than an Aurora cluster's.
+log "RENDER tenant map for $TENANT"
+mkdir -p "$WORK/src/$TENANT"
+cp "$WORK/tenants/tenants/$CLUSTER/$TENANT.yaml" "$WORK/src/$TENANT/platform.yaml"
+cat >"$TENANTS_MAP" <<JSON
+{
+  "$TENANT": {
+    "datastores": [
+      { "name": "smoke", "kind": "keyValue",
+        "deletion_policy": "Delete",
+        "key_value": { "partition_key": { "name": "pk", "type": "S" } } }
+    ]
+  }
+}
+JSON
+log "APPLY tenant-substrate"; tg tenant-substrate apply -auto-approve
 
 # --- 2. operator (GitOps: ArgoCD installs the released image) ----------------
 log "WAIT for cert-manager (the operator webhook cert depends on it)"

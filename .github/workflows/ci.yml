@@ -397,6 +397,23 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-tenant-schema-readers.py
 
+  # The e2e run's zero-billable assertion at teardown is the reason that script is
+  # trusted, and it can only see what the run created. tenant-substrate — every
+  # Aurora cluster, cache, table, bucket and queue a tenant declares — was in
+  # neither its apply list nor its destroy loop, so the check reported clean over
+  # a whole resource class it had never looked at. The five other guard scripts
+  # all inspect component internals; none reads e2e.sh, and none compares its
+  # component list against the leaves that exist.
+  e2e-covers-leaves:
+    name: E2E Covers Every Live Leaf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-e2e-covers-leaves.py
+
   plan:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]

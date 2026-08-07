@@ -161,9 +161,6 @@
         "name": "id-cache"
       },
       {
-        "cache": {
-          "engine": "redis"
-        },
         "kind": "cache",
         "name": "cache"
       },
