@@ -45,6 +45,13 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    # Two jobs at once. It scopes the OIDC subject claim to
+    # `repo:nanohype/landing-zone:environment:e2e`, which is what the deploy role
+    # trusts — without it the token presents `ref:refs/heads/main`, matches no
+    # claim, and the role cannot be assumed at all. And it is the place to hang
+    # required reviewers, which is worth having on the one workflow in this repo
+    # that provisions billable AWS on a button press.
+    environment: e2e
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
