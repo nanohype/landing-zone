@@ -138,6 +138,63 @@ variable "tenants" {
     error_message = "datastore names must be unique within a tenant."
   }
 
+  # Aurora Serverless v2 capacity is 0.5–256 ACU in half-ACU steps, plus 0 on the
+  # floor only, which is the auto-pause setting. The Platform CRD carries the same
+  # bounds, and this is not redundant with it: var.tenants is rendered from the
+  # CRs but the leaf can be edited directly, and the CRD's own comment used to
+  # claim this boundary enforced the range while nothing here did. A capacity AWS
+  # rejects should fail at plan, not part-way through an apply.
+  validation {
+    condition = alltrue(flatten([
+      for tk, tv in var.tenants : [
+        for d in tv.datastores : (
+          d.relational.min_acu == 0 ||
+          (d.relational.min_acu >= 0.5 && d.relational.min_acu <= 256 && d.relational.min_acu % 0.5 == 0)
+        ) if d.kind == "relational"
+      ]
+    ]))
+    error_message = "a relational datastore's min_acu must be 0 (Serverless v2 auto-pause) or between 0.5 and 256 in 0.5-ACU steps."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for tk, tv in var.tenants : [
+        for d in tv.datastores : (
+          d.relational.max_acu >= 0.5 && d.relational.max_acu <= 256 && d.relational.max_acu % 0.5 == 0
+        ) if d.kind == "relational"
+      ]
+    ]))
+    error_message = "a relational datastore's max_acu must be between 0.5 and 256 in 0.5-ACU steps. Unlike the floor it cannot be 0 — a ceiling of zero leaves no capacity to scale into."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for tk, tv in var.tenants : [
+        for d in tv.datastores : d.relational.max_acu >= d.relational.min_acu if d.kind == "relational"
+      ]
+    ]))
+    error_message = "a relational datastore's max_acu must be >= its min_acu."
+  }
+
+  # Auto-pause needs Aurora PostgreSQL 16.3 or later. Below that a min_acu of 0
+  # is accepted by the API and simply never pauses, so the cost saving the floor
+  # was set for silently does not happen. Checked on the major only, matching the
+  # CRD rule — the minor is compared as a number so 16.10 does not read as older
+  # than 16.3.
+  validation {
+    condition = alltrue(flatten([
+      for tk, tv in var.tenants : [
+        for d in tv.datastores : (
+          d.relational.min_acu != 0 ||
+          tonumber(split(".", d.relational.engine_version)[0]) > 16 ||
+          (tonumber(split(".", d.relational.engine_version)[0]) == 16 &&
+          tonumber(split(".", d.relational.engine_version)[1]) >= 3)
+        ) if d.kind == "relational"
+      ]
+    ]))
+    error_message = "min_acu = 0 is Aurora Serverless v2 auto-pause, which requires Aurora PostgreSQL 16.3 or later. Raise engine_version or set a non-zero floor."
+  }
+
   # cache replication_group_id budget: "<env>-<tenant>-<datastore>" <= 40 (the
   # tightest AWS limit any datastore composes against).
   validation {

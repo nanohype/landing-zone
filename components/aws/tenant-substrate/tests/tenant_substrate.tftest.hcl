@@ -723,3 +723,268 @@ run "a_delete_datastore_opens_its_own_gate_without_the_operator_lever" {
     error_message = "a sibling datastore that did not declare Delete must keep its backstop"
   }
 }
+
+# ── ACU bounds ──────────────────────────────────────────────────────────────
+#
+# The Platform CRD carries the same bounds, and these are not redundant with it.
+# var.tenants is rendered from the CRs, but a leaf can be edited directly, and
+# for as long as the field existed the CRD's own comment claimed THIS boundary
+# enforced the range while nothing here did. A capacity AWS rejects belongs at
+# plan, not part-way through an apply that has already created a subnet group.
+
+run "accepts_auto_pause_floor" {
+  command = plan
+
+  # The mocked provider returns no master_user_secret block, so the root's SSM
+  # parameter is unwritable at plan time. Same override the scoping-contract runs
+  # above use — it supplies what RDS would.
+  override_module {
+    target = module.tenant.module.relational
+    outputs = {
+      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-t1-db"
+      cluster_endpoint = "development-t1-db.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_master_user_secret = [{
+        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+      }]
+    }
+  }
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { min_acu = 0, max_acu = 8 } },
+        ]
+      }
+    }
+  }
+}
+
+run "accepts_full_acu_range" {
+  command = plan
+
+  # The mocked provider returns no master_user_secret block, so the root's SSM
+  # parameter is unwritable at plan time. Same override the scoping-contract runs
+  # above use — it supplies what RDS would.
+  override_module {
+    target = module.tenant.module.relational
+    outputs = {
+      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-t1-db"
+      cluster_endpoint = "development-t1-db.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_master_user_secret = [{
+        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+      }]
+    }
+  }
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "lo", kind = "relational", relational = { min_acu = 0.5, max_acu = 1 } },
+          { name = "hi", kind = "relational", relational = { min_acu = 255.5, max_acu = 256 } },
+          { name = "eq", kind = "relational", relational = { min_acu = 4, max_acu = 4 } },
+        ]
+      }
+    }
+  }
+}
+
+# ── reject: a floor past Aurora's 256-ACU cap ──
+# The CRD pattern admitted values up to 999 for as long as it existed.
+#
+# The min_acu upper bound is jointly enforced and cannot fire alone: any floor
+# above 256 forces either a ceiling above 256 (the max bound) or a ceiling below
+# the floor (the relation). It is kept because a reader of the validation should
+# see Aurora's real range stated on the field it constrains, and because it
+# produces the error naming min_acu rather than only max_acu. Mutating the 256
+# in that clause therefore does NOT turn this run red — that is the checks
+# overlapping, not a hole.
+run "rejects_min_acu_over_cap" {
+  command = plan
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { min_acu = 257, max_acu = 512 } },
+        ]
+      }
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# ── reject: a ceiling past Aurora's 256-ACU cap, with the floor in range ──
+# Isolates the max bound. The run above pairs an out-of-range floor with an
+# out-of-range ceiling, so either check alone still rejects it and neither is
+# proven load-bearing by it.
+run "rejects_max_acu_over_cap" {
+  command = plan
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { min_acu = 0.5, max_acu = 257 } },
+        ]
+      }
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# ── reject: a capacity off the 0.5-ACU step ──
+run "rejects_non_half_step_acu" {
+  command = plan
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { min_acu = 1.25, max_acu = 8 } },
+        ]
+      }
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# ── reject: a ceiling of zero ──
+# Only the floor may be 0; a ceiling of zero leaves no capacity to scale into.
+run "rejects_zero_max_acu" {
+  command = plan
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { min_acu = 0, max_acu = 0 } },
+        ]
+      }
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# ── reject: a ceiling below the floor ──
+run "rejects_max_acu_below_min" {
+  command = plan
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { min_acu = 8, max_acu = 0.5 } },
+        ]
+      }
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# ── reject: auto-pause on an engine that cannot pause ──
+# min_acu = 0 on Aurora PostgreSQL below 16.3 is accepted by the API and simply
+# never pauses, so the saving the floor was set for silently does not happen.
+run "rejects_auto_pause_on_old_engine" {
+  command = plan
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { engine_version = "15.4", min_acu = 0, max_acu = 8 } },
+        ]
+      }
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# ── reject: auto-pause on 16.2, which is major-16 but below the 16.3 bar ──
+# This is the case that exercises the MINOR comparison. The 15.4 run above is
+# settled by the major alone, so on its own it leaves the minor bound untested —
+# mutating `>= 3` to `>= 0` left that run green.
+run "rejects_auto_pause_on_16_2" {
+  command = plan
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { engine_version = "16.2", min_acu = 0, max_acu = 8 } },
+        ]
+      }
+    }
+  }
+
+  expect_failures = [var.tenants]
+}
+
+# ── accept: the same old engine with a non-zero floor ──
+# The engine bound applies only to auto-pause, so it must not become a general
+# floor on engine_version.
+run "accepts_old_engine_with_nonzero_floor" {
+  command = plan
+
+  # The mocked provider returns no master_user_secret block, so the root's SSM
+  # parameter is unwritable at plan time. Same override the scoping-contract runs
+  # above use — it supplies what RDS would.
+  override_module {
+    target = module.tenant.module.relational
+    outputs = {
+      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-t1-db"
+      cluster_endpoint = "development-t1-db.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_master_user_secret = [{
+        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+      }]
+    }
+  }
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { engine_version = "15.4", min_acu = 0.5, max_acu = 8 } },
+        ]
+      }
+    }
+  }
+}
+
+# ── accept: 16.10 is newer than 16.3, not older ──
+# The minor is compared as a number precisely so a string compare cannot make
+# "16.10" read as below "16.3".
+run "accepts_auto_pause_on_double_digit_minor" {
+  command = plan
+
+  # The mocked provider returns no master_user_secret block, so the root's SSM
+  # parameter is unwritable at plan time. Same override the scoping-contract runs
+  # above use — it supplies what RDS would.
+  override_module {
+    target = module.tenant.module.relational
+    outputs = {
+      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-t1-db"
+      cluster_endpoint = "development-t1-db.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_master_user_secret = [{
+        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+      }]
+    }
+  }
+
+  variables {
+    tenants = {
+      t1 = {
+        datastores = [
+          { name = "db", kind = "relational", relational = { engine_version = "16.10", min_acu = 0, max_acu = 8 } },
+        ]
+      }
+    }
+  }
+}
