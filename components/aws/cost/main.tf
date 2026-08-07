@@ -21,8 +21,14 @@ resource "aws_budgets_budget" "monthly" {
   time_unit    = "MONTHLY"
 
   cost_filter {
-    name   = "TagKeyValue"
-    values = ["user:Environment$${var.environment}"]
+    name = "TagKeyValue"
+    # AWS separates the tag key from its value with a literal "$", so the filter
+    # needs one dollar that reaches AWS and one interpolation that resolves
+    # first. Written as a template the two collide: doubling the dollar is HCL's
+    # escape for a literal opening brace, the whole expression becomes text, and
+    # the filter matches a tag value no resource carries. format() keeps them
+    # apart — the verb resolves, the separator does not.
+    values = [format("user:Environment$%s", var.environment)]
   }
 
   dynamic "notification" {

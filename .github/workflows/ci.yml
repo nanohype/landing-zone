@@ -280,6 +280,21 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./scripts/check-foreign-placeholders.py
 
+  # The adjacent shape: not a placeholder that reaches AWS, but a reference that
+  # never becomes one. Doubling the dollar escapes the interpolation, so the
+  # expression ships as its own text — valid HCL, clean fmt, clean validate,
+  # clean plan, and a cost filter matching a tag value no resource carries. The
+  # budget applies, shows green, and tracks zero forever. Both escapes are
+  # legitimate when something downstream resolves them, so each occurrence is
+  # either removed or listed with the reason it has to reach the provider
+  # unresolved — the contract .checkov.yaml states for its own skips.
+  escaped-interpolations:
+    name: Every Escaped Interpolation Is Explained
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check-escaped-interpolations.py
+
   # A tenant declares its stateful substrate once, in its Platform CR, and two
   # consumers read that declaration — the operator for IAM, this repo for the
   # resources. tenants.generated.json is the rendered second half, committed so a

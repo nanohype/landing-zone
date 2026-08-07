@@ -83,3 +83,22 @@ run "cost_alerts_key_admits_costalerts_publisher" {
     error_message = "cost-alerts CMK policy must admit costalerts.amazonaws.com for kms:GenerateDataKey*, scoped by aws:SourceAccount"
   }
 }
+
+# The monthly budget's cost filter must reference the environment, not carry the
+# text of the expression that would have produced it. HCL escapes a literal "${"
+# by doubling the dollar, so a filter written as a template renders as its own
+# source — a 34-character string matching a tag value no resource carries. The
+# budget applies clean, its actual and forecast stay at zero, and no percentage
+# threshold can ever breach. Nothing else observes this: the plan is valid, and
+# the failure is a filter that matches no line item rather than an error.
+run "budget_cost_filter_resolves_the_environment" {
+  command = plan
+
+  assert {
+    condition = anytrue([
+      for f in aws_budgets_budget.monthly.cost_filter :
+      f.name == "TagKeyValue" && contains(f.values, "user:Environment$development")
+    ])
+    error_message = "monthly budget cost_filter must resolve the environment into user:Environment$<environment>, not carry the text of an unevaluated template"
+  }
+}
