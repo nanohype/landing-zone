@@ -54,12 +54,6 @@ variable "enable_compute_optimizer" {
   default     = true
 }
 
-variable "enable_savings_plans_alarm" {
-  description = "Enable CloudWatch alarm for Savings Plans utilization"
-  type        = bool
-  default     = false
-}
-
 variable "enable_cur_export" {
   description = "Enable CUR 2.0 data export"
   type        = bool

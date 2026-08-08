@@ -181,27 +181,12 @@ resource "aws_computeoptimizer_enrollment_status" "this" {
   include_member_accounts = true
 }
 
-################################################################################
-# Savings Plans Utilization Alarm
-################################################################################
-
-resource "aws_cloudwatch_metric_alarm" "savings_plans_utilization" {
-  count = var.enable_savings_plans_alarm ? 1 : 0
-
-  alarm_name        = "org-savings-plans-utilization"
-  alarm_description = "Alert when Savings Plans utilization drops below 80%"
-
-  namespace           = "AWS/SavingsPlans"
-  metric_name         = "UtilizationPercentage"
-  statistic           = "Average"
-  period              = 86400
-  evaluation_periods  = 1
-  threshold           = 80
-  comparison_operator = "LessThanThreshold"
-  treat_missing_data  = "notBreaching"
-
-  tags = local.tags
-}
+# Savings Plans utilization has no CloudWatch alarm here, deliberately.
+# AWS/SavingsPlans is not a CloudWatch namespace — it does not appear in the
+# service-to-namespace table at all — so an alarm on it can never resolve a
+# series. Utilization lives in Cost Explorer and in AWS Budgets, whose
+# SAVINGS_PLANS_UTILIZATION budget type is the supported way to alert on it.
+# Reaching for that means a budget resource, not a metric alarm.
 
 ################################################################################
 # CUR 2.0 Export
