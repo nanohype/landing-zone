@@ -25,6 +25,28 @@ mock_provider "aws" {
       reverse_dns_prefix = "com.amazonaws"
     }
   }
+  # A quota's UsageMetric decides whether it can be alarmed at all, and the
+  # component refuses the plan for any quota without one. An unmocked data
+  # source returns an empty usage_metric, which makes every quota unmonitorable
+  # and trips that precondition before this test reaches its own assertions —
+  # so the mock has to carry the shape the real API returns. These values are
+  # the live response for vpc/L-F678F1CE.
+  mock_data "aws_servicequotas_service_quota" {
+    defaults = {
+      value = 100
+      usage_metric = [{
+        metric_namespace                = "AWS/Usage"
+        metric_name                     = "ResourceCount"
+        metric_statistic_recommendation = "Maximum"
+        metric_dimensions = [{
+          class    = "None"
+          resource = "VPCsPerRegion"
+          service  = "EC2"
+          type     = "Resource"
+        }]
+      }]
+    }
+  }
   # The mock's random default isn't a parseable ARN; pin the key + topic so the
   # CloudWatch alarm's alarm_actions (the topic ARN) plans cleanly.
   mock_resource "aws_kms_key" {
