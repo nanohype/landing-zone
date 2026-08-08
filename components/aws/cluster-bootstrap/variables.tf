@@ -91,9 +91,22 @@ variable "public_subnet_ids" {
 }
 
 variable "cilium_version" {
-  description = "Cilium Helm chart version"
+  # Must stay equal to the cilium chartVersion in eks-gitops'
+  # applicationsets/addons-networking.yaml. This resource installs the CNI at
+  # cluster creation and then never touches it again (ignore_changes = all
+  # below), while that ApplicationSet owns it from the first ArgoCD sync
+  # onward — so a difference here is not a difference of opinion, it is an
+  # upgrade performed on a minutes-old cluster by a second owner. Cilium
+  # permits only consecutive minors and requires the newest patch of the
+  # current one first, so a skew that crosses a minor is one its own upgrade
+  # documentation forbids.
+  #
+  # The hub is the case this comment exists for. addons-networking excludes
+  # `environment In [hub]`, so nothing reconciles the hub's CNI after creation
+  # and this default is the only version it will ever run.
+  description = "Cilium Helm chart version. Keep equal to eks-gitops addons-networking."
   type        = string
-  default     = "1.19.5"
+  default     = "1.20.0"
 }
 
 variable "cilium_operator_replicas" {
