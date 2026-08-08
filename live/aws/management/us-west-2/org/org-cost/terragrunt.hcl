@@ -15,8 +15,7 @@ inputs = {
   enable_anomaly_detection = true
   anomaly_threshold        = 100
 
-  enable_compute_optimizer   = true
-  enable_savings_plans_alarm = false
+  enable_compute_optimizer = true
 
   # The account's one Cost and Usage Report. A CUR has no filter — it always covers the
   # whole account — so this belongs to the single org-scoped root rather than to any

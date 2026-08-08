@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Parse outputs
 ROLE_NAME=$(jq -r '.role_name.value' outputs.json)
-ALARM_ARN=$(jq -r '.alarm_arn.value' outputs.json)
+DETECTION_RULE=$(jq -r '.detection_rule_name.value' outputs.json)
 SNS_TOPIC_ARN=$(jq -r '.sns_topic_arn.value' outputs.json)
 
 # --- Break-Glass Role ---
@@ -22,15 +22,23 @@ else
   echo "  Role exists (MFA condition not detected in trust policy — verify manually)"
 fi
 
-# --- CloudWatch Alarm ---
-echo "Checking break-glass alarm..."
-ALARM_NAME=$(echo "$ALARM_ARN" | awk -F':' '{print $NF}')
-ALARM_STATE=$(aws cloudwatch describe-alarms --alarm-names "$ALARM_NAME" --query 'MetricAlarms[0].StateValue' --output text 2>/dev/null || echo "NOT_FOUND")
-if [[ "$ALARM_STATE" == "NOT_FOUND" || -z "$ALARM_STATE" ]]; then
-  echo "FAIL: CloudWatch alarm not found"
+# --- EventBridge Detection ---
+# The detection path is the EventBridge rule, not a CloudWatch alarm. Checking
+# the rule exists is not enough: a rule with no target fires into nothing, so
+# this asserts the SNS topic is actually on the other end.
+echo "Checking break-glass detection rule '${DETECTION_RULE}'..."
+RULE_STATE=$(aws events describe-rule --name "$DETECTION_RULE" --query 'State' --output text 2>/dev/null || echo "NOT_FOUND")
+if [[ "$RULE_STATE" != "ENABLED" ]]; then
+  echo "FAIL: detection rule '${DETECTION_RULE}' is '${RULE_STATE}', expected ENABLED"
   exit 1
 fi
-echo "  Alarm exists (state: ${ALARM_STATE})"
+
+RULE_TARGET=$(aws events list-targets-by-rule --rule "$DETECTION_RULE" --query "Targets[?Arn=='${SNS_TOPIC_ARN}'].Arn" --output text 2>/dev/null || echo "")
+if [[ -z "$RULE_TARGET" ]]; then
+  echo "FAIL: detection rule '${DETECTION_RULE}' does not target the alert topic — it would fire into nothing"
+  exit 1
+fi
+echo "  Detection rule enabled and targeting the alert topic"
 
 # --- SNS Topic ---
 echo "Checking SNS alert topic..."

@@ -37,32 +37,34 @@ variable "quota_threshold_percent" {
 }
 
 variable "monitored_quotas" {
-  description = "Map of service quotas to monitor"
+  description = <<-EOT
+    Service quotas to alarm on utilization.
+
+    A quota can only be alarmed if AWS publishes a usage metric for it — Service
+    Quotas returns that as `UsageMetric`, and it is empty for most quotas. There
+    is no dimension set that makes an alarm work without one, so this component
+    fails the plan rather than creating an alarm that can never leave
+    INSUFFICIENT_DATA. Check before adding an entry:
+
+        aws service-quotas get-service-quota \
+          --service-code <svc> --quota-code <code> --query 'Quota.UsageMetric'
+  EOT
   type = map(object({
     service_code = string
     quota_code   = string
     description  = string
   }))
+  # Only quotas AWS publishes a usage metric for. Verified against the live API
+  # in us-west-2: eips_per_region (ec2/L-0263D0A3), nat_gateways_per_az
+  # (vpc/L-FE5A380F) and eks_clusters (eks/L-1194D53C) all return an empty
+  # UsageMetric, so the alarms this component used to build for them could never
+  # have fired. Their utilization has to come from somewhere else — a Cost
+  # Explorer/Config view, or polling DescribeAccountAttributes — not CloudWatch.
   default = {
     vpc_per_region = {
       service_code = "vpc"
       quota_code   = "L-F678F1CE"
       description  = "VPCs per region"
-    }
-    eips_per_region = {
-      service_code = "ec2"
-      quota_code   = "L-0263D0A3"
-      description  = "Elastic IPs per region"
-    }
-    nat_gateways_per_az = {
-      service_code = "vpc"
-      quota_code   = "L-FE5A380F"
-      description  = "NAT Gateways per AZ"
-    }
-    eks_clusters = {
-      service_code = "eks"
-      quota_code   = "L-1194D53C"
-      description  = "EKS clusters per region"
     }
     lambda_concurrent = {
       service_code = "lambda"

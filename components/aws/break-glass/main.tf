@@ -175,23 +175,13 @@ resource "aws_sns_topic_subscription" "break_glass_email" {
   endpoint  = each.value
 }
 
-resource "aws_cloudwatch_metric_alarm" "break_glass_usage" {
-  alarm_name          = "${var.environment}-break-glass-role-assumed"
-  alarm_description   = "Alert when break-glass role is assumed"
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 1
-  metric_name         = "BreakGlassAssumeRole"
-  namespace           = "Custom/Security"
-  period              = 60
-  statistic           = "Sum"
-  threshold           = 1
-  treat_missing_data  = "notBreaching"
-
-  alarm_actions = [aws_sns_topic.break_glass.arn]
-  ok_actions    = [aws_sns_topic.break_glass.arn]
-
-  tags = local.tags
-}
+# Break-glass detection is the EventBridge rule below, not a CloudWatch alarm.
+# Nothing in this org writes Custom/Security/BreakGlassAssumeRole — no
+# PutMetricData caller, no metric filter, no EMF emitter — so an alarm on it
+# could never fire. With treat_missing_data "notBreaching" it would not even
+# show INSUFFICIENT_DATA: it would sit in OK and read as "the break-glass role
+# has not been assumed", which is the most dangerous way for a security control
+# to be wrong.
 
 ################################################################################
 # EventBridge Rule for Break-Glass Detection
