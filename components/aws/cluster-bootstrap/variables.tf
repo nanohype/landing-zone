@@ -104,9 +104,15 @@ variable "cilium_version" {
   # The hub is the case this comment exists for. addons-networking excludes
   # `environment In [hub]`, so nothing reconciles the hub's CNI after creation
   # and this default is the only version it will ever run.
+  #
+  # Both sides sit at 1.19.6, the newest 1.19 patch, deliberately. Crossing to
+  # 1.20 is a separate decision and has to move both pins in one step; raising
+  # only the ApplicationSet would make a fresh cluster jump 1.19.6 -> 1.20.0
+  # from an install this resource performed, which is the skew this comment
+  # exists to prevent.
   description = "Cilium Helm chart version. Keep equal to eks-gitops addons-networking."
   type        = string
-  default     = "1.20.0"
+  default     = "1.19.6"
 }
 
 variable "cilium_operator_replicas" {
