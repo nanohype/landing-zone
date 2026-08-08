@@ -150,9 +150,43 @@ dump_operator_diag() {
   echo "::endgroup::"
 }
 
+# Capture why the cluster is unhappy, BEFORE the teardown deletes the evidence.
+#
+# There is a dump_operator_diag for the operator phase and nothing for the phases
+# before it, so a failure in the cluster apply destroys the only thing that could
+# explain it. That is what happened to the aws-ebs-csi-driver addon timing out at
+# 20m in CREATING: by the time anyone could look, the control plane was already
+# being deleted and the three questions that would separate a Pod Identity race
+# from a scheduling problem — node conditions, which pods are not Running, and
+# what the events say — were unanswerable.
+#
+# Everything here is best-effort and time-boxed. Diagnostics must never be able to
+# delay a teardown that exists to stop spend, so every call carries a timeout and
+# a `|| true`, and the whole thing returns 0 if the cluster is already gone.
+dump_cluster_diag() {
+  aws eks describe-cluster --name "$CLUSTER" --region "$REGION" >/dev/null 2>&1 || return 0
+  log "CLUSTER DIAGNOSTICS (captured before teardown)"
+  local a
+  for a in $(aws eks list-addons --cluster-name "$CLUSTER" --region "$REGION" --query 'addons' --output text 2>/dev/null); do
+    echo "  addon $a:"
+    aws eks describe-addon --cluster-name "$CLUSTER" --addon-name "$a" --region "$REGION" \
+      --query 'addon.{status:status,health:health.issues}' --output json 2>/dev/null | sed 's/^/    /'
+  done
+  aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" >/dev/null 2>&1 || return 0
+  echo "  nodes:"; kubectl get nodes -o wide --request-timeout=20s 2>&1 | sed 's/^/    /' | head -12
+  # Not-Running is the useful set: a pending or crashlooping controller is what an
+  # addon stuck in CREATING looks like from inside, and the addon's own health
+  # array stays empty while it happens.
+  echo "  pods not Running:"; kubectl get pods -A --field-selector=status.phase!=Running --request-timeout=20s 2>&1 | sed 's/^/    /' | head -25
+  echo "  recent events:"; kubectl get events -A --sort-by=.lastTimestamp --request-timeout=20s 2>&1 | tail -25 | sed 's/^/    /'
+}
+
 # --- teardown (ALWAYS runs) -------------------------------------------------
 teardown() {
   local ec=$?
+  # Before anything is deleted, and only when the run is failing — a passing run
+  # has nothing to explain and the extra API calls would just slow the reap.
+  [ "$ec" -ne 0 ] && dump_cluster_diag || true
   log "TEARDOWN (script exit $ec) — reaping everything to stop spend"
   # Drop the tenant from git FIRST so ArgoCD (selfHeal) can't recreate the
   # Platform CR mid-delete, then delete the ArgoCD app so it stops managing it.
@@ -207,7 +241,7 @@ teardown() {
   # <cluster>-<account>-<region>- prefix, and a versioned or still-populated one
   # fails BucketNotEmpty. Leaving S3 out meant the one resource class that halts
   # the reverse teardown was the one class the assertion could not see.
-  log "zero-billable check (us-$REGION)"
+  log "zero-billable check ($REGION)"
   local eks nat eip vpc ebs s3 ddb rds cache msk sqs leak="" r
   eks=$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" --query 'cluster.name' --output text 2>/dev/null || true)
   nat=$(aws ec2 describe-nat-gateways --region "$REGION" --filter Name=tag:Project,Values=landing-zone "Name=tag:Environment,Values=$ENVIRONMENT" Name=state,Values=available,pending --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null | tr '\t' ' ')
@@ -241,7 +275,19 @@ teardown() {
   if [ -n "$destroy_failed" ]; then
     echo -e "\n\033[1;31m!!! DESTROY FAILED after retry: $destroy_failed !!!\033[0m" >&2
     echo "    A component that will not destroy leaves everything below it in the" >&2
-    echo "    reverse order standing. Check the console before re-running." >&2
+    echo "    reverse order standing." >&2
+    # Defer to the assertion rather than to the exit code. A destroy also fails
+    # when it cannot init a root that never applied — nothing to delete, and the
+    # error says nothing about what is running. The check above queries AWS
+    # directly and is the only one of the two that examined the account, so say
+    # which of the two situations this is instead of asserting the worse one.
+    if [ -n "$leak" ]; then
+      echo "    The zero-billable check DID find resources — see it above." >&2
+    else
+      echo "    The zero-billable check above found none, so nothing is running." >&2
+      echo "    Still a failure: a destroy that errors cannot be read as a destroy" >&2
+      echo "    that had nothing to do. Find out which before re-running." >&2
+    fi
     RESULT="FAILED"
   fi
   if [ -n "$leak" ]; then
@@ -271,6 +317,39 @@ aws logs delete-log-group --log-group-name "/aws/eks/$CLUSTER/cluster" --region 
 # Clear any stale state locks from a prior interrupted run so this apply isn't
 # blocked waiting on a lock that will never release on its own.
 for c in network cluster secrets cluster-bootstrap agent-iam tenant-substrate; do clear_lock "$c"; done
+
+# Drop the untracked provider locks and source caches under this environment, so
+# the run's provider versions come from the repository rather than from whatever
+# this machine happens to be carrying.
+#
+# The lock is the one that bites. .gitignore tracks .terraform.lock.hcl only
+# under components/ and fleet/; the per-leaf copies under live/ are local state.
+# Terragrunt syncs the LEAF lock into its working directory, so the leaf lock is
+# what governs and the tracked component lock never applies. Twelve of the
+# sixteen leaves here sat at hashicorp/aws 6.44.0 while
+# components/aws/cluster/.terraform.lock.hcl said 6.54.0, and the run died on
+# `locked provider ... 6.44.0 does not match constraint >= 6.52.0` — a constraint
+# the karpenter module raised after those leaf locks were last written. Nothing
+# in the repository was wrong.
+#
+# That makes it invisible to CI by construction: a fresh runner has no leaf lock,
+# tofu resolves against the constraints, every gate passes. Only a machine that
+# has run this before can fail, which is the reverse of the usual direction and
+# the reason a preflight already reaping orphaned log groups and stale .tflock
+# files still let it through — these are the same kind of leftover and simply
+# were not on the list.
+#
+# It also disables the teardown, which is the part that matters. Every `destroy`
+# begins with an init, so the fault that stops the apply also stops the EXIT trap
+# from cleaning up after it: the safety net sharing a single point of failure
+# with the thing it catches. Clearing in preflight covers both, since teardown
+# runs later in the same process.
+#
+# Deleting them is safe and is the point — they are gitignored, tofu regenerates
+# them on init, and the regenerated one is pinned by the constraints in source.
+find "$BASE" -name '.terraform.lock.hcl' -delete 2>/dev/null || true
+find "$BASE" -type d -name '.terragrunt-cache' -prune -exec rm -rf {} + 2>/dev/null || true
+echo "  cleared untracked provider locks + terragrunt caches under $ENVIRONMENT"
 echo "  account $acct OK; region $REGION clean; tenant=$TENANT"
 
 # --- 1. substrate -----------------------------------------------------------
