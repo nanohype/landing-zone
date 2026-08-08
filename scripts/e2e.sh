@@ -173,6 +173,20 @@ dump_cluster_diag() {
       --query 'addon.{status:status,health:health.issues}' --output json 2>/dev/null | sed 's/^/    /'
   done
   aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" >/dev/null 2>&1 || return 0
+  # Probe once before asking three questions. A private-endpoint cluster answers
+  # the AWS control-plane calls above and none of the kubectl ones, and each
+  # failure prints five identical resolver errors — fifteen lines of noise shaped
+  # like data, which is the defect this function exists to catch. Say what is
+  # wrong instead, and say it once.
+  if ! kubectl version -o json --request-timeout=15s >/dev/null 2>&1; then
+    echo "  kubectl: cannot reach the API endpoint from here."
+    echo "    endpointPublicAccess=$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" \
+      --query 'cluster.resourcesVpcConfig.endpointPublicAccess' --output text 2>/dev/null)," \
+      "publicAccessCidrs=$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" \
+      --query 'cluster.resourcesVpcConfig.publicAccessCidrs' --output text 2>/dev/null)"
+    echo "    Node, pod and event state are unavailable — they need in-cluster reach."
+    return 0
+  fi
   echo "  nodes:"; kubectl get nodes -o wide --request-timeout=20s 2>&1 | sed 's/^/    /' | head -12
   # Not-Running is the useful set: a pending or crashlooping controller is what an
   # addon stuck in CREATING looks like from inside, and the addon's own health
@@ -368,6 +382,33 @@ export TERRAGRUNT_ACCOUNT_ID="$E2E_ACCOUNT_ID"
 if ! git -C "$LZ_DIR" diff --quiet -- "$TENANTS_MAP_REL" 2>/dev/null; then
   die "$TENANTS_MAP_REL has uncommitted changes — refusing to overwrite and restore it"
 fi
+
+# This run drives the cluster with kubectl from wherever it is invoked — 31 calls
+# after `aws eks update-kubeconfig`, waiting on cert-manager, the operator and the
+# Platform CR. None of them can work against the cluster this tree builds by
+# default: cluster_endpoint_public_access is false, and docs/inputs.md records why
+# the committed tree sets no posture — rackctl supplies it at apply time.
+#
+# This script is not rackctl. It supplied nothing, so every run built a
+# private-endpoint cluster and then failed to resolve its API from outside the
+# VPC. Observed directly: describe-cluster and list-addons answered while kubectl
+# returned `no such host` for the endpoint in the same second.
+#
+# So supply the same posture rackctl does, scoped to this runner alone. Public
+# access with an allow-list of exactly one address is narrower than the private
+# default is convenient — the cluster is reachable by this machine for the ~40
+# minutes it exists and by nothing else.
+#
+# Refuse rather than widen. The component already fails closed at plan time on an
+# empty CIDR list and offers no 0.0.0.0/0 fallback; a run that cannot establish
+# its own address must not be the thing that opens an API endpoint to the world.
+RUNNER_IP="$(curl -fsS --max-time 10 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]')"
+case "$RUNNER_IP" in
+  *[!0-9.]* | "") die "could not determine this runner's public IP — refusing to open the cluster API without a scope" ;;
+esac
+export TF_VAR_cluster_endpoint_public_access=true
+export TF_VAR_cluster_endpoint_public_access_cidrs="[\"${RUNNER_IP}/32\"]"
+echo "  cluster API will be reachable from ${RUNNER_IP}/32 only"
 
 log "APPLY network"; tg network apply -auto-approve
 log "APPLY cluster (~15-25m)"; tg cluster apply -auto-approve
