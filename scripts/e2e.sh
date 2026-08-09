@@ -501,8 +501,17 @@ log "APPLY agent-iam"; tg agent-iam apply -auto-approve
 # store — enough to exercise create, tag, grant and destroy end to end, at
 # DynamoDB on-demand prices rather than an Aurora cluster's.
 log "RENDER tenant map for $TENANT"
-mkdir -p "$WORK/src/$TENANT"
-cp "$WORK/tenants/tenants/$CLUSTER/$TENANT.yaml" "$WORK/src/$TENANT/platform.yaml"
+# No $WORK/src staging step. Two lines here used to copy the rendered Platform CR
+# into $WORK/src/<tenant>/platform.yaml, which nothing in this script ever read —
+# scripts/render-tenants.py consumes that shape, and CI calls it, but this run
+# writes tenants.generated.json directly in the heredoc below instead. They
+# arrived with the heredoc that replaced them and stayed.
+#
+# Vestigial and also fatal: the file they copied FROM is produced by the tenant
+# step further down, which clones the repo and helm-templates charts/tenant into
+# it. So the copy ran before its own source existed and killed the run —
+# `cp: .../tenants/development-platform/e2e-smoke.yaml: No such file or
+# directory` — the first time an e2e ever reached this far.
 cat >"$TENANTS_MAP" <<JSON
 {
   "$TENANT": {
@@ -580,8 +589,24 @@ log "VALIDATE tenant-role conformance"
 ROLE=$(kubectl get platform "$TENANT" -n eks-agent-platform -o jsonpath='{.status.iamRoleArn}')
 [ -n "$ROLE" ] || die "Platform has no status.iamRoleArn"
 RN="${ROLE##*/}"
-[ "$(aws iam list-role-policies --role-name "$RN" --query 'length(PolicyNames)' --output text)" = "0" ] ||
-  die "tenant role $RN has inline policies (expected none)"
+# The operator GENERATES scoped inline policies on the tenant role — that is the
+# mechanism, not a violation of it. bedrock-model-scoping is written on every
+# non-suspended reconcile (operators/internal/controller/platform_model_scoping.go),
+# and datastore-access / capability-access / tenant-secrets / tenant-key-access
+# follow whatever the Platform spec declares. IAM even refuses DeleteRole while
+# they exist. So "zero inline policies" is not conformance — it is the signature
+# of a role the operator never finished reconciling, and asserting it here fails
+# every correctly built tenant.
+#
+# The allowlist belongs to cloudgov (internal/platform/audit.go), and the
+# `cloudgov platform audit` gate below enforces it in both directions: nothing
+# outside the allowlist, and the model scope present. A second copy of that list
+# here would be a copy that drifts, so this asserts only that the per-Platform
+# model scope actually reached the role — the one thing whose absence means the
+# tenant's Bedrock access is clamped by the baseline alone.
+[ "$(aws iam list-role-policies --role-name "$RN" \
+  --query "contains(PolicyNames, 'bedrock-model-scoping')" --output text)" = "True" ] ||
+  die "tenant role $RN has no bedrock-model-scoping inline policy — the operator writes it on every non-suspended reconcile, so the per-Platform model scope is not in force"
 # The boundary is checked by identity, not by presence. `grep -q boundary` would
 # pass on any boundary whose ARN contains that word — including a wrong one, or
 # one broader than the ceiling agent-iam mints. The isolation guarantee is that
@@ -593,7 +618,7 @@ EXPECTED_BOUNDARY=$(tg agent-iam output -raw tenant_permissions_boundary_arn 2>/
 ACTUAL_BOUNDARY=$(aws iam get-role --role-name "$RN" --query 'Role.PermissionsBoundary.PermissionsBoundaryArn' --output text)
 [ "$ACTUAL_BOUNDARY" = "$EXPECTED_BOUNDARY" ] ||
   die "tenant role $RN boundary is '${ACTUAL_BOUNDARY}', expected '${EXPECTED_BOUNDARY}'"
-echo "  tenant role $RN: bounded by $EXPECTED_BOUNDARY, zero inline policies"
+echo "  tenant role $RN: bounded by $EXPECTED_BOUNDARY, model scope in force"
 
 log "VALIDATE cloudgov platform audit"
 (cd "$CLOUDGOV_DIR" && go build -o "$WORK/cloudgov" .)
