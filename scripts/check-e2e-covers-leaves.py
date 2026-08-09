@@ -62,6 +62,13 @@ EXEMPT: dict[str, str] = {
     "create — the one thing the run must never do.",
     "break-glass": "Deliberately unappliable: the leaves pass an empty principal list and the "
     "component refuses it. Nothing to apply.",
+    "fleet-hub": "It creates two resources with prevent_destroy — the state bucket holding every "
+    "vended cluster's tofu state, and the CMK that encrypts it — so a run that applied it could "
+    "never satisfy its own zero-billable exit. That guard is correct and is not something an e2e "
+    "gets to weaken: the alternative is a harness that removes the one thing standing between a "
+    "destroy and every spoke cluster's state. It is also an account singleton (the bucket name "
+    "carries no account or environment element), so applying it here would collide with a real "
+    "hub in the same account.",
     "cost": "Account-scoped cost pipeline, shared. Same reason as backup.",
     "dns": "Account-scoped hosted zones, shared across environments and outliving any run.",
     "private-dns": "As dns — shared, and outlives the run.",
