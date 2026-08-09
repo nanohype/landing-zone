@@ -261,9 +261,27 @@ teardown() {
     ) 2>/dev/null || true
   fi
   kubectl -n argocd delete application "portal-tenants-$CLUSTER" --cascade=foreground --timeout=120s 2>/dev/null || true
-  # Now delete the Platform CR; the operator finalizer reaps the tenant role
-  # while the operator is still running (before the cluster is destroyed below).
-  kubectl delete platform "$TENANT" -n eks-agent-platform --wait=true --timeout=180s 2>/dev/null || true
+  # Stop every Application's automated sync before deleting the CRs they manage.
+  # selfHeal would otherwise recreate a Platform mid-delete, and the operator's
+  # finalizer never completes against a CR that keeps coming back. Clearing
+  # syncPolicy disables the automation without deleting anything ArgoCD manages,
+  # which a cascading delete of the Applications would.
+  kubectl -n argocd patch applications --all --type merge -p '{"spec":{"syncPolicy":null}}' >/dev/null 2>&1 || true
+  # Delete EVERY Platform, not just this run's.
+  #
+  # The operator reaps a tenant's AWS identity from a finalizer, so that only
+  # happens for a CR deleted while the operator is still running — which is here,
+  # before the cluster goes. This used to name "$TENANT" alone, and the gitops
+  # catalog deploys Platforms of its own: an `ops` Platform arrives with the addon
+  # catalog, no e2e ever created it, and nothing deleted it. Its tenant and
+  # session roles therefore outlived the cluster, and because the tenant-baseline
+  # managed policy cannot be deleted while a role still has it attached, they
+  # failed the agent-iam destroy.
+  #
+  # Deleting the CRs is the mechanism; the IAM sweep in reap_cluster_orphans is
+  # the fallback for when the operator is already gone. The sweep alone cannot
+  # cover this, because it runs after the destroy loop that agent-iam is in.
+  kubectl delete platform --all -A --wait=true --timeout=300s 2>/dev/null || true
   # Destroy substrate in reverse dependency order (agent-iam depends on secrets;
   # both depend on cluster). cluster-bootstrap is in-cluster only (no billable AWS)
   # + finalizer-prone, so it dies with the cluster.
