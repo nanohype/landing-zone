@@ -18,25 +18,42 @@ locals {
     Team      = var.team
   })
 
-  # What the EBS CSI driver stamps on every volume it provisions from a PVC.
+  # Extra tags the EBS CSI driver stamps on every volume it provisions from a
+  # PVC, on top of the ones it writes itself.
   #
   # Such a volume is not in terraform state and carries only what the driver
-  # puts on it, so without this it reaches EC2 with no cluster tag at all — and
-  # the teardown sweep, which filters on kubernetes.io/cluster/<name>, finds
-  # none, reports no orphans, and leaves every one of them billing after the
-  # cluster is gone. Nothing fails at any point.
+  # puts on it, so the teardown sweep — which filters on
+  # kubernetes.io/cluster/<name> — depends entirely on the driver applying that
+  # tag. It does, via --k8s-tag-cluster-id, and `owned` rather than `shared` is
+  # its behaviour too: the volume belongs to exactly this cluster and is safe to
+  # delete with it, which is the claim the sweep acts on. Subnets carry `shared`
+  # (subnet_tags.tf) because a subnet legitimately outlives a cluster.
   #
-  # `owned`, not `shared`: these volumes belong to exactly this cluster and are
-  # safe to delete with it, which is the claim the sweep acts on. Subnets carry
-  # `shared` (subnet_tags.tf) because a subnet legitimately outlives a cluster.
+  # What belongs here is only what the driver would not otherwise write.
   #
   # Hoisted out of the addon's configuration_values so a test can assert it. The
   # module's cluster_addons OUTPUT is unknown at plan time, so an assertion
   # reading it passes whether or not the input is set — which is exactly what the
   # first draft of that test did.
-  ebs_csi_volume_tags = merge(local.tags, {
-    "kubernetes.io/cluster/${local.cluster_name}" = "owned"
-  })
+  # No kubernetes.io/* key here. The driver reserves that prefix for the tags it
+  # manages itself and refuses to start if one appears in --extra-tags:
+  #
+  #   failed to create driver: invalid driver options: invalid extra tags:
+  #   tag key prefix 'kubernetes.io' is reserved
+  #
+  # ebs-plugin then CrashLoopBackOffs on every restart, the addon sits in
+  # CREATING with an EMPTY health array until terraform's 20m wait expires, and
+  # the cluster apply fails with nothing anywhere naming the cause. Observed on
+  # three consecutive live runs before the logs were captured.
+  #
+  # The cluster tag the teardown sweep filters on is still applied — by
+  # --k8s-tag-cluster-id, which the EKS addon already passes to this same
+  # container, and which exists to stamp kubernetes.io/cluster/<id> = owned on
+  # every provisioned volume. So the entry removed here was not merely forbidden,
+  # it was a duplicate of a tag the driver was always going to write. Verified by
+  # deleting it on a live cluster: both replicas went 6/6 Running with zero
+  # restarts and the addon reached ACTIVE.
+  ebs_csi_volume_tags = local.tags
 }
 
 ################################################################################

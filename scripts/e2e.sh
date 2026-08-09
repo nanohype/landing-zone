@@ -428,6 +428,49 @@ export TF_VAR_cluster_endpoint_public_access=true
 export TF_VAR_cluster_endpoint_public_access_cidrs="[\"${RUNNER_IP}/32\"]"
 echo "  cluster API will be reachable from ${RUNNER_IP}/32 only"
 
+# cluster-bootstrap requires gitops_repo_url and deliberately gives it no
+# default: without one a cluster would sync its app-of-apps from whatever
+# repository happened to be configured, so the component fails the plan instead
+# of guessing. Correct, and it means every caller must supply it. rackctl does.
+# This script did not, so the run died at `APPLY cluster-bootstrap` with
+# `No value for required variable` the first time it ever got that far.
+#
+# A sweep of all six roots this run applies — every variable that is required,
+# has no default, and receives no value from _envcommon, the leaf or root.hcl —
+# returns this one and nothing else. That is a statement about this class only:
+# a variable with a default that is wrong here, or one supplied as empty, would
+# not appear in it.
+export TF_VAR_gitops_repo_url="${E2E_GITOPS_REPO_URL:-https://github.com/nanohype/eks-gitops}"
+echo "  app-of-apps will point at $TF_VAR_gitops_repo_url"
+
+# The development leaf sets enable_external_dns = true and declares
+# `dependencies { paths = ["../dns"] }` to order the dns component ahead of it.
+# This run applies six roots by name and never applies dns, so cluster-bootstrap
+# reached for a parameter nothing had written:
+#
+#   Error: reading SSM Parameter
+#   (/eks-agent-platform/development/dns/domain_filter): couldn't find resource
+#
+# Turned off here rather than adding dns to the run. The annotation it stamps is
+# read by the addons-external-dns ApplicationSet, which this run never reaches,
+# so applying dns would buy no coverage and would put a Route53 hosted zone —
+# whose records are a classic teardown wedge — in front of the one path this
+# campaign has proven works. If the run ever needs to cover external-dns, apply
+# dns and drop this line; that is the faithful version.
+#
+# State it plainly: this is the second deliberate divergence from the development
+# leaf, after the endpoint posture. A run that quietly differs from the
+# configuration it claims to validate is its own dead control, so both are
+# echoed at the top of every run.
+export TF_VAR_enable_external_dns=false
+echo "  external-dns annotation disabled (dns component is not in this run)"
+
+# Every dependency edge the six roots declare, checked rather than assumed:
+# cluster->network, secrets->cluster, agent-iam->{cluster,secrets},
+# tenant-substrate->{cluster,network}, cluster-bootstrap->{cluster,network,dns}.
+# `../dns` is the only one pointing outside the set, and the apply order below
+# satisfies the rest.
+
 log "APPLY network"; tg network apply -auto-approve
 log "APPLY cluster (~15-25m)"; tg cluster apply -auto-approve
 aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" >/dev/null
