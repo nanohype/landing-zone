@@ -12,7 +12,8 @@ dependency "network" {
       private_subnet_azs = ["us-west-2a", "us-west-2b", "us-west-2c"]
     }
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
 dependency "cluster" {
@@ -21,7 +22,8 @@ dependency "cluster" {
     cluster_security_group_id = "sg-mock"
     cluster_name              = "mock-eks"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
 inputs = {

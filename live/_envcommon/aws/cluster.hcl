@@ -10,7 +10,8 @@ dependency "network" {
     public_subnet_ids  = ["subnet-4", "subnet-5", "subnet-6"]
     network_mode       = "create"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
 inputs = {
