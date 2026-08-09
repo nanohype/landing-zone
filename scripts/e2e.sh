@@ -428,6 +428,21 @@ export TF_VAR_cluster_endpoint_public_access=true
 export TF_VAR_cluster_endpoint_public_access_cidrs="[\"${RUNNER_IP}/32\"]"
 echo "  cluster API will be reachable from ${RUNNER_IP}/32 only"
 
+# cluster-bootstrap requires gitops_repo_url and deliberately gives it no
+# default: without one a cluster would sync its app-of-apps from whatever
+# repository happened to be configured, so the component fails the plan instead
+# of guessing. Correct, and it means every caller must supply it. rackctl does.
+# This script did not, so the run died at `APPLY cluster-bootstrap` with
+# `No value for required variable` the first time it ever got that far.
+#
+# A sweep of all six roots this run applies — every variable that is required,
+# has no default, and receives no value from _envcommon, the leaf or root.hcl —
+# returns this one and nothing else. That is a statement about this class only:
+# a variable with a default that is wrong here, or one supplied as empty, would
+# not appear in it.
+export TF_VAR_gitops_repo_url="${E2E_GITOPS_REPO_URL:-https://github.com/nanohype/eks-gitops}"
+echo "  app-of-apps will point at $TF_VAR_gitops_repo_url"
+
 log "APPLY network"; tg network apply -auto-approve
 log "APPLY cluster (~15-25m)"; tg cluster apply -auto-approve
 aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" >/dev/null
