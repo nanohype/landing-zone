@@ -75,18 +75,53 @@ reap_cluster_orphans() {
     aws kms schedule-key-deletion --region "$REGION" --key-id "$kid" --pending-window-in-days 7 2>/dev/null && echo "  scheduled KMS key $kid for deletion" || true
     aws kms delete-alias --region "$REGION" --alias-name "alias/eks/$CLUSTER" 2>/dev/null || true
   fi
-  # Tenant role the operator minted at runtime (finalizer fallback if the
-  # in-cluster delete raced selfHeal or the operator was already gone).
-  local trole="$ENVIRONMENT-$TENANT-tenant" p ip
-  if aws iam get-role --role-name "$trole" >/dev/null 2>&1; then
-    for p in $(aws iam list-attached-role-policies --role-name "$trole" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
-      aws iam detach-role-policy --role-name "$trole" --policy-arn "$p" 2>/dev/null || true
+  # Second pass over the operator-minted roles, for anything the destroys
+  # themselves surfaced. The pass that matters for agent-iam runs earlier — see
+  # reap_operator_roles.
+  reap_operator_roles
+}
+
+# Roles the operator minted at runtime, for EVERY Platform on this cluster.
+#
+# Called TWICE, and both calls matter.
+#
+# Before the destroy loop, because agent-iam is IN that loop: the tenant-baseline
+# managed policy cannot be deleted while any role still has it attached, so one
+# surviving role fails that destroy and everything below it in the reverse order
+# stays standing. A sweep that only runs afterwards reaps the blocker after the
+# destroy it would have unblocked has already failed. It also catches roles left
+# by an EARLIER run, whose Platform CRs no longer exist for a finalizer to act on.
+#
+# And after, for anything the destroys themselves surfaced.
+#
+# Enumerated from IAM rather than reconstructed from a name. The operator names
+# them <cluster>-<platform>-{tenant,session} under /eks-agent-platform/, so
+# listing that path and filtering on this cluster's prefix finds all of them,
+# including kinds this script does not name. A constructed name was wrong twice
+# over: it built <environment>-<tenant>-tenant against an operator that writes
+# <cluster>-<platform>-tenant, so it had never matched anything — and a fallback
+# that silently matches nothing is indistinguishable from one with nothing to do.
+#
+# This is the fallback, not the mechanism. Deleting the Platform CR while the
+# operator still runs is what reaps a tenant identity properly, because the
+# operator also removes the Pod Identity association and the scoped policies it
+# generated. This exists for when the operator is already gone.
+#
+# The operator's own role is excluded: agent-iam created it and terraform
+# destroys it, so reaping it here would only race that.
+reap_operator_roles() {
+  local operator_role="$CLUSTER-agent-platform-operator" r p ip
+  for r in $(aws iam list-roles --path-prefix /eks-agent-platform/ \
+    --query "Roles[?starts_with(RoleName, '$CLUSTER-')].RoleName" --output text 2>/dev/null); do
+    [ "$r" = "$operator_role" ] && continue
+    for p in $(aws iam list-attached-role-policies --role-name "$r" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
+      aws iam detach-role-policy --role-name "$r" --policy-arn "$p" 2>/dev/null || true
     done
-    for ip in $(aws iam list-role-policies --role-name "$trole" --query 'PolicyNames' --output text 2>/dev/null); do
-      aws iam delete-role-policy --role-name "$trole" --policy-name "$ip" 2>/dev/null || true
+    for ip in $(aws iam list-role-policies --role-name "$r" --query 'PolicyNames' --output text 2>/dev/null); do
+      aws iam delete-role-policy --role-name "$r" --policy-name "$ip" 2>/dev/null || true
     done
-    aws iam delete-role --role-name "$trole" 2>/dev/null && echo "  reaped tenant role $trole (finalizer fallback)" || true
-  fi
+    aws iam delete-role --role-name "$r" 2>/dev/null && echo "  reaped operator-minted role $r" || true
+  done
 }
 
 # Orphaned EKS security groups + available ENIs (created by the cluster, outside
@@ -107,9 +142,16 @@ reap_vpc_blockers() {
 }
 
 # Wait until a Deployment exists and is Available.
+#
+# Bounded on wall clock, not an iteration count. `kubectl wait` burns up to its
+# own --timeout before the sleep, so counting iterations bounds at roughly DOUBLE
+# the stated seconds whenever the Deployment exists but is not Available, and
+# stays honest when it does not exist, because the `get` fails fast. The error is
+# therefore not a constant offset: the timeout stretches furthest in the
+# half-working case, which is the one a bounded wait is for.
 wait_avail() {
-  local ns=$1 dep=$2 to=${3:-300} i
-  for ((i = 0; i < to; i += 5)); do
+  local ns=$1 dep=$2 to=${3:-300} start=$SECONDS
+  while [ $((SECONDS - start)) -lt "$to" ]; do
     if kubectl -n "$ns" get deploy "$dep" >/dev/null 2>&1 &&
       kubectl -n "$ns" wait --for=condition=Available "deploy/$dep" --timeout=5s >/dev/null 2>&1; then
       return 0
@@ -231,9 +273,30 @@ teardown() {
     ) 2>/dev/null || true
   fi
   kubectl -n argocd delete application "portal-tenants-$CLUSTER" --cascade=foreground --timeout=120s 2>/dev/null || true
-  # Now delete the Platform CR; the operator finalizer reaps the tenant role
-  # while the operator is still running (before the cluster is destroyed below).
-  kubectl delete platform "$TENANT" -n eks-agent-platform --wait=true --timeout=180s 2>/dev/null || true
+  # Stop every Application's automated sync before deleting the CRs they manage.
+  # selfHeal would otherwise recreate a Platform mid-delete, and the operator's
+  # finalizer never completes against a CR that keeps coming back. Clearing
+  # syncPolicy disables the automation without deleting anything ArgoCD manages,
+  # which a cascading delete of the Applications would.
+  kubectl -n argocd patch applications --all --type merge -p '{"spec":{"syncPolicy":null}}' >/dev/null 2>&1 || true
+  # Delete EVERY Platform, not just this run's.
+  #
+  # The operator reaps a tenant's AWS identity from a finalizer, so that only
+  # happens for a CR deleted while the operator is still running — which is here,
+  # before the cluster goes. This used to name "$TENANT" alone, and the gitops
+  # catalog deploys Platforms of its own: an `ops` Platform arrives with the addon
+  # catalog, no e2e ever created it, and nothing deleted it. Its tenant and
+  # session roles therefore outlived the cluster, and because the tenant-baseline
+  # managed policy cannot be deleted while a role still has it attached, they
+  # failed the agent-iam destroy.
+  #
+  # Deleting the CRs is the mechanism; the IAM sweep in reap_cluster_orphans is
+  # the fallback for when the operator is already gone. The sweep alone cannot
+  # cover this, because it runs after the destroy loop that agent-iam is in.
+  kubectl delete platform --all -A --wait=true --timeout=300s 2>/dev/null || true
+  # Whatever the finalizers did not cover — including roles from an earlier run,
+  # whose Platform CRs are long gone — must go before agent-iam is destroyed.
+  reap_operator_roles
   # Destroy substrate in reverse dependency order (agent-iam depends on secrets;
   # both depend on cluster). cluster-bootstrap is in-cluster only (no billable AWS)
   # + finalizer-prone, so it dies with the cluster.
@@ -501,8 +564,8 @@ TF_VAR_tenants_repo_url="$TENANTS_REPO" TF_VAR_enable_agent_platform=true \
 # A child that is OutOfSync or Progressing is ordinary convergence and is not an
 # error here; a child that cannot render at all is.
 log "WAIT for the addon catalog (every wait below depends on it)"
-aoa_sync="" aoa_children=0 aoa_broken=""
-for ((i = 0; i < 60; i++)); do
+aoa_sync="" aoa_children=0 aoa_broken="" aoa_start=$SECONDS aoa_next=0 aoa_elapsed=0
+while [ $((SECONDS - aoa_start)) -lt 600 ]; do
   aoa_sync=$(kubectl -n argocd get application app-of-apps -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
   aoa_children=$(kubectl -n argocd get applications --no-headers 2>/dev/null | grep -cv '^app-of-apps ' || true)
   # Select the two error condition types by name and print the owning
@@ -510,7 +573,11 @@ for ((i = 0; i < 60; i++)); do
   aoa_broken=$(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.conditions[?(@.type=="ComparisonError")]}{.message}{end}{range .status.conditions[?(@.type=="InvalidSpecError")]}{.message}{end}{"\n"}{end}' 2>/dev/null |
     awk -F'\t' 'NF>1 && $2 != ""' || true)
   [ "$aoa_sync" = "Synced" ] && [ "${aoa_children:-0}" -gt 0 ] && [ -z "$aoa_broken" ] && break
-  [ $((i % 6)) -eq 0 ] && echo "  ...$((i * 10))s: app-of-apps sync='${aoa_sync:-<absent>}' children=${aoa_children:-0}"
+  aoa_elapsed=$((SECONDS - aoa_start))
+  if [ "$aoa_elapsed" -ge "$aoa_next" ]; then
+    echo "  ...${aoa_elapsed}s: app-of-apps sync='${aoa_sync:-<absent>}' children=${aoa_children:-0}"
+    aoa_next=$((aoa_elapsed + 60))
+  fi
   sleep 10
 done
 if [ "$aoa_sync" != "Synced" ] || [ "${aoa_children:-0}" -eq 0 ] || [ -n "$aoa_broken" ]; then
@@ -585,15 +652,19 @@ log "OPERATOR (GitOps via addons-agent-operator ApplicationSet)"
 # webhook cert -> the pod goes Ready. Nudge the AppSet controller to discover the
 # label now (not on its ~3m poll), hard-refresh the Application each loop, and wait.
 kubectl -n argocd rollout restart deployment/argocd-applicationset-controller >/dev/null 2>&1 || true
-opok=""
-for ((i = 0; i < 600; i += 10)); do
+opok="" op_start=$SECONDS op_next=0 op_elapsed=0
+while [ $((SECONDS - op_start)) -lt 600 ]; do
   if kubectl -n eks-agent-platform get deploy eks-agent-platform-operator >/dev/null 2>&1 &&
     kubectl -n eks-agent-platform wait --for=condition=Available deploy/eks-agent-platform-operator --timeout=5s >/dev/null 2>&1; then
     opok=1
     break
   fi
   kubectl -n argocd annotate application eks-agent-platform-operator argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
-  [ $((i % 60)) -eq 0 ] && echo "  ...${i}s: operator Deployment not Available yet"
+  op_elapsed=$((SECONDS - op_start))
+  if [ "$op_elapsed" -ge "$op_next" ]; then
+    echo "  ...${op_elapsed}s: operator Deployment not Available yet"
+    op_next=$((op_elapsed + 60))
+  fi
   sleep 10
 done
 [ -n "$opok" ] || { dump_operator_diag; die "operator Deployment not Available (GitOps install)"; }
@@ -623,12 +694,16 @@ APP="portal-tenants-$CLUSTER"
 # The operator signals tenant readiness via .status.phase=Ready — its conditions
 # are granular (NamespaceReady, Suspended), with no aggregate Ready condition —
 # so poll the phase rather than `kubectl wait --for=condition=Ready`.
-phase=""
-for ((i = 0; i < 720; i += 10)); do
+phase="" ph_start=$SECONDS ph_next=0 ph_elapsed=0
+while [ $((SECONDS - ph_start)) -lt 720 ]; do
   phase=$(kubectl get platform "$TENANT" -n eks-agent-platform -o jsonpath='{.status.phase}' 2>/dev/null || true)
   [ "$phase" = "Ready" ] && break
   kubectl -n argocd annotate application "$APP" argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
-  [ $((i % 60)) -eq 0 ] && echo "  ...${i}s: Platform phase='${phase:-<absent>}'"
+  ph_elapsed=$((SECONDS - ph_start))
+  if [ "$ph_elapsed" -ge "$ph_next" ]; then
+    echo "  ...${ph_elapsed}s: Platform phase='${phase:-<absent>}'"
+    ph_next=$((ph_elapsed + 60))
+  fi
   sleep 10
 done
 [ "$phase" = "Ready" ] || { dump_diag; die "Platform $TENANT did not reach phase=Ready (last: '${phase:-<absent>}')"; }
