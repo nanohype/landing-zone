@@ -305,6 +305,39 @@ resource "helm_release" "argocd" {
         # unhealthy about. The right check for a CR is "does a controller own this", not
         # "is it one of ours".
       }
+
+      # repo-server refuses to generate manifests for a directory source whose
+      # combined size exceeds this, defaulting to 10M. The Argo Workflows CRDs
+      # are 11M at argo-workflows-1.0.23 — four of the eight files carry full
+      # OpenAPI schemas at ~2.5M each — so the argo-workflows-crds Application
+      # fails comparison outright:
+      #
+      #   ComparisonError: failed to generate manifest for source 1 of 1:
+      #   exceeded max combined manifest file size
+      #
+      # Nothing about that is visible upstream of a live sync. The Application
+      # manifest is valid, the sync-wave gate confirms the CRDs precede their
+      # consumers, and the failure only appears as a downstream symptom: the
+      # WorkflowTemplate kind is never registered, so the operator chart's
+      # eval-runner WorkflowTemplate fails admission and the operator never
+      # installs at all.
+      #
+      # Raising the ceiling rather than switching the source to the chart's
+      # `crds/minimal` directory. minimal is 852K because it replaces each spec
+      # with x-kubernetes-preserve-unknown-fields — workflowtemplates drops from
+      # 2.5M to 1.7k — which installs a CRD that validates nothing. A resource
+      # whose schema accepts anything is a control in name only, and the trade
+      # here is memory for real admission validation.
+      #
+      # 20M is headroom over the measured 11M, not a ceiling chosen for its own
+      # sake: these CRDs grow with every Argo Workflows release, and the cost of
+      # rediscovering this is a full cluster build. It applies to every directory
+      # source, and upstream notes manifest generation can expand memory by up to
+      # 300x, so it is deliberately the smallest value that clears the payload
+      # with room to move rather than an arbitrarily large one.
+      params = {
+        "reposerver.max.combined.directory.manifests.size" = "20M"
+      }
     }
   })]
 
