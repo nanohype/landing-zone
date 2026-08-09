@@ -371,6 +371,17 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       # opencost reads (the monitoring/* annotations below), so a cluster carrying
       # this label always carries those annotations too.
       "monitoring/managed" = "true"
+      } : {}, local.wire_tenants_repo ? {
+      # Opts this cluster into the portal-tenants ApplicationSet, which applies
+      # the tenant boundary manifests the portal commits to the tenants repo.
+      #
+      # Same condition that registers ArgoCD's read-only deploy key for that
+      # repo and stamps the gitops/tenants-repo-url annotation below, because
+      # the three are one wiring: a key with no consumer installed reads
+      # nothing, and the appset's generator resolves its repoURL from that
+      # annotation under missingkey=error, so a label without it fails to
+      # render rather than silently generating no tenants.
+      "portal/tenants-enabled" = "true"
     } : {})
     # Per-cluster wiring for the agent-platform operator: the EKS cluster name
     # (the operator creates the tenant Pod Identity associations on it) + the
@@ -390,7 +401,18 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
       "gitops/repo-branch" = var.gitops_repo_branch
 
       "eks-agent-platform/operator-role-arn" = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:role/eks-agent-platform/${var.cluster_name}-agent-platform-operator"
-      }, var.enable_eval_runtime ? {
+      }, local.wire_tenants_repo ? {
+      # The tenants repo the portal commits tenant boundary manifests to. The
+      # portal-tenants ApplicationSet resolves its generator repoURL from here
+      # for the same reason every addon appset resolves its source from
+      # gitops/repo-url: an org named in the manifest makes a fork inert, and a
+      # deploy key registered for one URL against an appset pointing at another
+      # is a credential wired to the wrong repo.
+      #
+      # An annotation, not a label: an org/name slug and an SSH remote both
+      # carry characters a label value disallows.
+      "gitops/tenants-repo-url" = var.tenants_repo_url
+      } : {}, var.enable_eval_runtime ? {
       # eval-runner reports bucket, read from the eval-runtime SSM param. The
       # eval-runner role is bound by Pod Identity, so no role ARN is published.
       "eks-agent-platform/eval-reports-bucket" = data.aws_ssm_parameter.eval_reports_bucket[0].value
