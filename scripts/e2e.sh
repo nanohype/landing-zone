@@ -75,29 +75,41 @@ reap_cluster_orphans() {
     aws kms schedule-key-deletion --region "$REGION" --key-id "$kid" --pending-window-in-days 7 2>/dev/null && echo "  scheduled KMS key $kid for deletion" || true
     aws kms delete-alias --region "$REGION" --alias-name "alias/eks/$CLUSTER" 2>/dev/null || true
   fi
-  # Roles the operator minted at runtime, for EVERY Platform on this cluster —
-  # not only the one this run created.
-  #
-  # Enumerated from IAM rather than reconstructed from a name. The operator names
-  # them <cluster>-<platform>-{tenant,session} under /eks-agent-platform/, so
-  # listing that path and filtering on this cluster's prefix finds all of them,
-  # including kinds this script does not know about.
-  #
-  # A constructed name was wrong twice over. It has to agree with the operator's
-  # naming exactly and did not — it built <environment>-<tenant>-tenant against an
-  # operator that writes <cluster>-<platform>-tenant, so it had never matched
-  # anything, and a fallback that silently matches nothing is indistinguishable
-  # from one with nothing to do. It also only ever covered THIS run's tenant,
-  # while the gitops catalog deploys Platforms of its own — a cluster carries an
-  # `ops` Platform whose roles no e2e created and nothing here would remove.
-  #
-  # Those leftovers are not untidiness. The tenant-baseline managed policy cannot
-  # be deleted while any role still has it attached, so one surviving tenant role
-  # fails the agent-iam destroy, and every component below it in the reverse order
-  # stays standing.
-  #
-  # The operator's own role is excluded: agent-iam created it and terraform
-  # destroys it, so reaping it here would only race that.
+  # Second pass over the operator-minted roles, for anything the destroys
+  # themselves surfaced. The pass that matters for agent-iam runs earlier — see
+  # reap_operator_roles.
+  reap_operator_roles
+}
+
+# Roles the operator minted at runtime, for EVERY Platform on this cluster.
+#
+# Called TWICE, and both calls matter.
+#
+# Before the destroy loop, because agent-iam is IN that loop: the tenant-baseline
+# managed policy cannot be deleted while any role still has it attached, so one
+# surviving role fails that destroy and everything below it in the reverse order
+# stays standing. A sweep that only runs afterwards reaps the blocker after the
+# destroy it would have unblocked has already failed. It also catches roles left
+# by an EARLIER run, whose Platform CRs no longer exist for a finalizer to act on.
+#
+# And after, for anything the destroys themselves surfaced.
+#
+# Enumerated from IAM rather than reconstructed from a name. The operator names
+# them <cluster>-<platform>-{tenant,session} under /eks-agent-platform/, so
+# listing that path and filtering on this cluster's prefix finds all of them,
+# including kinds this script does not name. A constructed name was wrong twice
+# over: it built <environment>-<tenant>-tenant against an operator that writes
+# <cluster>-<platform>-tenant, so it had never matched anything — and a fallback
+# that silently matches nothing is indistinguishable from one with nothing to do.
+#
+# This is the fallback, not the mechanism. Deleting the Platform CR while the
+# operator still runs is what reaps a tenant identity properly, because the
+# operator also removes the Pod Identity association and the scoped policies it
+# generated. This exists for when the operator is already gone.
+#
+# The operator's own role is excluded: agent-iam created it and terraform
+# destroys it, so reaping it here would only race that.
+reap_operator_roles() {
   local operator_role="$CLUSTER-agent-platform-operator" r p ip
   for r in $(aws iam list-roles --path-prefix /eks-agent-platform/ \
     --query "Roles[?starts_with(RoleName, '$CLUSTER-')].RoleName" --output text 2>/dev/null); do
@@ -282,6 +294,9 @@ teardown() {
   # the fallback for when the operator is already gone. The sweep alone cannot
   # cover this, because it runs after the destroy loop that agent-iam is in.
   kubectl delete platform --all -A --wait=true --timeout=300s 2>/dev/null || true
+  # Whatever the finalizers did not cover — including roles from an earlier run,
+  # whose Platform CRs are long gone — must go before agent-iam is destroyed.
+  reap_operator_roles
   # Destroy substrate in reverse dependency order (agent-iam depends on secrets;
   # both depend on cluster). cluster-bootstrap is in-cluster only (no billable AWS)
   # + finalizer-prone, so it dies with the cluster.
