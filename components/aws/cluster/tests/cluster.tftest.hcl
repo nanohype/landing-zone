@@ -218,14 +218,16 @@ run "system_node_disk_floor_enforced" {
   ]
 }
 
-# ── Invariant: dynamically provisioned volumes are attributable ──
+# ── Invariant: extraVolumeTags cannot stop the driver from starting ──
 #
 # A PVC-created EBS volume is not in terraform state and carries only what the
-# CSI driver stamps on it. Without extraVolumeTags it reaches EC2 with no cluster
-# tag, and the teardown sweep — which filters on kubernetes.io/cluster/<name> —
-# finds nothing, reports no orphans, and leaves every volume billing after the
-# cluster is gone. Nothing fails, which is why this needs an assertion rather
-# than a runbook step.
+# CSI driver stamps on it, so the teardown sweep — which filters on
+# kubernetes.io/cluster/<name> — depends on the driver applying that tag. It
+# does: --k8s-tag-cluster-id, passed by the EKS addon, exists for exactly that.
+#
+# The risk this component controls is the opposite one. Anything it adds to
+# extraVolumeTags is passed straight through to --extra-tags, where a reserved
+# key is fatal at startup rather than ignored.
 #
 # The assertion reads the LOCAL, not module.eks.cluster_addons — that output is
 # unknown at plan time, so a condition reading it passes whether or not the input
@@ -236,16 +238,39 @@ run "system_node_disk_floor_enforced" {
 # tflint closes that: terraform_unused_declarations reports
 # `local.ebs_csi_volume_tags is declared but not used`, verified by disconnecting
 # it. The value is asserted here; that it is wired is asserted by lint.
-run "ebs_csi_stamps_the_cluster_tag_on_dynamic_volumes" {
+# This assertion was inverted, and it kept the cluster from ever building.
+#
+# It required extraVolumeTags to CARRY kubernetes.io/cluster/<name>. The driver
+# reserves that prefix for tags it manages itself and exits on startup if one is
+# passed in --extra-tags — `invalid extra tags: tag key prefix 'kubernetes.io' is
+# reserved`. So the test enforced a value that makes ebs-plugin CrashLoopBackOff,
+# leaves the addon in CREATING with an empty health array through terraform's 20m
+# wait, and fails the apply. It also failed anyone who tried to remove the tag,
+# which is how a wrong invariant outlives its own discovery.
+#
+# Nothing it examined could have caught that. A terraform local cannot say whether
+# the driver accepts the value, and every fact that decides it — the reserved
+# prefix, the startup exit, the flags the EKS addon already passes — lives outside
+# this plan. Asserting harder on the local was never going to help.
+#
+# The sweep's filter was right the whole time. --k8s-tag-cluster-id is passed to
+# the same container by the EKS addon and exists to stamp
+# kubernetes.io/cluster/<id> = owned on each provisioned volume, so the tag
+# arrives without this map. That guarantee is genuinely outside terraform's view;
+# it is stated here rather than asserted, because a check that cannot see its
+# subject is what this block used to be.
+#
+# What IS checkable here is the failure mode: no reserved-prefix key may appear.
+run "ebs_csi_extra_tags_carry_no_reserved_prefix" {
   command = plan
 
   assert {
-    condition     = can(local.ebs_csi_volume_tags["kubernetes.io/cluster/${local.cluster_name}"])
-    error_message = "the aws-ebs-csi-driver addon must set controller.extraVolumeTags carrying kubernetes.io/cluster/<name>; without it a dynamically provisioned volume is invisible to the orphan sweep that filters on exactly that tag"
+    condition     = length([for k in keys(local.ebs_csi_volume_tags) : k if startswith(k, "kubernetes.io/")]) == 0
+    error_message = "extraVolumeTags carries a kubernetes.io/* key. The EBS CSI driver reserves that prefix and refuses to start, so ebs-plugin CrashLoopBackOffs and the addon never leaves CREATING. The cluster tag the orphan sweep filters on is applied by --k8s-tag-cluster-id, not by this map."
   }
 
   assert {
-    condition     = local.ebs_csi_volume_tags["kubernetes.io/cluster/${local.cluster_name}"] == "owned"
-    error_message = "the ownership value must be `owned`, not `shared` — the sweep deletes on that claim, and a volume this cluster alone created is safe to delete with it"
+    condition     = length(keys(local.ebs_csi_volume_tags)) > 0
+    error_message = "extraVolumeTags resolved empty — the addon would be wired to nothing, and an assertion over an empty map passes for the wrong reason"
   }
 }
