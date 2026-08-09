@@ -11,7 +11,8 @@ dependency "cluster" {
     oidc_provider_arn = "arn:aws:iam::111111111111:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/MOCK"
     oidc_issuer       = "oidc.eks.us-west-2.amazonaws.com/id/MOCK"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
 inputs = {
