@@ -481,6 +481,56 @@ log "APPLY cluster-bootstrap (CoreDNS fix + portal-reader token + ArgoCD tenants
 # secret annotations cluster-bootstrap sets. This is the production install path.
 TF_VAR_tenants_repo_url="$TENANTS_REPO" TF_VAR_enable_agent_platform=true \
   tg cluster-bootstrap apply -auto-approve
+# Every wait below this point — cert-manager, the operator, the tenant — depends
+# on the addon catalog. When something in it cannot render, each of those waits
+# still burns its full timeout and then blames its own subject, so the reported
+# failure names a component that was never the problem. Two real cases:
+#
+#   an invalid label value on 30 ApplicationSets, which made every generated
+#   Application fail admission, surfaced as "cert-manager-webhook not Available"
+#
+#   a CRD Application exceeding the repo-server's combined-manifest size limit,
+#   which meant the WorkflowTemplate kind was never registered, surfaced as the
+#   operator Deployment never appearing
+#
+# Three conditions, all required, because those two cases fail differently.
+# Children > 0: an ApplicationSet that generates nothing leaves the parent Synced
+# and Healthy over an empty catalog. Parent Synced: the first case. And no child
+# carrying ComparisonError/InvalidSpecError: the second, where the parent was
+# Healthy with 38 children and exactly one of them could not produce manifests.
+# A child that is OutOfSync or Progressing is ordinary convergence and is not an
+# error here; a child that cannot render at all is.
+log "WAIT for the addon catalog (every wait below depends on it)"
+aoa_sync="" aoa_children=0 aoa_broken=""
+for ((i = 0; i < 60; i++)); do
+  aoa_sync=$(kubectl -n argocd get application app-of-apps -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+  aoa_children=$(kubectl -n argocd get applications --no-headers 2>/dev/null | grep -cv '^app-of-apps ' || true)
+  # Select the two error condition types by name and print the owning
+  # Application; awk keeps only the rows where a message was actually emitted.
+  aoa_broken=$(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.conditions[?(@.type=="ComparisonError")]}{.message}{end}{range .status.conditions[?(@.type=="InvalidSpecError")]}{.message}{end}{"\n"}{end}' 2>/dev/null |
+    awk -F'\t' 'NF>1 && $2 != ""' || true)
+  [ "$aoa_sync" = "Synced" ] && [ "${aoa_children:-0}" -gt 0 ] && [ -z "$aoa_broken" ] && break
+  [ $((i % 6)) -eq 0 ] && echo "  ...$((i * 10))s: app-of-apps sync='${aoa_sync:-<absent>}' children=${aoa_children:-0}"
+  sleep 10
+done
+if [ "$aoa_sync" != "Synced" ] || [ "${aoa_children:-0}" -eq 0 ] || [ -n "$aoa_broken" ]; then
+  echo "  catalog did not converge — sync='${aoa_sync:-<absent>}' children=${aoa_children:-0}" >&2
+  [ -n "$aoa_broken" ] && { echo "  Applications that cannot render:" >&2; printf '%s\n' "$aoa_broken" | cut -c1-300 | sed 's/^/    /' >&2; }
+  kubectl -n argocd get application app-of-apps \
+    -o jsonpath='{range .status.conditions[*]}  {.type}: {.message}{"\n"}{end}' 2>/dev/null >&2 || true
+  # The per-resource sync messages carry an admission rejection verbatim; the
+  # Application-level message only reports that some task failed.
+  kubectl -n argocd get application app-of-apps -o json 2>/dev/null |
+    python3 -c 'import json,sys
+d=json.load(sys.stdin)
+for r in d.get("status",{}).get("operationState",{}).get("syncResult",{}).get("resources",[]):
+    if r.get("message"):
+        print("  %s %s/%s: %s" % (r.get("status"), r.get("kind"), r.get("name"), r["message"][:400]))' >&2 || true
+  kubectl -n argocd get applications 2>/dev/null | head -40 >&2 || true
+  die "the addon catalog did not install — every wait below it would time out blaming its own subject"
+fi
+echo "  catalog Synced: $aoa_children Application(s), none blocked on rendering"
+
 # secrets provisions the data CMK that agent-iam encrypts its model-artifacts +
 # eval-reports buckets with (dependency.secrets.outputs.kms_key_arn). It MUST apply
 # before agent-iam — the dependency's mock is restricted to validate/plan, so a
