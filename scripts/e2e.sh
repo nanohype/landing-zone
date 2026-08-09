@@ -188,10 +188,28 @@ dump_cluster_diag() {
     return 0
   fi
   echo "  nodes:"; kubectl get nodes -o wide --request-timeout=20s 2>&1 | sed 's/^/    /' | head -12
-  # Not-Running is the useful set: a pending or crashlooping controller is what an
-  # addon stuck in CREATING looks like from inside, and the addon's own health
-  # array stays empty while it happens.
-  echo "  pods not Running:"; kubectl get pods -A --field-selector=status.phase!=Running --request-timeout=20s 2>&1 | sed 's/^/    /' | head -25
+  # NOT `--field-selector=status.phase!=Running`. A CrashLoopBackOff pod is phase
+  # Running, so that selector cannot see the single state this function most needs
+  # to report — it printed "No resources found" on a cluster where both
+  # ebs-csi-controller replicas had all six containers restarting, and only the
+  # event stream gave it away. Select on container readiness and restarts instead,
+  # which is what "unhealthy" actually means here.
+  echo "  pods unhealthy (not-ready containers or restarts):"
+  kubectl get pods -A --no-headers --request-timeout=20s 2>/dev/null |
+    awk '{split($3,r,"/"); if ($4 != "Running" || r[1] != r[2] || $5+0 > 0) print}' |
+    sed 's/^/    /' | head -25
+  # The logs are the point. Everything above says a container is failing; only this
+  # says why. --previous reads the crashed instance rather than the one currently
+  # starting, which is the copy that holds the error.
+  echo "  logs from restarting containers:"
+  kubectl get pods -A --no-headers --request-timeout=20s 2>/dev/null |
+    awk '$5+0 > 0 {print $1, $2}' | head -4 |
+    while read -r ns pod; do
+      for c in $(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.status.containerStatuses[?(@.restartCount>0)].name}' --request-timeout=15s 2>/dev/null); do
+        echo "    --- $ns/$pod [$c] ---"
+        kubectl logs "$pod" -n "$ns" -c "$c" --previous --tail=15 --request-timeout=20s 2>&1 | sed 's/^/      /'
+      done
+    done
   echo "  recent events:"; kubectl get events -A --sort-by=.lastTimestamp --request-timeout=20s 2>&1 | tail -25 | sed 's/^/    /'
 }
 
