@@ -30,7 +30,9 @@ variable "datastores" {
     kind            = string
     deletion_policy = optional(string, "Retain")
     relational = optional(object({
-      engine_version        = optional(string, "16.6")
+      # Major-only: RDS resolves the newest minor the region offers, so a patch
+      # AWS retires cannot strand the apply. See the parent variable.
+      engine_version        = optional(string, "16")
       min_acu               = optional(number, 0.5)
       max_acu               = optional(number, 8)
       backup_retention_days = optional(number, 7)
