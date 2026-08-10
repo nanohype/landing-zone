@@ -64,7 +64,13 @@ variable "tenants" {
       kind            = string
       deletion_policy = optional(string, "Retain")
       relational = optional(object({
-        engine_version        = optional(string, "16.6")
+        # Major-only by design. RDS resolves it to the newest minor the region
+        # offers, so a retired patch cannot strand the component: pinned at
+        # "16.6", this failed every apply with `Cannot find version 16.6 for
+        # aurora-postgresql` once AWS withdrew it — after the VPC and the EKS
+        # cluster were already built and billing. Pin a full version only to
+        # hold a tenant on one, and expect to move it when AWS retires it.
+        engine_version        = optional(string, "16")
         min_acu               = optional(number, 0.5)
         max_acu               = optional(number, 8)
         backup_retention_days = optional(number, 7)
@@ -178,9 +184,14 @@ variable "tenants" {
 
   # Auto-pause needs Aurora PostgreSQL 16.3 or later. Below that a min_acu of 0
   # is accepted by the API and simply never pauses, so the cost saving the floor
-  # was set for silently does not happen. Checked on the major only, matching the
-  # CRD rule — the minor is compared as a number so 16.10 does not read as older
-  # than 16.3.
+  # was set for silently does not happen. The minor is compared as a number so
+  # 16.10 does not read as older than 16.3.
+  #
+  # A major-only version ("16") satisfies the rule. RDS resolves it to the newest
+  # minor available in the region, and every 16.x AWS still offers is past 16.3 —
+  # the versions below it were the first two releases of the line and are long
+  # gone. Treating the absent minor as "whatever is current" is the only reading
+  # that matches what the API will actually create.
   validation {
     condition = alltrue(flatten([
       for tk, tv in var.tenants : [
@@ -188,7 +199,8 @@ variable "tenants" {
           d.relational.min_acu != 0 ||
           tonumber(split(".", d.relational.engine_version)[0]) > 16 ||
           (tonumber(split(".", d.relational.engine_version)[0]) == 16 &&
-          tonumber(split(".", d.relational.engine_version)[1]) >= 3)
+            (length(split(".", d.relational.engine_version)) == 1 ||
+          tonumber(split(".", d.relational.engine_version)[1]) >= 3))
         ) if d.kind == "relational"
       ]
     ]))
