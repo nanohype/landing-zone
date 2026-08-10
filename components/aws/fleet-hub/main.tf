@@ -209,6 +209,21 @@ resource "aws_s3_bucket_logging" "fleet_state" {
 # Access-log sink for the state bucket. Private, its own TLS deny, and grants
 # only the S3 logging service principal PutObject for this source bucket.
 resource "aws_s3_bucket" "fleet_state_logs" {
+  # force_destroy, and the crown-jewel exemption deliberately does NOT extend here.
+  #
+  # This is a server-access-log SINK. Its records are write-once, regenerable, and a
+  # byproduct of the bucket that is precious rather than precious themselves — the
+  # checkov skip above already says as much about versioning. It fills from the first
+  # PUT, so it is never empty when a teardown reaches it, and S3 refuses to delete a
+  # non-empty bucket.
+  #
+  # Without this, a teardown that has correctly and deliberately lowered the
+  # prevent_destroy guards on the state bucket and the CMK still wedges on
+  # BucketNotEmpty against the log sink — and the operator is left emptying object
+  # versions by hand to finish an act they already committed to. Observed on a real
+  # teardown, with everything else in the component already gone.
+  force_destroy = true
+
   #checkov:skip=CKV_AWS_21:versioning is intentionally off — this is a server-access-log sink; log records are write-once and regenerable, so versioning adds cost with no recovery value.
   bucket = "${var.state_bucket_name}-logs"
   tags   = local.tags

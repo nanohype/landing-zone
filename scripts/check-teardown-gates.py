@@ -113,11 +113,15 @@ EXEMPT = {
     "components/aws/fleet-hub": (
         "Crown jewels. The vend state bucket and its CMK carry prevent_destroy: they "
         "outlive every spoke they vend, so a deliberate teardown removes the guard "
-        "first, by hand and on purpose."
+        "first, by hand and on purpose. The exemption covers those two and nothing "
+        "else — the access-log SINK beside them carries force_destroy, because its "
+        "records are a regenerable byproduct and a non-empty log bucket otherwise "
+        "wedges a teardown the operator has already deliberately authorised."
     ),
     "components/aws/portal-hub": (
         "Crown jewels, same posture as fleet-hub — the portal's workspace state bucket "
-        "and CMK carry prevent_destroy and outlive the clusters they describe."
+        "and CMK carry prevent_destroy and outlive the clusters they describe. Its "
+        "access-log sink carries force_destroy for the same reason fleet-hub's does."
     ),
     "components/aws/org-cost": (
         "The CUR 2.0 export bucket is `org-<account>-cur-export` in the management "
