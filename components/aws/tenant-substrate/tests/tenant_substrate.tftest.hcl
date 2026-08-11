@@ -51,7 +51,7 @@ variables {
   vpc_id             = "vpc-0123456789abcdef0"
   private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
   cluster_sg_id      = "sg-0123456789abcdef0"
-  node_sg_id      = "sg-0fedcba9876543210"
+  node_sg_id         = "sg-0fedcba9876543210"
   cluster_name       = "development-platform"
   team               = "platform"
   tenants            = {}
@@ -83,7 +83,7 @@ run "every_billed_datastore_carries_platform_id" {
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"
-    node_sg_id   = "sg-0fedcba9876543210"
+    node_sg_id      = "sg-0fedcba9876543210"
     backup_policy   = "daily"
     tags            = {}
     datastores = [
@@ -173,7 +173,7 @@ run "every_kind_provisions_and_is_backup_tagged" {
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"
-    node_sg_id   = "sg-0fedcba9876543210"
+    node_sg_id      = "sg-0fedcba9876543210"
     backup_policy   = "daily"
     tags            = {}
     datastores = [
@@ -289,7 +289,7 @@ run "unversioned_object_store_is_not_backup_tagged" {
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"
-    node_sg_id   = "sg-0fedcba9876543210"
+    node_sg_id      = "sg-0fedcba9876543210"
     backup_policy   = "daily"
     tags            = {}
     datastores = [
@@ -332,7 +332,7 @@ run "queue_without_redrive_has_no_dlq" {
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"
-    node_sg_id   = "sg-0fedcba9876543210"
+    node_sg_id      = "sg-0fedcba9876543210"
     backup_policy   = "daily"
     datastores = [
       { name = "q", kind = "queue" },
@@ -526,7 +526,7 @@ run "each_tenant_key_is_named_for_its_own_tenant" {
     vpc_id          = "vpc-0123456789abcdef0"
     private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id   = "sg-0123456789abcdef0"
-    node_sg_id   = "sg-0fedcba9876543210"
+    node_sg_id      = "sg-0fedcba9876543210"
     backup_policy   = "daily"
     tags            = {}
   }
@@ -562,7 +562,7 @@ run "protected_environment_keeps_every_teardown_gate_armed" {
     vpc_id                = "vpc-0123456789abcdef0"
     private_subnets       = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id         = "sg-0123456789abcdef0"
-    node_sg_id         = "sg-0fedcba9876543210"
+    node_sg_id            = "sg-0fedcba9876543210"
     backup_policy         = "daily"
     tags                  = {}
     datastores = [
@@ -710,7 +710,7 @@ run "a_delete_datastore_opens_its_own_gate_without_the_operator_lever" {
     vpc_id                = "vpc-0123456789abcdef0"
     private_subnets       = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
     cluster_sg_id         = "sg-0123456789abcdef0"
-    node_sg_id         = "sg-0fedcba9876543210"
+    node_sg_id            = "sg-0fedcba9876543210"
     backup_policy         = "daily"
     tags                  = {}
     datastores = [
