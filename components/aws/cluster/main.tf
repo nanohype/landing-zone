@@ -80,10 +80,15 @@ locals {
   #     chart depends on to reach telemetry.monitoring.svc.
   #
   # `monitorAllServices: false` is AWS's documented opt-out
-  # (install-CloudWatch-Observability-EKS-addon.html). Enabling it later takes
-  # more than this flag: auto-monitor annotates `opentelemetry.io` resources, so
-  # it needs the OpenTelemetry Operator in the catalog first, and scoping it to
-  # specific workloads is what `autoMonitor.customSelector` is for.
+  # (install-CloudWatch-Observability-EKS-addon.html).
+  #
+  # The OpenTelemetry Operator this feature wants is absent by decision, not by
+  # omission: nothing in the org declares an `opentelemetry.io` resource, because
+  # the tenant contract already requires every workload to export OTLP to
+  # telemetry.monitoring.svc. Auto-monitor exists to instrument workloads that
+  # arrive with none, which is not how tenants reach this platform. A cluster
+  # that did need it would install the operator and scope the feature with
+  # `autoMonitor.customSelector` rather than turning it on for everything.
   cloudwatch_observability_config = {
     agent = {
       config = {
