@@ -24,8 +24,18 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
+variable "node_sg_id" {
+  description = "EKS node security group ID — the source of every packet a pod sends out of the cluster, and therefore the only thing a datastore's ingress rule can usefully allow."
+  type        = string
+}
+
+# tflint-ignore: terraform_unused_declarations
+# Declared for envcommon interface uniformity and not read: the security group a
+# datastore must admit is the NODE one (node_sg_id), because pods egress through the
+# node's ENI. The cluster SG is attached to the control plane's ENIs, and a datastore
+# whose ingress allows it accepts connections from nobody.
 variable "cluster_sg_id" {
-  description = "EKS cluster security group ID — the only source allowed into each datastore's port."
+  description = "EKS cluster security group ID. Attached to the control plane's ENIs, so it is NOT the source of pod traffic — see node_sg_id."
   type        = string
 }
 
