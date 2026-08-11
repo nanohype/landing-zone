@@ -292,12 +292,12 @@ run "ebs_csi_extra_tags_carry_no_reserved_prefix" {
 # Asserted here rather than trusted to a comment because the setting is an
 # absence-by-default: leave it out of the map and the broken behaviour returns
 # with nothing in the diff to notice.
-run "cloudwatch_addon_disables_application_signals" {
+run "cloudwatch_addon_disables_automonitor" {
   command = plan
 
   assert {
-    condition     = local.cloudwatch_observability_config.applicationSignals.enabled == false
-    error_message = "Application Signals is enabled on the CloudWatch addon. Its auto-monitor blocks ~30s on discovering the opentelemetry.io API group, which no component installs on this cluster, and the controller-manager is killed by its liveness probe before it ever binds :8081 — the addon reports DEGRADED indefinitely while metrics keep flowing. This platform sends traces to Tempo through its own OTel collector and consumes nothing from Application Signals."
+    condition     = local.cloudwatch_observability_config.manager.applicationSignals.autoMonitor.monitorAllServices == false
+    error_message = "Application Signals auto-monitor is enabled on the CloudWatch addon. It blocks ~30s discovering the opentelemetry.io API group, which no component installs on this cluster, and the controller-manager is killed by its liveness probe before it ever binds :8081 — the addon reports DEGRADED indefinitely while the agents keep publishing. Auto-monitor exists to inject instrumentation into workloads that carry none; this platform instruments deliberately through its own OTel collector, so it has nothing to discover. Enabling it needs the OpenTelemetry Operator installed first, not just this flag."
   }
 
   # The metrics path the alarms depend on must survive the fix. Turning the
