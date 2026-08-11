@@ -90,23 +90,17 @@ locals {
   # that sees it, and installs were being run with --skip-preflight to step over
   # it.
   #
-  # Disabling it costs no tracing. Application Signals does not replace X-Ray, it
-  # READS it — its service-linked role exists to collect X-Ray trace data,
-  # CloudWatch metrics and Logs. Traces reach their backend through the tenant's
-  # own OTel collector either way: awsxray at the floor tier, Tempo at full. That
-  # path never touches this addon.
+  # No tracing is lost. Traces reach their backend through the tenant's own OTel
+  # collector — awsxray at the floor tier, Tempo at full — and that path does not
+  # involve this addon.
   #
-  # What is genuinely given up is auto-instrumentation: Application Signals
-  # injecting SDKs into workloads that carry none. This platform instruments
-  # deliberately — tenant charts wire OTLP to telemetry.monitoring.svc — so there
-  # is nothing here for it to discover.
+  # What auto-monitor provides is injection of instrumentation into workloads
+  # carrying none. Tenant charts wire OTLP to telemetry.monitoring.svc
+  # explicitly, so there is nothing on this cluster for it to discover.
   #
-  # TO TURN IT ON LATER, a flag is not enough, and that is worth knowing before
-  # someone tries. Auto-monitor needs the `opentelemetry.io` CRDs to annotate,
-  # which means installing the OpenTelemetry Operator into the catalog. Until
-  # that exists, auto-monitor has nothing to act on and can only fail the way it
-  # does here. The flag is off because the dependency is absent, not to hide the
-  # symptom.
+  # Enabling it is not a matter of flipping this flag: auto-monitor annotates
+  # `opentelemetry.io` resources, so it requires the OpenTelemetry Operator in
+  # the catalog first.
   cloudwatch_observability_config = {
     agent = {
       config = {
