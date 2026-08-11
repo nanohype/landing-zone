@@ -60,7 +60,16 @@ locals {
   # containerLogs are explained at the addon in eks.tf, next to the alarms they
   # serve; this note covers only the third, which is newer and less obvious.
   #
-  # applicationSignals OFF — this is what keeps the addon out of DEGRADED.
+  # Auto-monitor OFF — this is what keeps the addon out of DEGRADED, and it is
+  # deliberately the NARROW knob rather than applicationSignals.enabled.
+  #
+  # The crashing component is the controller-manager, not the agent. The agents
+  # publish Container Insights fine throughout. Auto-monitor is the manager's
+  # feature — it discovers workloads to inject auto-instrumentation into — and
+  # `monitorAllServices: false` is AWS's own documented opt-out for it
+  # (install-CloudWatch-Observability-EKS-addon.html, "Opting out of
+  # Application Signals"). Turning off the whole of Application Signals would
+  # also disable the agent-side pipeline, which is not the thing that is broken.
   #
   # It defaults to ON. Its auto-monitor asks the API server for the
   # `opentelemetry.io` group so it can find OpenTelemetryCollector CRs to
@@ -81,9 +90,23 @@ locals {
   # that sees it, and installs were being run with --skip-preflight to step over
   # it.
   #
-  # Turning off a feature this platform does not use beats pinning back to an
-  # older build: Application Signals is CloudWatch's APM, and tracing here goes
-  # through the tenant's own OTel collector to Tempo. Nothing would consume it.
+  # Disabling it costs no tracing. Application Signals does not replace X-Ray, it
+  # READS it — its service-linked role exists to collect X-Ray trace data,
+  # CloudWatch metrics and Logs. Traces reach their backend through the tenant's
+  # own OTel collector either way: awsxray at the floor tier, Tempo at full. That
+  # path never touches this addon.
+  #
+  # What is genuinely given up is auto-instrumentation: Application Signals
+  # injecting SDKs into workloads that carry none. This platform instruments
+  # deliberately — tenant charts wire OTLP to telemetry.monitoring.svc — so there
+  # is nothing here for it to discover.
+  #
+  # TO TURN IT ON LATER, a flag is not enough, and that is worth knowing before
+  # someone tries. Auto-monitor needs the `opentelemetry.io` CRDs to annotate,
+  # which means installing the OpenTelemetry Operator into the catalog. Until
+  # that exists, auto-monitor has nothing to act on and can only fail the way it
+  # does here. The flag is off because the dependency is absent, not to hide the
+  # symptom.
   cloudwatch_observability_config = {
     agent = {
       config = {
@@ -96,8 +119,14 @@ locals {
         }
       }
     }
-    containerLogs      = { enabled = false }
-    applicationSignals = { enabled = false }
+    containerLogs = { enabled = false }
+    manager = {
+      applicationSignals = {
+        autoMonitor = {
+          monitorAllServices = false
+        }
+      }
+    }
   }
 }
 
