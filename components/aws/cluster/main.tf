@@ -58,49 +58,32 @@ locals {
   # The amazon-cloudwatch-observability configuration, hoisted out of the addon
   # block so a test can assert on it. enhanced_container_insights and
   # containerLogs are explained at the addon in eks.tf, next to the alarms they
-  # serve; this note covers only the third, which is newer and less obvious.
+  # serve.
   #
-  # Auto-monitor OFF — this is what keeps the addon out of DEGRADED, and it is
-  # deliberately the NARROW knob rather than applicationSignals.enabled.
+  # Auto-monitor is off. It defaults to ON and puts every Service-mapped
+  # Deployment, DaemonSet and StatefulSet in scope for Application Signals as it
+  # starts. Three reasons that is wrong here, and the first is why the addon
+  # could not reach ACTIVE:
   #
-  # The crashing component is the controller-manager, not the agent. The agents
-  # publish Container Insights fine throughout. Auto-monitor is the manager's
-  # feature — it discovers workloads to inject auto-instrumentation into — and
-  # `monitorAllServices: false` is AWS's own documented opt-out for it
-  # (install-CloudWatch-Observability-EKS-addon.html, "Opting out of
-  # Application Signals"). Turning off the whole of Application Signals would
-  # also disable the agent-side pipeline, which is not the thing that is broken.
+  #   - It breaks the controller-manager on this cluster. Auto-monitor resolves
+  #     its targets through the `opentelemetry.io` API group, which nothing
+  #     installs — the catalog's otel-agent and otel-gateway are plain collector
+  #     Deployments. The manager blocks ~30s on that discovery before binding
+  #     its health server on :8081, so the liveness probe (initialDelay 15s,
+  #     period 20s) kills it first, every time. The agents are unaffected, so
+  #     Container Insights keeps flowing and the alarms stay fed while the addon
+  #     sits DEGRADED.
+  #   - Application Signals bills per inbound request, per outbound request and
+  #     per SLO. On by default, it meters traffic for a product nothing here
+  #     reads.
+  #   - It overrides OTLP exporter endpoints, which is the contract every tenant
+  #     chart depends on to reach telemetry.monitoring.svc.
   #
-  # It defaults to ON. Its auto-monitor asks the API server for the
-  # `opentelemetry.io` group so it can find OpenTelemetryCollector CRs to
-  # annotate for auto-instrumentation. Nothing installs the OpenTelemetry
-  # Operator on this cluster — the catalog's otel-agent and otel-gateway are
-  # plain collector Deployments — so that group does not exist and never will.
-  # The manager blocks ~30s on the discovery before binding its health server on
-  # :8081, while the liveness probe is already running (initialDelay 15s, period
-  # 20s). It is killed at exit 137, restarts, and blocks again:
-  #
-  #   W! auto-monitor is disabled due to failures in retrieving server groups:
-  #      Get ".../apis/opentelemetry.io/v1alpha1": i/o timeout
-  #
-  # The agents are unaffected and Container Insights metrics keep flowing, so
-  # the alarms stay fed — only CR reconciliation dies. That is why it survived:
-  # the addon reports DEGRADED, every metric the platform reads is present, and
-  # the failure is a controller nobody queries. `rackctl check` is the only thing
-  # that sees it, and installs were being run with --skip-preflight to step over
-  # it.
-  #
-  # No tracing is lost. Traces reach their backend through the tenant's own OTel
-  # collector — awsxray at the floor tier, Tempo at full — and that path does not
-  # involve this addon.
-  #
-  # What auto-monitor provides is injection of instrumentation into workloads
-  # carrying none. Tenant charts wire OTLP to telemetry.monitoring.svc
-  # explicitly, so there is nothing on this cluster for it to discover.
-  #
-  # Enabling it is not a matter of flipping this flag: auto-monitor annotates
-  # `opentelemetry.io` resources, so it requires the OpenTelemetry Operator in
-  # the catalog first.
+  # `monitorAllServices: false` is AWS's documented opt-out
+  # (install-CloudWatch-Observability-EKS-addon.html). Enabling it later takes
+  # more than this flag: auto-monitor annotates `opentelemetry.io` resources, so
+  # it needs the OpenTelemetry Operator in the catalog first, and scoping it to
+  # specific workloads is what `autoMonitor.customSelector` is for.
   cloudwatch_observability_config = {
     agent = {
       config = {
