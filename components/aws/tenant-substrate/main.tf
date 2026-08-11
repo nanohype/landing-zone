@@ -36,7 +36,7 @@ module "tenant" {
   datastores            = each.value.datastores
   vpc_id                = var.vpc_id
   private_subnets       = var.private_subnet_ids
-  cluster_sg_id         = var.cluster_sg_id
+  node_sg_id            = var.node_sg_id
   backup_policy         = var.backup_policy
   force_destroy_buckets = var.force_destroy_buckets
   tags                  = local.tags

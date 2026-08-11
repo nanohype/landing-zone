@@ -29,7 +29,7 @@ resource "aws_security_group" "cache" {
     from_port       = 6379
     to_port         = 6379
     protocol        = "tcp"
-    security_groups = [var.cluster_sg_id]
+    security_groups = [var.node_sg_id]
     description     = "Cache from EKS"
   }
 

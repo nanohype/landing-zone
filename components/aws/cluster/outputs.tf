@@ -18,8 +18,13 @@ output "cluster_certificate_authority_data" {
 }
 
 output "cluster_security_group_id" {
-  description = "EKS cluster security group ID"
+  description = "EKS cluster security group ID — attached to the CONTROL PLANE's ENIs. Not the source of pod traffic: see node_security_group_id."
   value       = module.eks.cluster_security_group_id
+}
+
+output "node_security_group_id" {
+  description = "EKS node security group ID — attached to the worker nodes' ENIs, and therefore the source of every packet a pod sends out of the cluster. This is what a datastore's ingress rule has to allow."
+  value       = module.eks.node_security_group_id
 }
 
 output "oidc_provider_arn" {

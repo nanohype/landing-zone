@@ -44,8 +44,8 @@ module "relational" {
       type                     = "ingress"
       from_port                = 5432
       to_port                  = 5432
-      source_security_group_id = var.cluster_sg_id
-      description              = "PostgreSQL from EKS"
+      source_security_group_id = var.node_sg_id
+      description              = "PostgreSQL from the EKS nodes. Pods egress via the node ENI, so the cluster SG (control-plane ENIs) would admit nothing"
     }
   }
 
