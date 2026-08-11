@@ -54,6 +54,51 @@ locals {
   # deleting it on a live cluster: both replicas went 6/6 Running with zero
   # restarts and the addon reached ACTIVE.
   ebs_csi_volume_tags = local.tags
+
+  # The amazon-cloudwatch-observability configuration, hoisted out of the addon
+  # block so a test can assert on it. enhanced_container_insights and
+  # containerLogs are explained at the addon in eks.tf, next to the alarms they
+  # serve; this note covers only the third, which is newer and less obvious.
+  #
+  # applicationSignals OFF — this is what keeps the addon out of DEGRADED.
+  #
+  # It defaults to ON. Its auto-monitor asks the API server for the
+  # `opentelemetry.io` group so it can find OpenTelemetryCollector CRs to
+  # annotate for auto-instrumentation. Nothing installs the OpenTelemetry
+  # Operator on this cluster — the catalog's otel-agent and otel-gateway are
+  # plain collector Deployments — so that group does not exist and never will.
+  # The manager blocks ~30s on the discovery before binding its health server on
+  # :8081, while the liveness probe is already running (initialDelay 15s, period
+  # 20s). It is killed at exit 137, restarts, and blocks again:
+  #
+  #   W! auto-monitor is disabled due to failures in retrieving server groups:
+  #      Get ".../apis/opentelemetry.io/v1alpha1": i/o timeout
+  #
+  # The agents are unaffected and Container Insights metrics keep flowing, so
+  # the alarms stay fed — only CR reconciliation dies. That is why it survived:
+  # the addon reports DEGRADED, every metric the platform reads is present, and
+  # the failure is a controller nobody queries. `rackctl check` is the only thing
+  # that sees it, and installs were being run with --skip-preflight to step over
+  # it.
+  #
+  # Turning off a feature this platform does not use beats pinning back to an
+  # older build: Application Signals is CloudWatch's APM, and tracing here goes
+  # through the tenant's own OTel collector to Tempo. Nothing would consume it.
+  cloudwatch_observability_config = {
+    agent = {
+      config = {
+        logs = {
+          metrics_collected = {
+            kubernetes = {
+              enhanced_container_insights = true
+            }
+          }
+        }
+      }
+    }
+    containerLogs      = { enabled = false }
+    applicationSignals = { enabled = false }
+  }
 }
 
 ################################################################################

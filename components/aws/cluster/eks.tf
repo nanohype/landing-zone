@@ -170,22 +170,7 @@ module "eks" {
       # service_account_role_arn and declares no pod_identity_association of its
       # own — declaring one here as well would collide with that association on
       # the same (namespace, service account).
-      configuration_values = jsonencode({
-        agent = {
-          config = {
-            logs = {
-              metrics_collected = {
-                kubernetes = {
-                  enhanced_container_insights = true
-                }
-              }
-            }
-          }
-        }
-        containerLogs = {
-          enabled = false
-        }
-      })
+      configuration_values = jsonencode(local.cloudwatch_observability_config)
     }
   }
 

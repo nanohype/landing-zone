@@ -274,3 +274,36 @@ run "ebs_csi_extra_tags_carry_no_reserved_prefix" {
     error_message = "extraVolumeTags resolved empty — the addon would be wired to nothing, and an assertion over an empty map passes for the wrong reason"
   }
 }
+
+# The CloudWatch addon must not ship with Application Signals on.
+#
+# It defaults to ON, and on this cluster it is what breaks the addon. Its
+# auto-monitor asks the API server for the `opentelemetry.io` group so it can
+# annotate OpenTelemetryCollector CRs for auto-instrumentation. Nothing installs
+# the OpenTelemetry Operator here, so the group never exists, the manager blocks
+# ~30s on the discovery before binding its health server, and the liveness probe
+# (initialDelay 15s, period 20s) kills it first — forever.
+#
+# The failure is quiet in the worst way: the agents keep publishing, every alarm
+# stays fed, and only CR reconciliation dies. The addon sits DEGRADED while
+# nothing a human looks at appears wrong, which is how installs ended up being
+# run with --skip-preflight.
+#
+# Asserted here rather than trusted to a comment because the setting is an
+# absence-by-default: leave it out of the map and the broken behaviour returns
+# with nothing in the diff to notice.
+run "cloudwatch_addon_disables_application_signals" {
+  command = plan
+
+  assert {
+    condition     = local.cloudwatch_observability_config.applicationSignals.enabled == false
+    error_message = "Application Signals is enabled on the CloudWatch addon. Its auto-monitor blocks ~30s on discovering the opentelemetry.io API group, which no component installs on this cluster, and the controller-manager is killed by its liveness probe before it ever binds :8081 — the addon reports DEGRADED indefinitely while metrics keep flowing. This platform sends traces to Tempo through its own OTel collector and consumes nothing from Application Signals."
+  }
+
+  # The metrics path the alarms depend on must survive the fix. Turning the
+  # addon down is only correct while it is still the ContainerInsights producer.
+  assert {
+    condition     = local.cloudwatch_observability_config.agent.config.logs.metrics_collected.kubernetes.enhanced_container_insights == true
+    error_message = "enhanced_container_insights is off. The observability component's alarms read ClusterName-only rollups that only the enhanced set publishes, so they would sit INSUFFICIENT_DATA with no producer."
+  }
+}
