@@ -30,12 +30,8 @@ variable "node_sg_id" {
 }
 
 # tflint-ignore: terraform_unused_declarations
-# Declared for envcommon interface uniformity and not read: the security group a
-# datastore must admit is the NODE one (node_sg_id), because pods egress through the
-# node's ENI. The cluster SG is attached to the control plane's ENIs, and a datastore
-# whose ingress allows it accepts connections from nobody.
 variable "cluster_sg_id" {
-  description = "EKS cluster security group ID. Attached to the control plane's ENIs, so it is NOT the source of pod traffic — see node_sg_id."
+  description = "EKS cluster security group ID. Declared for envcommon interface uniformity and deliberately not read: it is attached to the CONTROL PLANE's ENIs, so no packet a pod sends carries it, and a datastore admitting it accepts connections from nobody. The group that matters is node_sg_id."
   type        = string
 }
 
