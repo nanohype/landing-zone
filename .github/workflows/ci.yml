@@ -381,6 +381,23 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-smoke-outputs.py
 
+  # No component may hard-code a MINOR version of a managed engine. AWS retires
+  # minor versions and regional availability differs, so `engine_version = "16.6"`
+  # is a bet on what AWS still offers in every region an adopter deploys into — and
+  # it loses that bet at APPLY time, after the VPC and the cluster underneath it
+  # already exist and bill. Neither tflint nor checkov reads a version literal for
+  # retirement risk, and a `tofu test` asserting against a mocked provider never
+  # contacts the API that would reject it.
+  engine-version-pins:
+    name: No Minor-Version Engine Pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-engine-version-pins.py
+
   # Every teardown gate on a component must open on the same lever. AWS spreads the
   # protections across unrelated resources and nothing in the dependency graph joins
   # them, so a partially-gated component empties its buckets, fails on the database it
@@ -513,6 +530,7 @@ jobs:
         tenant-substrate-render,
         architecture-components,
         smoke-outputs,
+        engine-version-pins,
         teardown-gates,
         tenant-schema-readers,
         e2e-covers-leaves,

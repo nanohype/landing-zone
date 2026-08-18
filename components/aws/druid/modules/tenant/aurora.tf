@@ -55,10 +55,17 @@ module "aurora" {
   source  = "terraform-aws-modules/rds-aurora/aws"
   version = "~> 9.0"
 
-  name           = "${local.prefix}-aurora"
-  engine         = "aurora-postgresql"
-  engine_mode    = "provisioned"
-  engine_version = "16.6"
+  name        = "${local.prefix}-aurora"
+  engine      = "aurora-postgresql"
+  engine_mode = "provisioned"
+  # Major-only by design. RDS resolves it to the newest minor the region offers,
+  # so a retired patch cannot strand the component. A full pin bets on what AWS
+  # still offers in every region an adopter deploys into, and that differs by
+  # region — pinned at "16.6" this failed every apply with `Cannot find version
+  # 16.6 for aurora-postgresql` once AWS withdrew it, after the VPC and the EKS
+  # cluster were already built and billing. Enforced by
+  # scripts/check-engine-version-pins.py.
+  engine_version = "16"
 
   database_name   = local.db_name
   master_username = local.db_username
