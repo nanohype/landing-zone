@@ -169,3 +169,74 @@ run "empty_allowed_subject_claims_rejected" {
     var.allowed_subject_claims,
   ]
 }
+
+# ─────────────────────────── plan role ───────────────────────────
+#
+# The plan role is the credential the CI plan matrix assumes on pull requests.
+# Its trust is the whole control: the matrix runs on `pull_request`, a context the
+# DEPLOY role deliberately refuses because that role can provision and destroy EKS
+# and IAM. These assertions pin the two properties that keep the separation real —
+# the plan role never trusts a pull_request/branch/wildcard claim, and widening it
+# never silently widens the deploy role (or vice versa).
+
+run "plan_role_trusts_only_the_environment_claim" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role.plan[0].assume_role_policy).Statement :
+      contains(
+        tolist(try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])),
+        "repo:nanohype/landing-zone:environment:plan"
+      )
+    ])
+    error_message = "the plan role's trust must scope sub to repo:nanohype/landing-zone:environment:plan — a GitHub Environment, which can carry required reviewers"
+  }
+}
+
+run "plan_role_never_trusts_pull_request_or_a_bare_branch" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role.plan[0].assume_role_policy).Statement :
+      alltrue([
+        for sub in tolist(try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])) :
+        !endswith(sub, ":pull_request") && !strcontains(sub, ":ref:refs/heads/") && sub != "*" && !endswith(sub, ":*")
+      ])
+    ])
+    error_message = "the plan role must NOT trust :pull_request, a bare branch ref, or a wildcard sub — on a public repo any of those hands an AWS credential to an arbitrary PR"
+  }
+}
+
+run "plan_role_is_read_only" {
+  command = plan
+
+  assert {
+    condition     = contains(var.plan_managed_policy_arns, "arn:aws:iam::aws:policy/ReadOnlyAccess")
+    error_message = "the plan role must carry ReadOnlyAccess — a plan reads, it does not write"
+  }
+
+  assert {
+    condition = alltrue([
+      for a in var.plan_managed_policy_arns :
+      !strcontains(a, "AdministratorAccess") && !strcontains(a, "PowerUserAccess")
+    ])
+    error_message = "the plan role must not carry AdministratorAccess or PowerUserAccess — the point of a separate plan role is that a pull-request-reachable credential cannot write"
+  }
+}
+
+run "deploy_role_trust_is_unchanged_by_the_plan_role" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
+      alltrue([
+        for sub in tolist(try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])) :
+        !strcontains(sub, "environment:plan")
+      ])
+    ])
+    error_message = "the deploy role must not have acquired the plan role's environment claim — the two roles exist to keep those trust surfaces separate"
+  }
+}

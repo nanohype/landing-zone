@@ -466,6 +466,17 @@ jobs:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]
     runs-on: ubuntu-latest
+    # The credential this job assumes is the READ-ONLY plan role, and the
+    # environment is what makes that safe. The job runs on pull_request; declaring
+    # `environment: plan` makes its OIDC token present
+    # repo:<org>/<repo>:environment:plan instead of a pull_request or branch claim,
+    # which is the only sub the plan role trusts. The deploy role — which can
+    # provision and destroy EKS and IAM — trusts none of these contexts and is not
+    # reachable from here. Adding required reviewers to the `plan` environment in
+    # repo settings additionally gates it on a human before any credential is
+    # issued; approval is per-environment-per-run, so one approval releases the
+    # whole matrix.
+    environment: plan
     # The plan jobs need AWS credentials (vars.AWS_ROLE_ARN). continue-on-error is
     # tied to whether that variable is set:
     #   - unset (e.g. a fork without cloud creds): continue-on-error is true and the

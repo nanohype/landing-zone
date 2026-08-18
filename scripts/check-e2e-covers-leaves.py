@@ -20,7 +20,8 @@ component list against the set of leaves that actually exist.
 
 WHAT THIS ASSERTS
 
-Every directory under the e2e environment's live path is either
+Every directory under the e2e environment's live path, in EVERY region the
+environment spans, is either
 
   1. named in e2e.sh's apply sequence AND its destroy loop, or
   2. listed in EXEMPT below with a reason.
@@ -40,7 +41,13 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 E2E = ROOT / "scripts" / "e2e.sh"
-LEAVES = ROOT / "live" / "aws" / "workload-development" / "us-west-2" / "development"
+# The e2e environment is workload-development/development. It spans more than one
+# region: account-global components (github-oidc) live in the account's home region
+# while the regional substrate lives in us-west-2. Scanning a single hardcoded region
+# would silently drop a leaf from coverage the moment one moved — and a coverage
+# check that quietly narrows is worse than none, because it still reports a pass.
+ACCOUNT = ROOT / "live" / "aws" / "workload-development"
+ENVIRONMENT = "development"
 
 # A leaf the e2e run deliberately does not exercise, and why. An entry here is a
 # decision; a leaf missing from both this table and e2e.sh is an accident.
@@ -100,8 +107,22 @@ def e2e_destroyed() -> set[str]:
     return set(m.group(1).split())
 
 
+def leaf_dirs() -> list[pathlib.Path]:
+    """Every <region>/development/ directory in the e2e account, in region order."""
+    return sorted(
+        d
+        for d in ACCOUNT.glob(f"*/{ENVIRONMENT}")
+        if d.is_dir() and not d.name.startswith(".")
+    )
+
+
 def leaves() -> set[str]:
-    return {p.name for p in LEAVES.iterdir() if p.is_dir() and not p.name.startswith(".")}
+    found: set[str] = set()
+    for env_dir in leaf_dirs():
+        found |= {
+            p.name for p in env_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
+        }
+    return found
 
 
 def main() -> int:
