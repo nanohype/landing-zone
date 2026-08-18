@@ -19,7 +19,7 @@ module "tenant" {
   tenant_config         = each.value
   vpc_id                = var.network.vpc_id
   private_subnets       = var.network.private_subnet_ids
-  cluster_sg_id         = var.cluster_sg_id
+  node_sg_id            = var.node_sg_id
   cluster_name          = var.cluster_name
   force_destroy_buckets = var.force_destroy_buckets
   tags                  = local.tags

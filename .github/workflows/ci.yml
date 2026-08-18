@@ -381,6 +381,22 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-smoke-outputs.py
 
+  # A datastore's ingress must admit the NODE security group, never the cluster SG.
+  # cluster_security_group_id sits on the EKS control plane's ENIs, so no packet a pod
+  # sends carries it: a rule naming it is valid HCL, applies cleanly, and admits
+  # nobody. Nothing fails — the workload hangs on connect and the timeout blames the
+  # application. No linter models "this rule can never match", and a `tofu test`
+  # against a mocked provider asserts the rule exists, not that it can match.
+  datastore-ingress-source:
+    name: Datastores Admit The Node SG
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-datastore-ingress-source.py
+
   # No component may hard-code a MINOR version of a managed engine. AWS retires
   # minor versions and regional availability differs, so `engine_version = "16.6"`
   # is a bet on what AWS still offers in every region an adopter deploys into — and
@@ -530,6 +546,7 @@ jobs:
         tenant-substrate-render,
         architecture-components,
         smoke-outputs,
+        datastore-ingress-source,
         engine-version-pins,
         teardown-gates,
         tenant-schema-readers,

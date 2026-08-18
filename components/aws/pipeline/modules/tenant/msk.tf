@@ -30,7 +30,7 @@ resource "aws_security_group" "msk" {
     from_port       = 9098
     to_port         = 9098
     protocol        = "tcp"
-    security_groups = [var.cluster_sg_id]
+    security_groups = [var.node_sg_id]
     description     = "MSK IAM auth from EKS"
   }
 

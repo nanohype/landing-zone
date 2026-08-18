@@ -56,6 +56,7 @@ variables {
     private_subnet_azs = ["us-west-2a", "us-west-2b"]
   }
   cluster_sg_id = "sg-0123456789abcdef0"
+  node_sg_id    = "sg-0fedcba987654321f"
   cluster_name  = "development-platform"
   team          = "platform"
   tenants = {
@@ -159,7 +160,7 @@ run "adopt_mode_plans_with_matching_placement" {
     values = { vpc_id = "vpc-adopt00000000000" }
   }
   override_data {
-    target = data.aws_security_group.cluster
+    target = data.aws_security_group.nodes
     values = { vpc_id = "vpc-adopt00000000000" }
   }
 
@@ -189,7 +190,7 @@ run "adopt_mode_rejects_foreign_subnet" {
     values = { vpc_id = "vpc-somewhere-else00" }
   }
   override_data {
-    target = data.aws_security_group.cluster
+    target = data.aws_security_group.nodes
     values = { vpc_id = "vpc-adopt00000000000" }
   }
 
@@ -199,7 +200,7 @@ run "adopt_mode_rejects_foreign_subnet" {
 # A cluster security group from a different VPC must also fail at plan — a bare-id membership
 # reference to an SG in another VPC would attach an MSK ingress rule that silently never
 # matches.
-run "adopt_mode_rejects_foreign_cluster_sg" {
+run "adopt_mode_rejects_foreign_node_sg" {
   command = plan
 
   variables {
@@ -216,11 +217,11 @@ run "adopt_mode_rejects_foreign_cluster_sg" {
     values = { vpc_id = "vpc-adopt00000000000" }
   }
   override_data {
-    target = data.aws_security_group.cluster
+    target = data.aws_security_group.nodes
     values = { vpc_id = "vpc-somewhere-else00" }
   }
 
-  expect_failures = [data.aws_security_group.cluster]
+  expect_failures = [data.aws_security_group.nodes]
 }
 
 # AZ coverage is pipeline's own floor, checked in both modes: fewer than two distinct zones

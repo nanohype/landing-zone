@@ -47,8 +47,8 @@ variable "private_subnets" {
   type        = list(string)
 }
 
-variable "cluster_sg_id" {
-  description = "EKS cluster security group ID"
+variable "node_sg_id" {
+  description = "EKS node security group ID — the source of every packet a pod sends out of the cluster, and therefore the only thing a datastore's ingress rule can usefully allow."
   type        = string
 }
 

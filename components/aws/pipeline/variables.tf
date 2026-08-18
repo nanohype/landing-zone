@@ -46,8 +46,14 @@ variable "network" {
   }
 }
 
+variable "node_sg_id" {
+  description = "EKS node security group ID — the source of every packet a pod sends out of the cluster, and therefore the only thing a datastore's ingress rule can usefully allow."
+  type        = string
+}
+
+# tflint-ignore: terraform_unused_declarations
 variable "cluster_sg_id" {
-  description = "EKS cluster security group ID"
+  description = "EKS cluster security group ID. Declared for envcommon interface uniformity and deliberately not read: it is attached to the CONTROL PLANE's ENIs, so no packet a pod sends carries it, and a datastore admitting it accepts connections from nobody. The group that matters is node_sg_id."
   type        = string
 }
 

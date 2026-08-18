@@ -20,6 +20,7 @@ dependency "cluster" {
   config_path = "../cluster"
   mock_outputs = {
     cluster_security_group_id = "sg-mock"
+    node_security_group_id    = "sg-node-mock"
     cluster_name              = "mock-eks"
   }
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
@@ -29,6 +30,7 @@ dependency "cluster" {
 inputs = {
   network       = dependency.network.outputs.network
   cluster_sg_id = dependency.cluster.outputs.cluster_security_group_id
+  node_sg_id    = dependency.cluster.outputs.node_security_group_id
   cluster_name  = dependency.cluster.outputs.cluster_name
   team          = "data-platform"
 }
