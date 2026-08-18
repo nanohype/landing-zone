@@ -38,21 +38,21 @@ data "aws_subnet" "placement" {
   }
 }
 
-# The EKS cluster security group pipeline references by membership in its MSK ingress rule
+# The EKS node security group pipeline references by membership in its MSK ingress rule
 # must live in the same VPC. A bare security-group-id reference resolves within one VPC; a
 # cluster SG from a different VPC would attach a rule that silently never matches. (A same-
 # account reference is what pipeline makes today — participant-created SGs are participant-
 # owned — so this asserts the placement that keeps the bare-id form valid.) Postcondition-only,
 # like data.aws_subnet.placement above.
 # tflint-ignore: terraform_unused_declarations
-data "aws_security_group" "cluster" {
+data "aws_security_group" "nodes" {
   count = local.adopt_mode ? 1 : 0
-  id    = var.cluster_sg_id
+  id    = var.node_sg_id
 
   lifecycle {
     postcondition {
       condition     = self.vpc_id == var.network.vpc_id
-      error_message = "cluster_sg_id ${var.cluster_sg_id} is in VPC ${self.vpc_id}, not network.vpc_id (${var.network.vpc_id}). The cluster security group pipeline grants ingress from must reside in the same VPC as its MSK/Batch security groups."
+      error_message = "node_sg_id ${var.node_sg_id} is in VPC ${self.vpc_id}, not network.vpc_id (${var.network.vpc_id}). The node security group pipeline grants ingress from must reside in the same VPC as its MSK/Batch security groups."
     }
   }
 }

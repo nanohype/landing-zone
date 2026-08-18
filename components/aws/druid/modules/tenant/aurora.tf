@@ -29,28 +29,6 @@ resource "aws_db_subnet_group" "this" {
   })
 }
 
-resource "aws_security_group" "aurora" {
-  name_prefix = "${local.prefix}-aurora-"
-  description = "Security group for Aurora PostgreSQL - ${var.tenant_id}"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [var.cluster_sg_id]
-    description     = "PostgreSQL from EKS"
-  }
-
-  tags = merge(local.tenant_tags, {
-    Name = "${local.prefix}-aurora"
-  })
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
 module "aurora" {
   source  = "terraform-aws-modules/rds-aurora/aws"
   version = "~> 9.0"
@@ -79,8 +57,8 @@ module "aurora" {
       type                     = "ingress"
       from_port                = 5432
       to_port                  = 5432
-      source_security_group_id = var.cluster_sg_id
-      description              = "PostgreSQL from EKS"
+      source_security_group_id = var.node_sg_id
+      description              = "PostgreSQL from the EKS node ENIs"
     }
   }
 
