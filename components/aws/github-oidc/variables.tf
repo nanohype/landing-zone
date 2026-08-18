@@ -105,3 +105,46 @@ variable "max_session_duration" {
   type        = number
   default     = 3600
 }
+
+variable "create_plan_role" {
+  description = "Create the read-only plan role the CI plan matrix assumes on pull requests. Separate from the deploy role because the plan matrix runs on `pull_request`, a context the deploy role must never trust."
+  type        = bool
+  default     = true
+}
+
+variable "plan_role_name" {
+  description = "Name of the GitHub Actions plan role"
+  type        = string
+  default     = "github-actions-plan"
+}
+
+variable "plan_allowed_subject_claims" {
+  description = <<-EOT
+    GitHub OIDC `sub` claim suffixes the PLAN role trusts. Default is a single
+    GitHub Environment ("environment:plan"), which is the escape hatch the deploy
+    leaf prescribes for jobs needing a role from a non-environment context: the
+    job declares `environment: plan`, its token presents
+    repo:<org>/<repo>:environment:plan, and the environment can carry required
+    reviewers so an untrusted branch waits for a human before any credential is
+    issued. Deliberately NOT "pull_request" and NOT a bare branch claim — either
+    would hand a credential to any PR the moment it opens, on a public repo.
+  EOT
+  type        = list(string)
+  default     = ["environment:plan"]
+
+  validation {
+    condition     = length(var.plan_allowed_subject_claims) > 0
+    error_message = "plan_allowed_subject_claims must contain at least one claim; an empty list would render an empty sub condition, which AWS drops — making the plan role assumable by any GitHub Actions workflow."
+  }
+
+  validation {
+    condition     = !contains(var.plan_allowed_subject_claims, "*")
+    error_message = "plan_allowed_subject_claims must not contain a bare \"*\": that trusts every context including pull_request from any branch. Name the contexts explicitly."
+  }
+}
+
+variable "plan_managed_policy_arns" {
+  description = "Managed policies attached to the plan role. Defaults to ReadOnlyAccess — a plan reads, it does not write. Note this is account-wide read INCLUDING the Terraform state bucket, whose objects hold plaintext values for any attribute a provider does not mark sensitive; that is inherent to letting CI plan at all, since plan reads state."
+  type        = list(string)
+  default     = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+}
