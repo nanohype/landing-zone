@@ -236,14 +236,25 @@ inputs = {
       })
     }
 
+    # ONE STATEMENT PER TAG, and that is the whole point. IAM ANDs every key inside
+    # a single Condition block, so putting both Null checks together denies only
+    # when BOTH tags are absent — a resource carrying one and missing the other
+    # sails through. That is not a theoretical gap here: live/root.hcl injects
+    # DataClassification into default_tags on every resource this repo creates, so
+    # that key is never absent, so the AND is never satisfied, so a combined
+    # statement can never fire at all. It would read as enforcement and deny
+    # nothing, forever.
+    #
+    # Two statements means each tag is independently required: absent PlatformId
+    # denies regardless of DataClassification, and vice versa.
     EnforceMandatoryTags = {
-      description = "Deny resource creation without PlatformId and DataClassification tags"
+      description = "Deny resource creation missing EITHER the PlatformId or the DataClassification tag (one statement per tag — a combined Null block would AND them and never fire)"
       target_ids  = []
       policy = jsonencode({
         Version = "2012-10-17"
         Statement = [
-          {
-            Sid    = "DenyCreateWithoutMandatoryTags"
+          for tag in ["PlatformId", "DataClassification"] : {
+            Sid    = "DenyCreateWithout${tag}"
             Effect = "Deny"
             Action = [
               "ec2:RunInstances",
@@ -259,11 +270,10 @@ inputs = {
             Resource = "*"
             Condition = {
               Null = {
-                "aws:RequestTag/PlatformId"         = "true"
-                "aws:RequestTag/DataClassification" = "true"
+                "aws:RequestTag/${tag}" = "true"
               }
             }
-          },
+          }
         ]
       })
     }

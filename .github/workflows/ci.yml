@@ -414,6 +414,23 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-engine-version-pins.py
 
+  # A Deny whose Condition can never be satisfied is not a guardrail. IAM ANDs every
+  # key inside one Condition block, so a Deny with several required-absent Null keys
+  # fires only when ALL of them are missing — a resource carrying one and missing
+  # another sails through, while the policy description says the opposite. The
+  # EnforceMandatoryTags SCP shipped exactly that shape, and because live/root.hcl
+  # injects DataClassification via default_tags the AND was never satisfiable at all:
+  # it read as enforcement and denied nothing. No linter models policy satisfiability.
+  scp-deny-can-fire:
+    name: SCP Denies Can Actually Fire
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-scp-deny-can-fire.py
+
   # Every teardown gate on a component must open on the same lever. AWS spreads the
   # protections across unrelated resources and nothing in the dependency graph joins
   # them, so a partially-gated component empties its buckets, fails on the database it
@@ -557,6 +574,7 @@ jobs:
         tenant-substrate-render,
         architecture-components,
         smoke-outputs,
+        scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,
         teardown-gates,
