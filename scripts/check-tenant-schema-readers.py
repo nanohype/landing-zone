@@ -93,6 +93,30 @@ def main():
                     f"    type and every live leaf, or add it to ALLOW in this script with the\n"
                     f"    reason it has no reader.")
 
+    # Anti-vacuity. This check reports an invariant over whatever it discovered,
+    # so a discovery that finds nothing reports the invariant holding over
+    # nothing — printing "Checked tenant schemas in 0 component(s)" directly
+    # above "Every tenant-declarable field reaches a resource", exit 0. The count
+    # was already on screen and nothing read it.
+    #
+    # Any of these produce that: a `git ls-files` that matches nothing because
+    # the check ran outside the repository, a components/ directory that moved,
+    # or a rename of the `tenants` variable that makes every schema invisible to
+    # the parser. None of them is a state where this repository is healthy, and
+    # all of them look identical to a clean run.
+    #
+    # The floor is deliberately below the real count rather than equal to it:
+    # this asserts that discovery WORKED, and a component legitimately gaining or
+    # losing a tenants schema must not require editing this number.
+    MIN_COMPONENTS = 3
+    if checked < MIN_COMPONENTS:
+        print(
+            f"::error::discovered tenant schemas in only {checked} component(s) "
+            f"(expected at least {MIN_COMPONENTS}). The scan did not see the tree, "
+            f"so this check has nothing to report on and refuses to report a pass."
+        )
+        return 1
+
     print(f"Checked tenant schemas in {checked} component(s).\n")
     if failures:
         for f in failures:
