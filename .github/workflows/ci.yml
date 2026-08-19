@@ -503,7 +503,7 @@ jobs:
     #     the build — an honest gate, not an advisory that swallows regressions.
     # The always-hard gates are the placeholder check, fmt, validate, tflint, checkov,
     # the tofu test suites, terragrunt evaluate, and the two output cross-checks.
-    continue-on-error: ${{ vars.AWS_ROLE_ARN == '' }}
+    continue-on-error: ${{ vars.AWS_ROLE_ARN == '' || vars.TERRAGRUNT_ACCOUNT_ID == '' }}
     if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
@@ -542,16 +542,33 @@ jobs:
       - name: Detect credential availability
         id: creds
         run: |
-          [ -n "${{ vars.AWS_ROLE_ARN }}" ] && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT"
+          # BOTH are required. A role without an account id resolves the backend
+          # through root.hcl's placeholder fallback (111111111111-<region>-tfstate),
+          # a bucket in an account that does not exist — so every leaf dies at
+          # backend init with NoSuchBucket before any plan runs. Half-arming the
+          # matrix is strictly worse than leaving it off: it reds every PR without
+          # evaluating a single line of config.
+          if [ -n "${{ vars.AWS_ROLE_ARN }}" ] && [ -n "${{ vars.TERRAGRUNT_ACCOUNT_ID }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Skip notice (no cloud credentials configured)
         if: steps.creds.outputs.available != 'true'
         run: |
-          echo "::notice::Skipping plan for ${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }} — AWS credentials not configured in repo Variables."
+          echo "::notice::Skipping plan for ${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }} — needs BOTH AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID in repo Variables."
 
       - name: Plan
         if: steps.creds.outputs.available == 'true'
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
+        # root.hcl:13 reads TERRAGRUNT_ACCOUNT_ID and falls back to the tracked
+        # account.hcl placeholder when it is unset. That fallback is correct for a
+        # public template and fatal for a real plan, so the id is injected here as
+        # the env var root.hcl already documents rather than written into a tracked
+        # file — the same path scripts/e2e.sh uses.
+        env:
+          TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
         run: terragrunt plan -no-color
 
   merge-gate:

@@ -22,7 +22,7 @@ on:
         required: true
       region:
         description: "Region"
-        default: "us-west-2"
+        default: "us-east-1"
       environment:
         description: "Env tree (development | staging | production)"
         default: "development"
