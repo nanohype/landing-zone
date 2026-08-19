@@ -123,7 +123,9 @@ def main():
             print(f)
         print(f"\n{len(failures)} tenant field(s) declared but never read.")
         return 1
-    print("Every tenant-declarable field reaches a resource.")
+    # Scope inside the assertion, not two lines above it — a separated count is
+    # exactly what let this check print "0 component(s)" over a clean-looking pass.
+    print(f"Every tenant-declarable field reaches a resource — {checked} component(s) checked.")
     return 0
 
 
