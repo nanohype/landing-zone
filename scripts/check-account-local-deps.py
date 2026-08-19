@@ -23,9 +23,30 @@ is not under `live/aws/workload-*` so the scope skipped the file entirely, and
 seen it even in scope.
 
 Widening by enumeration does not converge — each pass adds the one pattern that
-just escaped. So this asks what a file CAN DO to name another account, not which
-function did it: any path literal that resolves into a foreign account
-directory, whatever syntax carried it.
+just escaped. So this no longer asks which FUNCTION carried the path: any string
+literal is a candidate, whether it sat on a `config_path`, a
+`read_terragrunt_config`, a `file()`, or a function nobody has used yet.
+
+WHAT IT DOES NOT DO, stated because the sentence above would otherwise promise
+more than the code delivers. Having stopped enumerating functions, this still
+enumerates the PATH FORMS it can resolve:
+
+  - in a leaf: a literal beginning `../`, `./` or `live/`, resolved against the
+    leaf's own directory.
+  - in `_envcommon`: the `${dirname(find_in_parent_folders("cloud.hcl"))}/<seg>/`
+    idiom, which is how a shared file addresses a sibling of the cloud root.
+
+A path assembled from a local or a variable, an absolute path, or an anchoring
+idiom other than the one above is NOT matched. Nothing in the tree uses those
+forms today — every `_envcommon` traversal is cloud.hcl-anchored and every
+`config_path` is a single-level `../sibling` — so the guard is correct here and
+now, not correct by construction.
+
+Resolving instead of pattern-matching is the version that would converge, and it
+is not free: it needs terragrunt to evaluate the config, and `_envcommon` cannot
+be evaluated standalone — it only has meaning through the leaf that includes it.
+So this is a deliberate trade, recorded rather than hidden. IF YOU ADD A NEW PATH
+IDIOM, THIS GUARD DOES NOT AUTOMATICALLY COVER IT.
 
 TWO SCOPES, because "its own account" means different things.
 
