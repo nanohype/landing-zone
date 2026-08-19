@@ -137,7 +137,10 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
        },
        "StringLike": {
-         "token.actions.githubusercontent.com:sub": "repo:<org>/<repo>:*"
+         "token.actions.githubusercontent.com:sub": [
+           "repo:<org>/<repo>:environment:*",
+           "repo:<org>/<repo>:ref:refs/tags/*"
+         ]
        }
      }
    }

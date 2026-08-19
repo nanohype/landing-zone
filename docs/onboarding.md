@@ -62,7 +62,7 @@ This runs `terragrunt plan` for the network component in development. You need v
 
 ### `components/`
 
-OpenTofu root modules under `components/aws/`. Each is self-contained with `main.tf`, `variables.tf`, `outputs.tf`, and `versions.tf`. The seven multi-tenant components also have a `modules/tenant/` sub-module.
+OpenTofu root modules under `components/aws/`. Each is self-contained with `main.tf`, `variables.tf`, `outputs.tf`, and `versions.tf`. A multi-tenant component — one taking a `tenants` map and using `for_each` — also has a `modules/tenant/` sub-module holding the per-tenant resources.
 
 Components define **what** to create. They are environment-agnostic -- no hardcoded account IDs, regions, or environment names.
 
