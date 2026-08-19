@@ -104,10 +104,10 @@ git clone <repo-url> && cd landing-zone
 ./scripts/init-backend-aws.sh <account_id> <region>
 
 # 3. Plan all development components
-task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
+task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development
 
 # 4. Apply a single component
-task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
+task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=network
 ```
 
 ## Task Targets

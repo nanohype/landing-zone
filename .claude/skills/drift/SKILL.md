@@ -13,7 +13,7 @@ Check for infrastructure drift by running plan and analyzing the output.
 - `$ARGUMENTS[1]` — component (optional, defaults to all)
 
 `task plan` needs the account and region. Map the environment to its account
-(region defaults to `us-west-2`):
+(region defaults to `us-east-1`):
 
 | environment | account (`ACCOUNT`) |
 |---|---|
@@ -23,7 +23,7 @@ Check for infrastructure drift by running plan and analyzing the output.
 
 ## Steps
 
-1. Run `task plan ACCOUNT=<account> REGION=us-west-2 ENVIRONMENT=$ARGUMENTS[0] COMPONENT=$ARGUMENTS[1]`, capturing the output
+1. Run `task plan ACCOUNT=<account> REGION=us-east-1 ENVIRONMENT=$ARGUMENTS[0] COMPONENT=$ARGUMENTS[1]`, capturing the output
 2. Parse the plan output for any changes (add/change/destroy)
 3. If no changes: report "No drift detected"
 4. If changes found: categorize them:

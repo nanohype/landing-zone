@@ -22,7 +22,7 @@ management account            network-owner account          workload account
   subnet IDs, and a `cluster` with `stamp_subnet_tags = false`.
 
 One network-owner account holds per-environment VPCs
-(`live/aws/network/us-west-2/{development,staging,production}/shared-network`), each sharing
+(`live/aws/network/us-east-1/{development,staging,production}/shared-network`), each sharing
 to its matching `workload-<env>` account. Account-per-environment is a live-tree layout
 choice at activation time, not a component change.
 
