@@ -397,8 +397,14 @@ def main():
         print(f"\n{len(failures)} teardown-gate problem(s).")
         return 1
 
-    print("Every teardown gate opens on the lever, every protectable resource carries one, "
-          "and every module without one declares why.")
+    # The scope belongs in the assertion, not two lines above it. A reader who
+    # sees the claim sees what it ranged over, and cannot read one without the
+    # other.
+    print(
+        f"Every teardown gate opens on the lever, every protectable resource carries "
+        f"one, and every module without one declares why — {len(inventory)} module(s) "
+        f"across {len(files)} tracked .tf files."
+    )
     return 0
 
 
