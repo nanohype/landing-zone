@@ -260,18 +260,49 @@ jobs:
           #     injects it as TF_VAR_gitops_repo_url.
           EXEMPT="gitops_repo_url"
 
+          # A leaf is only judged once its validation is known to have RUN. There are
+          # exactly two outcomes that mean the check executed:
+          #   "All required inputs are passed in by terragrunt"  -> clean
+          #   "required inputs are missing"                      -> incomplete
+          # Anything else — a parse error, a provider failure, a timeout, terragrunt
+          # absent — means the leaf was NOT inspected, and must fail rather than be
+          # counted clean. Without this, `|| true` swallows the error, the awk finds
+          # no missing-input line, and an unparseable leaf reports as passing. That
+          # is the exact vacuous-pass shape this step exists to prevent, and the
+          # first version of this step had it.
+          PASS_MARK="All required inputs are passed in by terragrunt"
+          MISS_MARK="required inputs are missing"
+
           fail=0
-          checked=0
+          discovered=0
+          validated=0
           while IFS= read -r leaf; do
             dir=$(dirname "$leaf")
-            checked=$((checked + 1))
+            discovered=$((discovered + 1))
             out=$( cd "$dir" && TG_NON_INTERACTIVE=true terragrunt hcl validate --inputs 2>&1 ) || true
+            clean=$(echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -cF "$PASS_MARK") || true
+            incomplete=$(echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -cF "$MISS_MARK") || true
+
+            if [ "$clean" -eq 0 ] && [ "$incomplete" -eq 0 ]; then
+              echo "::error::$dir — terragrunt hcl validate produced neither a pass nor a missing-input result. The leaf was NOT inspected; this is a failure, not a pass."
+              echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | tail -6 | sed 's/^/    /'
+              fail=1
+              continue
+            fi
+
+            validated=$((validated + 1))
+            [ "$incomplete" -eq 0 ] && continue
+
             # terragrunt prefixes every line with a timestamp and level, so the
             # missing names arrive as "HH:MM:SS.mmm ERROR \t- name". Match the
             # trailing "- <name>" rather than anchoring at the start of the line.
             missing=$(echo "$out" | sed 's/\x1b\[[0-9;]*m//g' \
                       | awk '/required inputs are missing/{f=1;next} f && /-[[:space:]]+[A-Za-z0-9_]+[[:space:]]*$/{print $NF}')
-            [ -z "$missing" ] && continue
+            if [ -z "$missing" ]; then
+              echo "::error::$dir reported missing inputs but none could be parsed out — the extraction is broken, refusing to treat this as clean."
+              fail=1
+              continue
+            fi
             for m in $missing; do
               case " $EXEMPT " in
                 *" $m "*) ;;
@@ -280,16 +311,23 @@ jobs:
             done
           done < <(git ls-files 'live/**/terragrunt.hcl' | grep '/terragrunt\.hcl$')
 
-          # Anti-vacuity: a run that inspected nothing must not report success.
-          if [ "$checked" -lt 50 ]; then
-            echo "::error::only $checked leaves inspected (expected >= 50) — refusing to report a pass"
+          # Anti-vacuity, measuring EXECUTION rather than discovery. `discovered`
+          # counts the file list; `validated` counts leaves whose check demonstrably
+          # ran. A gate that inspected nothing must never report success.
+          echo "discovered=$discovered validated=$validated"
+          if [ "$discovered" -lt 50 ]; then
+            echo "::error::only $discovered leaves discovered (expected >= 50) — the file list is wrong, refusing to report a pass"
+            exit 1
+          fi
+          if [ "$validated" -ne "$discovered" ]; then
+            echo "::error::$((discovered - validated)) leaf/leaves were never actually validated — refusing to report a pass over them"
             exit 1
           fi
           if [ "$fail" -ne 0 ]; then
             echo "A required input is supplied by nothing. Wire it, or remove the declaration."
             exit 1
           fi
-          echo "All $checked live leaves have every required input supplied."
+          echo "All $validated live leaves validated, every required input supplied."
 
   # Guards the dependency mocks: every mock_outputs key must be a real output of the
   # component the dependency points at, so a renamed component output fails here
