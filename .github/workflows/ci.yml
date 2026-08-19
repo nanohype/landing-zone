@@ -235,6 +235,62 @@ jobs:
           fi
           echo "All live leaves evaluate cleanly against their mocks."
 
+      # A required input nothing supplies makes a component UNPLANNABLE in every
+      # environment it appears in. `governance` carried a `vpc_id` that no
+      # _envcommon and no leaf passed and no resource read, so `terragrunt plan`
+      # died with "No value for required variable" in development, staging and
+      # production — for as long as the variable existed.
+      #
+      # Nothing caught it. `tofu validate` does not require variable VALUES, the
+      # render step above resolves against mocks without checking completeness, and
+      # the plan matrix that would have caught it was never armed. This check needs
+      # no AWS credentials, no role, no account and no state bucket — the defect was
+      # free to find for the whole life of the repo.
+      - name: Every leaf has all its required inputs
+        run: |
+          set -uo pipefail
+
+          # Required inputs deliberately left unsupplied, and why. An entry here is
+          # a decision; a variable missing from both this list and the wiring is an
+          # unplannable component.
+          #   gitops_repo_url — cluster-bootstrap gives it no default ON PURPOSE
+          #     (components/aws/cluster-bootstrap/variables.tf:147-153): it must be
+          #     the operator's OWN catalog fork, and a default would silently sync
+          #     an app-of-apps from someone else's main branch. scripts/e2e.sh:506
+          #     injects it as TF_VAR_gitops_repo_url.
+          EXEMPT="gitops_repo_url"
+
+          fail=0
+          checked=0
+          while IFS= read -r leaf; do
+            dir=$(dirname "$leaf")
+            checked=$((checked + 1))
+            out=$( cd "$dir" && TG_NON_INTERACTIVE=true terragrunt hcl validate --inputs 2>&1 ) || true
+            # terragrunt prefixes every line with a timestamp and level, so the
+            # missing names arrive as "HH:MM:SS.mmm ERROR \t- name". Match the
+            # trailing "- <name>" rather than anchoring at the start of the line.
+            missing=$(echo "$out" | sed 's/\x1b\[[0-9;]*m//g' \
+                      | awk '/required inputs are missing/{f=1;next} f && /-[[:space:]]+[A-Za-z0-9_]+[[:space:]]*$/{print $NF}')
+            [ -z "$missing" ] && continue
+            for m in $missing; do
+              case " $EXEMPT " in
+                *" $m "*) ;;
+                *) echo "::error::$dir is missing required input '$m' — the component cannot plan in any environment"; fail=1 ;;
+              esac
+            done
+          done < <(git ls-files 'live/**/terragrunt.hcl' | grep '/terragrunt\.hcl$')
+
+          # Anti-vacuity: a run that inspected nothing must not report success.
+          if [ "$checked" -lt 50 ]; then
+            echo "::error::only $checked leaves inspected (expected >= 50) — refusing to report a pass"
+            exit 1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "A required input is supplied by nothing. Wire it, or remove the declaration."
+            exit 1
+          fi
+          echo "All $checked live leaves have every required input supplied."
+
   # Guards the dependency mocks: every mock_outputs key must be a real output of the
   # component the dependency points at, so a renamed component output fails here
   # instead of silently resolving to a stale mock value at plan/apply time.
