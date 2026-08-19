@@ -19,7 +19,7 @@ set -euo pipefail
 
 # --- config (env-overridable; defaults target the cheap development tree) -----------
 : "${E2E_ACCOUNT_ID:?set E2E_ACCOUNT_ID (the real 12-digit AWS account)}"
-REGION="${E2E_REGION:-us-west-2}"
+REGION="${E2E_REGION:-us-east-1}"
 ENVIRONMENT="${E2E_ENV:-development}"
 ACCOUNT_DIR="${E2E_ACCOUNT_DIR:-workload-development}"
 CLUSTER="${E2E_CLUSTER:-development-platform}"

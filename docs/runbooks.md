@@ -201,7 +201,7 @@ If the state file itself is corrupted:
 6. **Create the environment directory** by copying an existing one under
    `live/aws/<account>/<region>/<env>/`:
    ```bash
-   cp -r live/aws/workload-development/us-west-2/development/ live/aws/<new-account>/<region>/<new-env>/
+   cp -r live/aws/workload-development/us-east-1/development/ live/aws/<new-account>/<region>/<new-env>/
    ```
 
 7. **Set the account metadata across the three scoped `.hcl` files** — each level owns a different value:

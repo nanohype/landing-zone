@@ -614,7 +614,7 @@ run "the_rendered_development_map_is_accepted_and_provisions_every_declared_stor
   }
 
   variables {
-    tenants = jsondecode(file("../../../live/aws/workload-development/us-west-2/development/tenant-substrate/tenants.generated.json"))
+    tenants = jsondecode(file("../../../live/aws/workload-development/us-east-1/development/tenant-substrate/tenants.generated.json"))
   }
 
   # The renderer produced something, and this run is not passing over an empty
