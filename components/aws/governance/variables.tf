@@ -19,13 +19,6 @@ variable "region" {
 
 # Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
 # tflint-ignore: terraform_unused_declarations
-variable "vpc_id" {
-  description = "VPC ID"
-  type        = string
-}
-
-# Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
-# tflint-ignore: terraform_unused_declarations
 variable "cluster_sg_id" {
   description = "EKS cluster security group ID"
   type        = string
