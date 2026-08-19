@@ -12,8 +12,8 @@ than creating their own.
 
 | leaf | mode | adopts | from |
 | --- | --- | --- | --- |
-| `network` | `network_mode = "adopt"` | VPC + subnets | `live/aws/network/us-west-2/development/shared-network` |
-| `private-dns` | `dns_mode = "adopt"` | a Route53 Profile | `live/aws/network/us-west-2/development/shared-dns` |
+| `network` | `network_mode = "adopt"` | VPC + subnets | `live/aws/network/us-east-1/development/shared-network` |
+| `private-dns` | `dns_mode = "adopt"` | a Route53 Profile | `live/aws/network/us-east-1/development/shared-dns` |
 
 Both dependency `config_path`s reach out of this account directory into the network
 account's tree, which is the whole point — that reach is what adopt mode *is*. It is
@@ -41,7 +41,7 @@ This tree is not `workload-*`, so the example keeps working.
 
 The owner side has to exist first, and today it does not — end to end:
 
-1. `live/aws/management/us-west-2/org/org-networking` mints the IPAM pools, but its
+1. `live/aws/management/us-east-1/org/org-networking` mints the IPAM pools, but its
    committed leaf sets `ram_principals = []`, which gates off all three RAM shares.
    Without principals, nothing is shared.
 2. `components/aws/shared-network` discovers its pool by tag and has **no

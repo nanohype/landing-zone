@@ -19,7 +19,7 @@ placeholder + env-var override keeps a real value out of the tree (account id).
 
 | Local | Example | Notes |
 |-------|---------|-------|
-| `region` | `"us-west-2"` | Declared (no default) by every component; passed down from `root.hcl`. |
+| `region` | `"us-east-1"` | Declared (no default) by every component; passed down from `root.hcl`. |
 
 ## Per-environment — `live/aws/.../<env>/env.hcl`
 
@@ -202,7 +202,7 @@ To reproduce the rackctl-supplied path on a manual `task` deploy (terragrunt for
 ```bash
 export TF_VAR_cluster_endpoint_public_access=true
 export TF_VAR_cluster_endpoint_public_access_cidrs="[\"$(curl -s https://checkip.amazonaws.com)/32\"]"
-task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=cluster
+task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=cluster
 ```
 
 Leave them unset for a private endpoint.

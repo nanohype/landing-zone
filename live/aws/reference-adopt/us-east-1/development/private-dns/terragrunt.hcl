@@ -11,7 +11,7 @@ include "envcommon" {
 # env-specific, so the dependency lives here rather than in envcommon — the same shape the
 # workload network adopt leaf uses for its shared_network dependency.
 dependency "shared_dns" {
-  config_path = "../../../../network/us-west-2/development/shared-dns"
+  config_path = "../../../../network/us-east-1/development/shared-dns"
 
   # mock_outputs feed the credential-less CI render; a real plan reads the live output.
   mock_outputs = {

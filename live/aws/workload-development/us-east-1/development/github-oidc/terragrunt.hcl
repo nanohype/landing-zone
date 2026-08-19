@@ -31,13 +31,13 @@ include "envcommon" {
 # way. plan_role_arn is what goes in the AWS_ROLE_ARN repo variable — NOT
 # deploy_role_arn.
 #
-# This leaf sits under us-east-1 while the rest of workload-development is
-# us-west-2. That is not an inconsistency to tidy up later: the OIDC provider and
-# both roles are account-GLOBAL, so pinning them to a regional tree was always a
-# claim the resources do not make. us-east-1 is also the only region the Ventures
-# OU's `guardrail-region-lock` SCP permits, so it is the only region this leaf can
-# be applied into today — but the merits argument stands on its own and survives
-# that SCP changing.
+# This leaf moved to us-east-1 before the rest of the estate followed, and the
+# reason it moved first is worth keeping: the OIDC provider and both roles are
+# account-GLOBAL, so pinning them to a regional tree was always a claim the
+# resources do not make. That argument stands on its own and survives the SCP
+# changing — which matters, because the estate-wide move that came after it was
+# driven by the Ventures OU's `guardrail-region-lock`, a different reason that
+# could be repealed.
 
 # The account already has the GitHub Actions OIDC provider (AWS allows one per
 # issuer), so this component references it rather than creating a second.

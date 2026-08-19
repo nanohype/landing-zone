@@ -4,7 +4,7 @@ include "root" {
 
 # The fleet hub, co-located with this environment's workload cluster.
 #
-# live/aws/fleet/us-west-2/hub/fleet-hub is the OTHER home for this component: a
+# live/aws/fleet/us-east-1/hub/fleet-hub is the OTHER home for this component: a
 # dedicated hub account with its own cluster, network and bootstrap. That shape is
 # right once an org has one, and unreachable before it does — its `dependency
 # "cluster"` resolves ../cluster in the fleet tree, which is a second EKS cluster

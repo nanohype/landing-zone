@@ -23,7 +23,7 @@ include "envcommon" {
 # to exist on the owner side before any of this can be applied.
 
 dependency "shared_network" {
-  config_path = "../../../../network/us-west-2/development/shared-network"
+  config_path = "../../../../network/us-east-1/development/shared-network"
 
   # mock_outputs feed credential-less `terragrunt render` (the CI evaluate job)
   # when the owner leaf has no readable state — same mechanism the cluster→network

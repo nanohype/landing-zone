@@ -24,7 +24,7 @@ inputs = {
 
   securityhub_standards = [
     "arn:aws:securityhub:::ruleset/cis-aws-foundations-benchmark/v/3.0.0",
-    "arn:aws:securityhub:us-west-2::standards/aws-foundational-security-best-practices/v/1.0.0",
+    "arn:aws:securityhub:us-east-1::standards/aws-foundational-security-best-practices/v/1.0.0",
   ]
 
   enable_cross_region_aggregation = false

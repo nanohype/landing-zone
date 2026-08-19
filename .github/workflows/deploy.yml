@@ -9,10 +9,10 @@ on:
         type: string
         default: "workload-development"
       region:
-        description: "Target region (e.g., us-west-2)"
+        description: "Target region (e.g., us-east-1)"
         required: true
         type: string
-        default: "us-west-2"
+        default: "us-east-1"
       environment:
         description: "Target environment"
         required: true
