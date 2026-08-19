@@ -32,7 +32,7 @@ output. No override rescues it: `network_mode` is set in the leaf's `inputs`, an
 
 That failure had no way to surface. The evaluate job renders against mocks by design,
 and the plan job green-skips whenever `AWS_ROLE_ARN` is unset, so a leaf whose apply
-path cannot resolve stayed green indefinitely. `scripts/check-account-local-deps.sh`
+path cannot resolve stayed green indefinitely. `scripts/check-account-local-deps.py`
 now encodes the rule that was previously only a convention: a leaf under
 `live/aws/workload-*/` may not depend on a unit outside its own account directory.
 This tree is not `workload-*`, so the example keeps working.

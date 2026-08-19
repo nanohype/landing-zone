@@ -87,7 +87,7 @@ environment variable that gets past it.
 
 That is why a leaf under `live/aws/workload-*/` may not depend on a unit outside its own
 account directory: such a leaf cannot be brought up at all, regardless of what a caller
-supplies. `scripts/check-account-local-deps.sh` enforces it; cross-account worked examples
+supplies. `scripts/check-account-local-deps.py` enforces it; cross-account worked examples
 live in `live/aws/reference-adopt/`.
 
 ## Component-specific — `live/_envcommon/aws/<component>.hcl`
