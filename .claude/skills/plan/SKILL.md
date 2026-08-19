@@ -13,7 +13,7 @@ Run `task plan` for the given environment and optional component.
 - `$ARGUMENTS[1]` — component name (network, cluster, druid, etc.) — defaults to "all"
 
 `task plan` needs the account and region too. Map the environment to its account
-(region defaults to `us-west-2`):
+(region defaults to `us-east-1`):
 
 | environment | account (`ACCOUNT`) |
 |---|---|
@@ -23,9 +23,9 @@ Run `task plan` for the given environment and optional component.
 | org | `management` |
 
 **Steps:**
-1. Validate that the environment exists under `live/aws/<account>/us-west-2/<env>/`
-2. If a component is specified, validate it exists at `live/aws/<account>/us-west-2/<env>/<component>/`
-3. Run `task plan ACCOUNT=<account> REGION=us-west-2 ENVIRONMENT=$ARGUMENTS[0] COMPONENT=$ARGUMENTS[1]`
+1. Validate that the environment exists under `live/aws/<account>/us-east-1/<env>/`
+2. If a component is specified, validate it exists at `live/aws/<account>/us-east-1/<env>/<component>/`
+3. Run `task plan ACCOUNT=<account> REGION=us-east-1 ENVIRONMENT=$ARGUMENTS[0] COMPONENT=$ARGUMENTS[1]`
 4. Summarize the plan output — resources to add/change/destroy
 
 If no arguments are provided, ask which environment to plan.
