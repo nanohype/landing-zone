@@ -2,7 +2,7 @@ version: "3"
 
 vars:
   ACCOUNT: '{{.ACCOUNT | default "workload-development"}}'
-  REGION: '{{.REGION | default "us-west-2"}}'
+  REGION: '{{.REGION | default "us-east-1"}}'
   ENVIRONMENT: '{{.ENVIRONMENT | default "development"}}'
   COMPONENT: '{{.COMPONENT | default "all"}}'
 
@@ -133,7 +133,7 @@ tasks:
   # === Backend ===
 
   init-backend:
-    desc: "Create the S3 state backend (ACCOUNT_ID defaults to the caller's account; REGION defaults to us-west-2)"
+    desc: "Create the S3 state backend (ACCOUNT_ID defaults to the caller's account; REGION defaults to us-east-1)"
     vars:
       ACCOUNT_ID: '{{.ACCOUNT_ID | default ""}}'
     cmds:
@@ -162,6 +162,6 @@ tasks:
       - |
         echo ""
         echo "Usage:"
-        echo "  task <target> [ACCOUNT=workload-development|workload-staging|workload-production|management] [REGION=us-west-2] [ENVIRONMENT=development|staging|production|org] [COMPONENT=network|cluster|all]"
+        echo "  task <target> [ACCOUNT=workload-development|workload-staging|workload-production|management] [REGION=us-east-1] [ENVIRONMENT=development|staging|production|org] [COMPONENT=network|cluster|all]"
         echo ""
         task --list

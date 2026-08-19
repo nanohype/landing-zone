@@ -72,7 +72,7 @@ Sign out as root. Sign in via the IAM Identity Center portal URL as `<yourname>-
 aws configure sso
 # SSO start URL: <your access portal URL>
 # SSO Region: us-east-1 (or wherever Identity Center is hosted)
-# CLI default region: us-west-2
+# CLI default region: us-east-1
 # CLI default output: json
 # Profile name: workload-development (or whatever)
 
@@ -106,7 +106,7 @@ Creates an S3 bucket `{account_id}-{region}-tfstate` with versioning + encryptio
 
 ```bash
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-./scripts/init-backend-aws.sh $ACCOUNT_ID us-west-2
+./scripts/init-backend-aws.sh $ACCOUNT_ID us-east-1
 ```
 
 ### 9. Service quotas
@@ -116,7 +116,7 @@ AWS imposes per-region quotas on resources like EC2 instances, EIPs, NAT Gateway
 Check current limits:
 
 ```bash
-aws service-quotas list-service-quotas --service-code ec2 --region us-west-2 \
+aws service-quotas list-service-quotas --service-code ec2 --region us-east-1 \
   --query "Quotas[?QuotaCode=='L-1216C47A'].{Quota:QuotaName,Limit:Value}" \
   --output table
 ```
@@ -130,7 +130,7 @@ aws service-quotas request-service-quota-increase \
   --service-code ec2 \
   --quota-code L-1216C47A \
   --desired-value 256 \
-  --region us-west-2
+  --region us-east-1
 ```
 
 Most On-Demand quota increases are auto-approved within 15-30 minutes. EIP increases can take longer (manual review).
@@ -153,11 +153,11 @@ Leave them unset for a private endpoint. A public endpoint with an empty allow-l
 ```bash
 cd <repo-root>
 
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=network            # ~3-5 min
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster            # ~15-25 min
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=secrets            # ~2 min
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster-bootstrap  # ~5-10 min
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=cluster-addons     # ~5-10 min
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=network            # ~3-5 min
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=cluster            # ~15-25 min
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=secrets            # ~2 min
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=cluster-bootstrap  # ~5-10 min
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=cluster-addons     # ~5-10 min
 ```
 
 Replace `<env>` with `development`/`staging`/`production` and account accordingly.
@@ -165,7 +165,7 @@ Replace `<env>` with `development`/`staging`/`production` and account accordingl
 ### Get kubectl access (after `cluster` succeeds)
 
 ```bash
-aws eks update-kubeconfig --name <env>-platform --region us-west-2 --profile workload-<env>
+aws eks update-kubeconfig --name <env>-platform --region us-east-1 --profile workload-<env>
 kubectl get nodes
 ```
 
@@ -184,7 +184,7 @@ Bootstrap creates the App-of-Apps Application pointing at `eks-gitops`. Applicat
 `cluster-addons` outputs the real role ARNs that need to replace the `000000000000` placeholders:
 
 ```bash
-cd live/aws/workload-<env>/us-west-2/<env>/cluster-addons
+cd live/aws/workload-<env>/us-east-1/<env>/cluster-addons
 terragrunt output -json pod_identity_role_arns
 terragrunt output -json s3_bucket_names
 ```
@@ -213,19 +213,19 @@ kubectl get pods -A | grep -vE 'Running|Completed'
 
 ```bash
 # Amazon Managed Prometheus + Amazon Managed Grafana
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=managed-monitoring
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=managed-monitoring
 
 # Druid analytics tenant
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=druid
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=druid
 
 # Route 53 hosted zone (if attaching ingress hostnames)
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=dns
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=dns
 ```
 
 After `managed-monitoring`, bootstrap the Amazon Managed Grafana service-account token into Secrets Manager (one-time):
 
 ```bash
-AMG_ID=$(cd live/aws/workload-<env>/us-west-2/<env>/managed-monitoring && terragrunt output -raw grafana_workspace_id)
+AMG_ID=$(cd live/aws/workload-<env>/us-east-1/<env>/managed-monitoring && terragrunt output -raw grafana_workspace_id)
 
 SA=$(aws grafana create-workspace-service-account \
   --workspace-id $AMG_ID \
@@ -323,8 +323,8 @@ role). Apply it once per account with your admin/SSO creds, then wire its output
 into the GitHub Actions repo *variables*:
 
 ```bash
-task apply ACCOUNT=workload-<env> REGION=us-west-2 ENVIRONMENT=<env> COMPONENT=github-oidc
-cd live/aws/workload-<env>/us-west-2/<env>/github-oidc && terragrunt output -raw deploy_role_arn
+task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=github-oidc
+cd live/aws/workload-<env>/us-east-1/<env>/github-oidc && terragrunt output -raw deploy_role_arn
 # Set the printed ARN as the AWS_ROLE_ARN (deploy.yml) and E2E_AWS_ROLE_ARN
 # (e2e.yml) repo variables. Local exec does not need this.
 ```

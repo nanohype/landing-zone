@@ -9,7 +9,7 @@ dependency "network" {
       vpc_id             = "vpc-mock"
       ownership_mode     = "create"
       private_subnet_ids = ["subnet-1", "subnet-2", "subnet-3"]
-      private_subnet_azs = ["us-west-2a", "us-west-2b", "us-west-2c"]
+      private_subnet_azs = ["us-east-1a", "us-east-1b", "us-east-1c"]
     }
   }
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]

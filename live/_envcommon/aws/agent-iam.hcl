@@ -6,7 +6,7 @@ dependency "cluster" {
   config_path = "../cluster"
   mock_outputs = {
     oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/mock"
-    oidc_issuer       = "oidc.eks.us-west-2.amazonaws.com/id/MOCK"
+    oidc_issuer       = "oidc.eks.us-east-1.amazonaws.com/id/MOCK"
     cluster_name      = "mock-eks"
   }
   # `destroy` is in this list because a teardown is not always a first teardown.
@@ -47,7 +47,7 @@ dependency "cluster" {
 dependency "secrets" {
   config_path = "../secrets"
   mock_outputs = {
-    kms_key_arn = "arn:aws:kms:us-west-2:123456789012:key/mock"
+    kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/mock"
   }
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"

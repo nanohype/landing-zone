@@ -7,15 +7,15 @@ Day-to-day procedures for operating the landing-zone infrastructure.
 ### Single Component
 
 ```bash
-task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
-task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
+task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=network
+task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=network
 ```
 
 ### All Components in an Environment
 
 ```bash
-task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
-task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
+task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development
+task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development
 ```
 
 Terragrunt resolves the dependency graph and runs components in the correct order.
@@ -23,8 +23,8 @@ Terragrunt resolves the dependency graph and runs components in the correct orde
 ### Organization Components
 
 ```bash
-task plan ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
-task apply ACCOUNT=management REGION=us-west-2 ENVIRONMENT=org COMPONENT=org-identity
+task plan ACCOUNT=management REGION=us-east-1 ENVIRONMENT=org COMPONENT=org-identity
+task apply ACCOUNT=management REGION=us-east-1 ENVIRONMENT=org COMPONENT=org-identity
 ```
 
 ## Deployment Order
@@ -170,8 +170,8 @@ leaf. The other three carry hand-authored sizing maps in their live leaves.
      }
    }
    ```
-4. Plan to verify: `task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=<component>`
-5. Apply: `task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=<component>`
+4. Plan to verify: `task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=<component>`
+5. Apply: `task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=<component>`
 
 ### Removing a Tenant
 
@@ -238,6 +238,13 @@ Production and staging infrastructure is checked for drift every weekday morning
 The `secrets` component manages encryption and storage: customer-managed KMS keys with auto-rotation, and Secrets Manager as the secrets store. The External Secrets Operator role sits in `cluster-addons` with every other addon identity, because a ServiceAccount holds exactly one EKS Pod Identity association.
 
 The flow: secrets are stored in Secrets Manager, External Secrets Operator (running in the cluster, authenticated by an EKS Pod Identity role bound to its ServiceAccount) syncs them, and Kubernetes Secrets are created for pod consumption.
+
+## Retargeting a Region
+
+Moving an account tree between regions has three failure modes no gate catches —
+the `region.hcl` local (the directory name is cosmetic), region-bearing values
+inside opaque strings such as ARNs, and non-deployable trees that break silently.
+See [RB-008](runbooks.md#rb-008-retargeting-an-account-tree-to-a-different-region).
 
 ## Backup and Recovery
 

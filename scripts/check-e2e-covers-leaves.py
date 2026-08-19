@@ -43,7 +43,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 E2E = ROOT / "scripts" / "e2e.sh"
 # The e2e environment is workload-development/development. It spans more than one
 # region: account-global components (github-oidc) live in the account's home region
-# while the regional substrate lives in us-west-2. Scanning a single hardcoded region
+# alongside the regional substrate. Scanning a single hardcoded region
 # would silently drop a leaf from coverage the moment one moved — and a coverage
 # check that quietly narrows is worse than none, because it still reports a pass.
 ACCOUNT = ROOT / "live" / "aws" / "workload-development"

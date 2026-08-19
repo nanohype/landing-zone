@@ -335,3 +335,71 @@ Run `cloudgov orphans --profile <p>` in every touched account until clean.
 Confirm zero EKS / NAT / VPC / EC2 / EBS / ELB / EIP before walking away. A
 COMPLIANCE-locked S3 bucket (e.g. a Bedrock invocation-log bucket) stays
 undeletable until its retention elapses — that's expected; leave it.
+
+---
+
+## RB-008: Retargeting an Account Tree to a Different Region
+
+Moving `live/aws/<account>/<region>/` is mostly mechanical. Three things in it
+are not, and none of them is caught by any gate in this repository.
+
+### The directory name is cosmetic — change the local
+
+`live/root.hcl` reads `local.region` out of `region.hcl`. It never looks at the
+directory name. So `git mv`-ing the tree and stopping there produces a
+repository that reads as retargeted in every diff, every path and every review,
+and resolves the old region at plan time.
+
+```bash
+# after moving the tree, assert the values actually changed
+for f in $(git ls-files 'live/aws/*/*/region.hcl'); do
+  printf '%-44s %s\n' "$f" "$(grep -E '^\s*region\s*=' "$f")"
+done
+```
+
+### Region-bearing values inside opaque strings are outside every gate's reach
+
+A region can be embedded in any string a provider accepts — an ARN, a service
+endpoint, an OIDC issuer URL, a bucket name. Nothing here parses inside those:
+`check-account-local-deps.py` resolves paths, `tflint` and `checkov` read
+resource shapes, and `terragrunt hcl validate --inputs` checks completeness.
+None of them reads a region out of the middle of a string.
+
+The one that bit this repo: `org-security` enrolled
+
+    arn:aws:securityhub:us-west-2::standards/aws-foundational-security-best-practices/v/1.0.0
+
+That names a *regional standard*, not a path. Left alone it would have applied
+cleanly from a us-east-1 account and enrolled a standard in a region the org SCP
+denies — and a successful apply would have looked like proof it was fine.
+
+Do not try to build a gate for this. The set of strings that can carry a region
+is not enumerable, and each pass would add whichever form escaped last time.
+Grep the old region across the whole tree and read every hit instead:
+
+```bash
+git grep -n "<old-region>" -- 'live/**' 'scripts/**' '.github/**' 'docs/**' 'Taskfile.yaml'
+```
+
+Expect three categories, and decide each: *stale* (fix), *deliberate policy*
+(e.g. an SCP allowlist naming more regions than the estate uses — narrowing it
+is a security decision, not part of a move), and *mock values* (cosmetic, but
+stale mocks mislead readers).
+
+### Non-deployable trees break silently
+
+`live/aws/reference-adopt/` is excluded from drift and e2e and applies nowhere,
+so a stale path in it fails nothing, forever. It exists to be copied — a worked
+example pointing at a directory that no longer exists is worse than no example.
+Move it with the tree it references, in the same commit.
+
+### Verify
+
+```bash
+# every leaf still resolves its includes, dependencies and inputs — no credentials
+git ls-files 'live/**/terragrunt.hcl' | while read -r l; do
+  ( cd "$(dirname "$l")" && terragrunt hcl validate --inputs ) || echo "FAILED: $l"
+done
+```
+
+A leaf whose wiring broke in the move cannot pass that.
