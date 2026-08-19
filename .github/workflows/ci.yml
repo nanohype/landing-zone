@@ -355,7 +355,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/check-account-local-deps.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-account-local-deps.py
 
   # Every account id in this tree is a placeholder, and that is correct for a
   # public repo — root.hcl resolves a leaf's OWN account from
