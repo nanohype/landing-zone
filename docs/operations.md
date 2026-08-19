@@ -239,6 +239,13 @@ The `secrets` component manages encryption and storage: customer-managed KMS key
 
 The flow: secrets are stored in Secrets Manager, External Secrets Operator (running in the cluster, authenticated by an EKS Pod Identity role bound to its ServiceAccount) syncs them, and Kubernetes Secrets are created for pod consumption.
 
+## Retargeting a Region
+
+Moving an account tree between regions has three failure modes no gate catches —
+the `region.hcl` local (the directory name is cosmetic), region-bearing values
+inside opaque strings such as ARNs, and non-deployable trees that break silently.
+See [RB-008](runbooks.md#rb-008-retargeting-an-account-tree-to-a-different-region).
+
 ## Backup and Recovery
 
 The `backup` component manages AWS Backup: configurable plans, vault lock for production, KMS encryption, and cross-region copy.
