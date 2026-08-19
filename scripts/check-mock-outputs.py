@@ -83,10 +83,16 @@ def mock_keys(block):
 
 
 def main():
+    # The directory this walks must exist AND hold files. Letting os.listdir raise
+    # is not a guard: it only fires when the path is absent. A path that exists and
+    # is empty walks zero files, checks zero keys, and prints a pass.
+    if not os.path.isdir(ENVCOMMON):
+        print(f"::error::{ENVCOMMON} is missing — the subject of this check")
+        return 1
+
     errors, skips, checked = [], [], 0
-    for fname in sorted(os.listdir(ENVCOMMON)):
-        if not fname.endswith(".hcl"):
-            continue
+    hcl_files = [f for f in sorted(os.listdir(ENVCOMMON)) if f.endswith(".hcl")]
+    for fname in hcl_files:
         path = os.path.join(ENVCOMMON, fname)
         lines = open(path).read().split("\n")
         for dep_name, block in iter_blocks(lines):
@@ -120,6 +126,26 @@ def main():
         print("\nFix the mock_outputs key (and the matching dependency.<name>.outputs.<key> "
               "reference) to a real output, or rename the component output back.")
         return 1
+    # Anti-vacuity, on BOTH populations this walks. Either can collapse
+    # independently: the directory can survive while its contents move, and the
+    # files can survive while a change to the dependency or mock_outputs syntax
+    # makes every block invisible to the parser. Each produces a confident pass
+    # over nothing, and "0 mock key(s) ... match" reads as success.
+    #
+    # Floors sit deliberately below the real counts (33 files, 38 keys) rather
+    # than at them: this asserts discovery WORKED, and adding or removing an
+    # envcommon file must not require editing a number here. An assertion whose
+    # easiest repair is to weaken the assertion gets repaired that way.
+    MIN_FILES, MIN_KEYS = 10, 15
+    if len(hcl_files) < MIN_FILES or checked < MIN_KEYS:
+        print(
+            f"::error::discovered {len(hcl_files)} envcommon file(s) and {checked} mock "
+            f"key(s) (expected at least {MIN_FILES} and {MIN_KEYS}). The scan did not "
+            f"see the tree, so this check has nothing to report on and refuses to "
+            f"report a pass."
+        )
+        return 1
+
     print(f"OK    {checked} mock key(s) across every dependency match a declared "
           f"component output.")
     return 0
