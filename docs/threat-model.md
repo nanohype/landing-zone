@@ -25,9 +25,14 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
 ## 1. CI/CD → AWS  (`github-oidc`)
 
 - **Spoofing** — a foreign workflow assuming the deploy role. Mitigated: the
-  trust policy is scoped to `repo:<org>/<repo>:*` and `github_repos` is validated
-  non-empty (an empty list would drop the `sub` condition and let *any* Actions
-  token assume the role). No long-lived keys; OIDC federation only.
+  trust policy names each repo AND the contexts it trusts within that repo —
+  `repo:<org>/<repo>:environment:*` and `repo:<org>/<repo>:ref:refs/tags/*` by
+  default. Naming the repo alone, with a wildcard claim suffix, would satisfy
+  "repo-scoped" while also trusting `pull_request` and every branch — so a fork's
+  pull request against a public repo could assume the role. Both `github_repos` and
+  `allowed_subject_claims` are validated non-empty, because an empty list on
+  either drops the `sub` condition entirely and lets *any* Actions token assume
+  the role. No long-lived keys; OIDC federation only.
 - **Elevation of privilege** — the deploy role is powerful. Residual: scope it
   per-environment; do not share one role across development and production.
 - **Repudiation** — CloudTrail records the assumed-role session; the `Revision`

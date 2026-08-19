@@ -528,6 +528,24 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-scp-deny-can-fire.py
 
+  # Documentation must not describe a GitHub OIDC trust wider than the component
+  # ships. The threat model cites trust scoping as the mitigation for a foreign
+  # workflow assuming the deploy role, and the troubleshooting guide shows a policy
+  # an operator is told to match — so a documented wildcard claim states the
+  # vulnerability as the control in one place and teaches an operator to create it
+  # in the other. Permitted suffixes are read from the component's own variables.tf,
+  # so widening the component widens what may be documented and the two cannot drift
+  # apart in the direction that matters.
+  documented-oidc-trust:
+    name: Docs Match The OIDC Trust Policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-documented-oidc-trust.py
+
   # Every teardown gate on a component must open on the same lever. AWS spreads the
   # protections across unrelated resources and nothing in the dependency graph joins
   # them, so a partially-gated component empties its buckets, fails on the database it
@@ -563,8 +581,8 @@ jobs:
   # trusted, and it can only see what the run created. tenant-substrate — every
   # Aurora cluster, cache, table, bucket and queue a tenant declares — was in
   # neither its apply list nor its destroy loop, so the check reported clean over
-  # a whole resource class it had never looked at. The five other guard scripts
-  # all inspect component internals; none reads e2e.sh, and none compares its
+  # a whole resource class it had never looked at. Every other guard script
+  # inspects component internals; none reads e2e.sh, and none compares its
   # component list against the leaves that exist.
   e2e-covers-leaves:
     name: E2E Covers Every Live Leaf
@@ -688,6 +706,7 @@ jobs:
         tenant-substrate-render,
         architecture-components,
         smoke-outputs,
+        documented-oidc-trust,
         scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,
