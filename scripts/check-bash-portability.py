@@ -8,10 +8,21 @@ bash the machine has. CI runs Linux with bash 5. macOS ships bash 3.2 and has
 since 2007 — Apple will not ship a newer one under GPLv3 — so a developer, a
 release step, or an incident responder running these scripts on a Mac is on 3.2.
 
-A bash 4 builtin on bash 3.2 does not warn. `mapfile` prints "command not found"
-and the loop that consumed its array runs zero times, so a script that reads a
-list and acts on each entry silently acts on nothing and exits 0. In a teardown
-that means resources are left billing with a successful-looking run.
+A bash 4 builtin on bash 3.2 does not warn. `mapfile` prints "command not
+found"; in a script without `set -e` the array is length 0, the loop that
+consumed it runs zero times, and the script exits 0 — so one that reads a list
+and acts on each entry acts on nothing and reports success. In a teardown that
+leaves resources billing behind a green run.
+
+With `set -e` the failure is loud but not early: bash executes incrementally, so
+every line above the construct has already run. A teardown aborts partway
+through, which is a worse state than never starting.
+
+The effects below were measured by running each construct under bash 3.2.57,
+not reasoned about. Two of the eight did not behave the way the obvious reading
+suggested — `&>>` is a parse error rather than a background-plus-append, and an
+associative array without `set -e` silently collapses every key onto one slot
+rather than merely erroring.
 
 WHAT A LINTER DOES NOT CATCH
 
@@ -47,16 +58,34 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# construct -> what it does on bash 3.2
+# construct -> what it actually does on bash 3.2, measured by running each one
+# under /bin/bash 3.2.57 rather than reasoned about. Two categories, and the
+# difference decides how bad a given occurrence is:
+#
+#   PARSE   bash rejects the construct when it reaches that line. Lines ABOVE it
+#           have already run, so a teardown aborts halfway through rather than
+#           declining to start — the partial state is the damage.
+#   RUNTIME the line fails. Under `set -e` the script aborts there; without it,
+#           execution continues on a wrong value. 27 of the 28 scripts here set
+#           -e, so for them these abort; `no-placeholders.sh` does not, and there
+#           the failure is silent.
 BASH4 = [
-    (re.compile(r"\bmapfile\b"), "mapfile", "command not found; the array stays empty and the loop over it runs zero times"),
-    (re.compile(r"\breadarray\b"), "readarray", "command not found; same silent empty array as mapfile"),
-    (re.compile(r"\bcoproc\b"), "coproc", "syntax error; the script aborts"),
-    (re.compile(r"\b(?:declare|local|typeset)\s+-A\b"), "associative array", "declare: -A: invalid option; every later index write lands on element 0"),
-    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\^\^"), "${x^^} upper-case", "bad substitution; the script aborts"),
-    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*,,"), "${x,,} lower-case", "bad substitution; the script aborts"),
-    (re.compile(r";;&"), ";;& case fallthrough", "syntax error; the script aborts"),
-    (re.compile(r"&>>"), "&>> append-both redirect", "parsed as background + append; stderr is not redirected"),
+    (re.compile(r"\bmapfile\b"), "mapfile",
+     "RUNTIME: `mapfile: command not found`. Under set -e the script aborts (rc 127); without it the array is length 0 and the loop over it runs zero times"),
+    (re.compile(r"\breadarray\b"), "readarray",
+     "RUNTIME: `readarray: command not found`; identical to mapfile"),
+    (re.compile(r"\bcoproc\b"), "coproc",
+     "PARSE: `syntax error near unexpected token` (rc 2), after the lines above it have already run"),
+    (re.compile(r"\b(?:declare|local|typeset)\s+-A\b"), "associative array",
+     "RUNTIME: `declare: -A: invalid option` (rc 2 under set -e). Without set -e it is worse than an error: every string index collapses to element 0, so writing two keys leaves one value that both keys read back"),
+    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\^\^"), "${x^^} upper-case",
+     "RUNTIME: `bad substitution` (rc 1 under set -e)"),
+    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*,,"), "${x,,} lower-case",
+     "RUNTIME: `bad substitution` (rc 1 under set -e)"),
+    (re.compile(r";;&"), ";;& case fallthrough",
+     "PARSE: `syntax error near unexpected token `&`` (rc 2), after the lines above it have already run"),
+    (re.compile(r"&>>"), "&>> append-both redirect",
+     "PARSE: `syntax error near unexpected token `>`` (rc 2) — bash 3.2 does not parse it as a redirect at all, so nothing about the line survives"),
 ]
 
 WAIVER = re.compile(r"#[ \t]*bash4-ok:[ \t]*\S")
@@ -101,6 +130,29 @@ def main() -> int:
         print(
             "FAIL: no shell scripts found. The scan could not see the tree; "
             "refusing to report a pass.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Precondition, asserted rather than assumed. This gate knows one class:
+    # bash 4 constructs in a script that runs under bash. A `#!/bin/sh` script
+    # raises a DIFFERENT class — bashisms that Debian's dash rejects — and macOS
+    # cannot surface it, because /bin/sh there is bash 3.2 in POSIX mode and
+    # accepts them. Rather than check an sh script with bash rules and report a
+    # pass, say what is not covered.
+    non_bash = []
+    for rel in scripts:
+        first = (ROOT / rel).read_text().split("\n", 1)[0]
+        if first.startswith("#!") and "bash" not in first:
+            non_bash.append(f"  {rel}:1: {first}")
+    if non_bash:
+        print(
+            "Script(s) that do not declare bash:\n\n" + "\n".join(non_bash) +
+            "\n\nThis gate checks bash 4 constructs under bash. A POSIX-shell "
+            "script needs the other check — bashisms that dash rejects — and "
+            "this cannot answer it. Either give the script a bash shebang, or "
+            "add a dash check that RUNS the script (dash -n is a syntax check "
+            "and accepts constructs dash cannot execute).",
             file=sys.stderr,
         )
         return 1

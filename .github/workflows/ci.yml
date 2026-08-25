@@ -95,6 +95,29 @@ jobs:
                   })
               '
           )
+          # Every value here becomes a matrix entry, and matrix entries reach
+          # both `run:` blocks and `working-directory:`. They are derived from
+          # PATH COMPONENTS of files in the checked-out tree, and on a
+          # pull_request that tree is the contributor's — so a directory named
+          # with a quote and a semicolon is an injection into every job that
+          # interpolates it. `working-directory:` cannot be made safe with env
+          # indirection, so the names are constrained here, at the source, where
+          # one check covers every consumer.
+          for set in "$validate" "$plan"; do
+            # Counted, not tested for emptiness: an offending value that is
+            # itself the empty string (a doubled slash, a path shorter than the
+            # split expects) renders as an empty line, and a `[ -n "$bad" ]`
+            # test reads that as "no offenders" — the offender that hides is the
+            # one whose rendering is indistinguishable from finding none.
+            bad_count=$(printf '%s' "$set" | jq '[ .[] | .[] | select(type != "string" or (test("^[A-Za-z0-9][A-Za-z0-9._-]*$") | not)) ] | length')
+            if [ "$bad_count" -ne 0 ]; then
+              echo "::error::Refusing to build a matrix from $bad_count unsafe path component(s):" >&2
+              printf '%s' "$set" | jq -r '.[] | .[] | select(type != "string" or (test("^[A-Za-z0-9][A-Za-z0-9._-]*$") | not)) | "  [" + (. | tostring) + "]"' >&2
+              echo "A matrix value reaches run: and working-directory:. Path components must match ^[A-Za-z0-9][A-Za-z0-9._-]*$." >&2
+              exit 1
+            fi
+          done
+
           echo "validate=$validate" >> "$GITHUB_OUTPUT"
           echo "plan=$plan" >> "$GITHUB_OUTPUT"
 
@@ -788,7 +811,21 @@ jobs:
       # Verified in both directions: the tree is clean at this setting, and a
       # workflow carrying pull_request_target with a head-sha checkout and a
       # template-injected run block exits 14.
-      - run: zizmor --offline --persona=auditor --min-severity=high .github/workflows/
+      # Two tiers, deliberately. The first REPORTS everything the auditor
+      # persona finds and never fails: those are informational and low-severity
+      # findings in workflows that only a maintainer can trigger (schedule and
+      # workflow_dispatch), so gating on them would keep this job permanently
+      # red for things nobody is going to close, and a permanently red gate
+      # teaches people to bypass it.
+      #
+      # The second GATES on high severity. Splitting them this way keeps a pass
+      # from reading as nothing-found: the reporting step prints the
+      # sub-threshold findings into the log every run, so the count below the
+      # line is visible rather than merely ignored.
+      - name: Report (all severities, never fails)
+        run: zizmor --offline --persona=auditor .github/workflows/ || true
+      - name: Gate (high severity)
+        run: zizmor --offline --persona=auditor --min-severity=high .github/workflows/
 
   # The gates above are the assertions no `tofu test` can reach, and they are regex
   # over HCL — a matcher that stops matching keeps exiting 0, and the summary line
@@ -991,8 +1028,16 @@ jobs:
 
       - name: Skip notice (no cloud credentials configured)
         if: steps.creds.outputs.available != 'true'
+        # Matrix values reach the shell as environment variables rather than by
+        # expansion into the script text. The discover job already constrains
+        # them; this keeps the run block safe on its own terms rather than
+        # depending on a check in another job to stay correct.
+        env:
+          CLOUD: ${{ matrix.cloud }}
+          ENV: ${{ matrix.env }}
+          COMPONENT: ${{ matrix.component }}
         run: |
-          echo "::notice::Skipping plan for ${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }} — needs BOTH AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID in repo Variables."
+          echo "::notice::Skipping plan for ${CLOUD}/${ENV}/${COMPONENT} — needs BOTH AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID in repo Variables."
 
       - name: Plan
         if: steps.creds.outputs.available == 'true'

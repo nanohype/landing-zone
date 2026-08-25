@@ -21,6 +21,13 @@ then reports on a document the author never wrote. In this tree 23 files contain
 `/*` only inside a string, against 3 that contain a real block comment, so the
 naive reading is wrong far more often than it is right.
 
+HEREDOCS
+
+`#` inside a heredoc is data, not a comment — a policy document or an embedded
+script carries hashes that mean something. The scan tracks heredoc bodies and
+leaves them alone, so a gate reading a resource does not lose an attribute
+because the value above it embedded a shell comment.
+
 WHAT IT DOES NOT DO
 
 It does not give a view for reading comments. A gate whose vocabulary IS a
@@ -31,6 +38,22 @@ they annotate.
 """
 
 from __future__ import annotations
+
+import re
+
+_HEREDOC = re.compile(r"<<[-~]?(?P<tag>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\r?\n")
+
+
+def _terminator(text: str, start: int, tag: str) -> int:
+    """Offset just past the line that closes this heredoc, or end of text.
+
+    A heredoc with no terminator is malformed HCL that OpenTofu rejects outright;
+    consuming to the end keeps the scan from treating the remainder as code and
+    reporting on a document that does not parse anyway.
+    """
+    for m in re.finditer(rf"^[ \t]*{re.escape(tag)}[ \t]*$", text[start:], re.M):
+        return start + m.end()
+    return len(text)
 
 
 def blank_comments(text: str) -> str:
@@ -62,6 +85,16 @@ def blank_comments(text: str) -> str:
             out.append(c)
             i += 1
             continue
+        if text.startswith("<<", i):
+            # A heredoc body is data. Copy it through verbatim to its terminator
+            # so an embedded `#` — a shell comment in a user-data script, a
+            # comment inside a policy document — is not read as HCL comment.
+            m = _HEREDOC.match(text, i)
+            if m:
+                end = _terminator(text, m.end(), m.group("tag"))
+                out.append(text[i:end])
+                i = end
+                continue
         if c == "#" or text.startswith("//", i):
             while i < n and text[i] != "\n":
                 out.append(" ")
