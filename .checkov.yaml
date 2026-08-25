@@ -1,3 +1,14 @@
+# Test fixtures are excluded by PATH rather than by disabling a check or a
+# framework. `.tftest.hcl` files declare no deployable resources and hold mock
+# values by construction — a `mock_data` token exists to be a token-shaped
+# string — so the secrets scanner reads them as high-entropy findings that will
+# never be real. Scoping the path keeps secret detection on the configuration
+# that does deploy, which turning the framework off would lose; and checkov's
+# terraform parser cannot read the `tofu test` format at all, so these files
+# have never been scanned for anything else either.
+skip-path:
+  - "tests"
+
 # Checkov policy — CI runs this as a HARD gate (ci.yml security-scan job,
 # soft_fail off): any finding not skipped here fails the build.
 #

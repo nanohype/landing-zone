@@ -44,9 +44,26 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+
+from _repo import repo_is_visible
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# The SECOND of two floors, and they are deliberately separate because they are
+# different kinds of claim:
+#
+#   UNCONDITIONAL (repo_is_visible, in _repo.py) — the tracked set holds
+#     something other than the gates themselves. A law about ANY tree, and the
+#     half that catches a scripts-only checkout however the count falls.
+#   REPO-ONLY (below) — this repository has 28 tracked shell scripts, so a scan
+#     seeing fewer than ten saw almost nothing. True of THIS tree, not a law.
+#
+# Collapsing them into one number is what makes a floor reject a known-good
+# fixture: a small legitimate tree fails the repo-only count while satisfying
+# the unconditional rule, and the gate then reads as broken rather than as
+# out of scope.
+MIN_SCRIPTS = 10
 
 # tool -> the flag that bounds it on the call itself, if it has one.
 UNBOUNDED = {
@@ -109,10 +126,28 @@ def main() -> int:
         ["git", "-C", str(ROOT), "ls-files", "*.sh"],
         capture_output=True, text=True, check=True,
     ).stdout.split()
+    # Two preconditions, and they answer different questions. The first asks
+    # whether the PATTERN matched; the second asks whether the REPOSITORY is
+    # here. A tree holding nothing but the gate scripts satisfies the first
+    # using this gate's own file and fails the second, which is exactly the
+    # shape that reported a pass over an absent tree.
     if not scripts:
         print(
             "FAIL: no shell scripts found. The scan could not see the tree; "
             "refusing to report a pass.",
+            file=sys.stderr,
+        )
+        return 1
+    visible, why = repo_is_visible(ROOT)
+    if not visible:
+        print(f"FAIL: {why}", file=sys.stderr)
+        return 1
+    if len(scripts) < MIN_SCRIPTS:
+        print(
+            f"FAIL: found only {len(scripts)} shell script(s), below the "
+            f"{MIN_SCRIPTS} floor. The scan saw almost nothing, which is what a wrong "
+            f"working directory or a broken pathspec looks like from in here. "
+            f"Refusing to report a pass over a collapsed denominator.",
             file=sys.stderr,
         )
         return 1
