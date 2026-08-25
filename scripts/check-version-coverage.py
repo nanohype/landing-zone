@@ -80,6 +80,11 @@ PIN_PATTERNS = [
         re.compile(r"pip install\s+[a-zA-Z0-9._-]+==\d+\.\d+"),
     ),
     (
+        "eks addon version",
+        re.compile(r"^components/aws/cluster/variables\.tf$"),
+        re.compile(r"^\s*[a-z-]+\s*=\s*\"v\d+\.\d+\.\d+-eksbuild\.\d+\"", re.M),
+    ),
+    (
         "kubernetes control-plane version",
         re.compile(r"^components/aws/cluster/variables\.tf$"),
         re.compile(r"^\s*default\s*=\s*\"1\.\d+\"", re.M),
@@ -230,6 +235,35 @@ def main() -> int:
             + "\n\nThe assertion is the mechanism: a coverage claim that is merely "
             "described goes stale in silence. Either add a customManager for the pin "
             "or remove the file from ASSERTED_NO_VERSION.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # The one EKS-addon relationship that is checkable. kube-proxy is versioned in
+    # lockstep with the control plane — its addon build for a 1.36 cluster is
+    # v1.36.x-eksbuild.N — so a cluster_version bump that leaves the addon map
+    # behind pins a kube-proxy built for the previous minor. AWS accepts the
+    # combination within its skew window and then stops, which makes this the
+    # failure the map exists to prevent and the one worth asserting rather than
+    # describing.
+    cluster_vars = (ROOT / "components/aws/cluster/variables.tf").read_text()
+    k8s = re.search(r'default\s*=\s*"(1\.\d+)"\s*#\s*k8s-version', cluster_vars)
+    kube_proxy = re.search(r'kube-proxy\s*=\s*"v(\d+\.\d+)\.\d+-eksbuild\.\d+"', cluster_vars)
+    if not k8s or not kube_proxy:
+        print(
+            "FAIL: could not locate cluster_version or the kube-proxy addon pin in "
+            "components/aws/cluster/variables.tf. One of them moved, and this check "
+            "cannot silently stop asserting their relationship.",
+            file=sys.stderr,
+        )
+        return 1
+    if k8s.group(1) != kube_proxy.group(1):
+        print(
+            f"FAIL: kube-proxy addon is pinned to {kube_proxy.group(1)} while "
+            f"cluster_version is {k8s.group(1)}.\n"
+            f"    kube-proxy tracks the control-plane minor. Re-pin the addon map "
+            f"alongside cluster_version:\n"
+            f"      aws eks describe-addon-versions --kubernetes-version {k8s.group(1)}",
             file=sys.stderr,
         )
         return 1

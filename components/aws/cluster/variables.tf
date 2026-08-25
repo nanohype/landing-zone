@@ -75,19 +75,29 @@ variable "eks_addon_versions" {
     An addon omitted from this map falls back to most_recent for that addon only.
   EOT
   type        = map(string)
+  # EKS addon builds have no Renovate datasource. The authoritative source is
+  # `aws eks describe-addon-versions --kubernetes-version <ver>` — an AWS API
+  # rather than a registry — and the -eksbuild.N suffix corresponds to no upstream
+  # release. Each pin below therefore carries its own waiver rather than one
+  # waiver covering the block: a block-level waiver would silently adopt every
+  # addon added after it, which is the shape that lets an unwatched pin in.
+  #
+  # The one relationship that CAN be checked is asserted instead of described:
+  # scripts/check-version-coverage.py requires kube-proxy's minor to equal
+  # cluster_version, since those going out of step is what this map prevents.
   default = {
-    vpc-cni                = "v1.22.3-eksbuild.1"
-    coredns                = "v1.14.3-eksbuild.3"
-    kube-proxy             = "v1.36.0-eksbuild.13"
-    aws-ebs-csi-driver     = "v1.63.1-eksbuild.1"
-    eks-pod-identity-agent = "v1.3.10-eksbuild.3"
+    vpc-cni                = "v1.22.3-eksbuild.1" # renovate-ok: no Renovate datasource for EKS addon builds
+    coredns                = "v1.14.3-eksbuild.3" # renovate-ok: no Renovate datasource for EKS addon builds
+    kube-proxy             = "v1.36.0-eksbuild.13" # renovate-ok: no Renovate datasource for EKS addon builds
+    aws-ebs-csi-driver     = "v1.63.1-eksbuild.1" # renovate-ok: no Renovate datasource for EKS addon builds
+    eks-pod-identity-agent = "v1.3.10-eksbuild.3" # renovate-ok: no Renovate datasource for EKS addon builds
     # The pin also selects the Container Insights PIPELINE, not just a build.
     # From v6.2.0 the addon can run either the Classic (CloudWatch-format, EMF)
     # or the OTel (Prometheus-native names) pipeline, and they publish different
     # metric names. The observability component's alarms read CloudWatch-format
     # names, so this cluster runs Classic — which is what the addon's defaults
     # select at this version. Re-check that when bumping.
-    amazon-cloudwatch-observability = "v6.4.0-eksbuild.1"
+    amazon-cloudwatch-observability = "v6.4.0-eksbuild.1" # renovate-ok: no Renovate datasource for EKS addon builds
   }
 }
 
