@@ -508,7 +508,13 @@ resource "aws_cloudwatch_dashboard" "eks" {
       # ── SLO ──────────────────────────────────────────────────────────────────
       # Present only when the SLO is declared: a budget gauge with no objective
       # behind it is a number with no meaning.
-      local.slo_enabled ? [
+      #
+      # `slice(..., 0, n)` rather than a ternary. The three widgets below are
+      # objects with different attribute sets — one carries `annotations`, one
+      # `yAxis` — so the list is a TUPLE, and OpenTofu cannot unify a tuple type
+      # with the empty tuple a ternary's other branch produces. Slicing to zero
+      # yields the same empty result without asking for that unification.
+      slice([
         {
           type   = "metric"
           x      = 0
@@ -585,7 +591,7 @@ resource "aws_cloudwatch_dashboard" "eks" {
             }
           }
         },
-      ] : [],
+      ], 0, local.slo_enabled ? 3 : 0),
 
       # ── Errors and traffic ───────────────────────────────────────────────────
       [

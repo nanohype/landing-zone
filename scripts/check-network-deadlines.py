@@ -71,6 +71,17 @@ LOCAL_ONLY = re.compile(
 
 
 def blank_comment_bodies(text: str) -> str:
+    """Blank comment interiors in SHELL, preserving length and line breaks.
+
+    Deliberately diverged from its three siblings in scripts/ — the HCL strippers
+    in check-version-coverage, check-backup-coverage and check-tenant-schema-readers
+    also treat `//` as a comment opener. This one must not: shell has no `//`
+    comment, and `//` appears in live code (a `sed 's//x/'`, a doubled path
+    separator), so matching the others here would blank real code.
+
+    Said out loud because four near-copies of one helper invite a well-meant
+    consistency edit that is a bug in exactly one of them.
+    """
     out, quote, i = [], None, 0
     while i < len(text):
         c = text[i]

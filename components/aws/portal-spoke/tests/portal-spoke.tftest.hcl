@@ -83,10 +83,33 @@ run "role_grants_only_reads" {
   assert {
     condition = alltrue(flatten([
       for s in jsondecode(aws_iam_role_policy.spoke.policy).Statement : [
-        for a in(can(tolist(s.Action)) ? tolist(s.Action) : [s.Action]) :
+        for a in flatten([s.Action]) :
         can(regex(":(Describe|List|Get)", a))
       ]
     ]))
     error_message = "every action in the portal-spoke role policy must be a Describe/List/Get. This is a cross-account credential in an account the portal does not own; one mutating verb makes it a write credential and nothing in a diff would look alarming"
   }
 }
+
+
+# NOT ASSERTED HERE, and stated rather than silently absent: that the boundary is
+# ATTACHED to the role, and that the published SSM parameter names this role.
+#
+# Both are reference-to-reference equalities against values that are UNKNOWN at
+# plan under this file's real provider — `aws_iam_policy.spoke_boundary.arn` and
+# `aws_iam_role.spoke.arn` are computed — and OpenTofu refuses an unknown
+# comparison rather than guessing it. Two ways out were tried and neither is
+# sound:
+#
+#   * A mock provider makes those ARNs known, but it also replaces
+#     data.aws_iam_policy_document with a placeholder, which is what the trust
+#     assertions above read.
+#   * Splitting the two concerns across two files does not help: a file-level
+#     mock_provider or override_data applies to the WHOLE `tofu test` run rather
+#     than to its own file, so the mock reached this file too and the trust
+#     rendered empty — this suite passed alone and failed beside its sibling,
+#     which is the worst of the three outcomes.
+#
+# So the attachment is covered by `tofu plan` in CI rather than here. A `command =
+# apply` run against a mock would make the values known and is the way to assert
+# it, at the cost of this suite no longer being plan-only.

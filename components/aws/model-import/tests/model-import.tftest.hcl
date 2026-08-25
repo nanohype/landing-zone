@@ -74,7 +74,7 @@ run "grant_is_read_only_and_account_scoped" {
   assert {
     condition = alltrue(flatten([
       for s in jsondecode(aws_iam_role_policy.import_read_staging.policy).Statement : [
-        for a in(can(tolist(s.Action)) ? tolist(s.Action) : [s.Action]) :
+        for a in flatten([s.Action]) :
         can(regex(":(Get|List)", a))
       ]
     ]))

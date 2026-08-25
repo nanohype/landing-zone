@@ -17,7 +17,22 @@
 # default rather than only rejects, because a reconstruction needs the accepted
 # connections as much as the refused ones.
 
-mock_provider "aws" {}
+# The provider validates iam_role_arn and log_destination as real ARNs at plan
+# time, and a bare mock_provider generates a random string for each computed
+# .arn — so the ARNs the flow log consumes are pinned here. The values are
+# irrelevant to every assertion below; what matters is that they parse.
+mock_provider "aws" {
+  mock_resource "aws_iam_role" {
+    defaults = {
+      arn = "arn:aws:iam::123456789012:role/development-vpc-flow-logs"
+    }
+  }
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:us-east-1:123456789012:log-group:/aws/vpc/development-flow-logs"
+    }
+  }
+}
 
 variables {
   vpc_id         = "vpc-0mock"
@@ -50,7 +65,7 @@ run "delivery_grant_is_log_writes_only" {
   assert {
     condition = alltrue(flatten([
       for s in jsondecode(aws_iam_role_policy.this.policy).Statement : [
-        for a in(can(tolist(s.Action)) ? tolist(s.Action) : [s.Action]) :
+        for a in flatten([s.Action]) :
         startswith(a, "logs:")
       ]
     ]))

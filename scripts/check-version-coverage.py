@@ -191,7 +191,38 @@ def custom_managers() -> list[tuple[re.Pattern, list[re.Pattern], str]]:
     deleted from renovate.json makes this gate fail, instead of this gate
     continuing to assert coverage that no longer exists.
     """
-    cfg = json.loads((ROOT / "renovate.json").read_text())
+    # A config this gate READS is a dependency it has never tested. A malformed
+    # customManager is discarded by Renovate silently, so the pin it names watches
+    # nothing while this gate counts it as covered — the failure is invisible from
+    # both ends.
+    #
+    # PARTIAL coverage, stated rather than implied: this is a shape check, not a
+    # semantic one. It cannot tell that a datasourceTemplate names a datasource
+    # Renovate does not have, only that the fields a manager needs are present and
+    # its regexes compile.
+    raw = (ROOT / "renovate.json").read_text()
+    try:
+        cfg = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"FAIL: renovate.json is not valid JSON ({exc}). Renovate would discard "
+            f"it entirely, so every pin in this repo would be unwatched while this "
+            f"gate reported them covered."
+        )
+
+    REQUIRED = ("customType", "matchStrings", "datasourceTemplate")
+    for i, m in enumerate(cfg.get("customManagers", [])):
+        missing = [k for k in REQUIRED if k not in m]
+        if not m.get("managerFilePatterns") and not m.get("fileMatch"):
+            missing.append("managerFilePatterns")
+        if missing:
+            raise SystemExit(
+                f"FAIL: renovate.json customManagers[{i}] "
+                f"({m.get('description', '<no description>')[:60]}) is missing "
+                f"{', '.join(missing)}. Renovate discards an incomplete manager "
+                f"without erroring, so the pins it claims to watch are unwatched."
+            )
+
     out = []
     for m in cfg.get("customManagers", []):
         files = []

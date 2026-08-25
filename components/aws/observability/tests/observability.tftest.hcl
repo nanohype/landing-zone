@@ -529,7 +529,7 @@ run "slo_burn_rate_pairs_match_the_standard" {
     condition = alltrue([
       for a in values(aws_cloudwatch_metric_alarm.slo_burn_window) : anytrue([
         for q in a.metric_query : try(q.metric[0].metric_name, "") == "apiserver_request_total_5xx"
-      ]) && anytrue([
+        ]) && anytrue([
         for q in a.metric_query : try(q.metric[0].metric_name, "") == "apiserver_request_total"
       ])
     ])

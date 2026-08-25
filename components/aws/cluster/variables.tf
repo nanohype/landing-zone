@@ -51,7 +51,7 @@ variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
   # renovate: datasource=github-releases depName=kubernetes/kubernetes
-  default     = "1.36" # k8s-version
+  default = "1.36" # k8s-version
 
   # EKS takes the control-plane version as major.minor only ("1.36", not "1.36.2"
   # or "v1.36"). Reject the common malformed shapes at plan time rather than
@@ -86,11 +86,11 @@ variable "eks_addon_versions" {
   # scripts/check-version-coverage.py requires kube-proxy's minor to equal
   # cluster_version, since those going out of step is what this map prevents.
   default = {
-    vpc-cni                = "v1.22.3-eksbuild.1" # renovate-ok: no Renovate datasource for EKS addon builds
-    coredns                = "v1.14.3-eksbuild.3" # renovate-ok: no Renovate datasource for EKS addon builds
+    vpc-cni                = "v1.22.3-eksbuild.1"  # renovate-ok: no Renovate datasource for EKS addon builds
+    coredns                = "v1.14.3-eksbuild.3"  # renovate-ok: no Renovate datasource for EKS addon builds
     kube-proxy             = "v1.36.0-eksbuild.13" # renovate-ok: no Renovate datasource for EKS addon builds
-    aws-ebs-csi-driver     = "v1.63.1-eksbuild.1" # renovate-ok: no Renovate datasource for EKS addon builds
-    eks-pod-identity-agent = "v1.3.10-eksbuild.3" # renovate-ok: no Renovate datasource for EKS addon builds
+    aws-ebs-csi-driver     = "v1.63.1-eksbuild.1"  # renovate-ok: no Renovate datasource for EKS addon builds
+    eks-pod-identity-agent = "v1.3.10-eksbuild.3"  # renovate-ok: no Renovate datasource for EKS addon builds
     # The pin also selects the Container Insights PIPELINE, not just a build.
     # From v6.2.0 the addon can run either the Classic (CloudWatch-format, EMF)
     # or the OTel (Prometheus-native names) pipeline, and they publish different

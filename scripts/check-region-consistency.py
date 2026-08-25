@@ -135,7 +135,11 @@ def scan(rel: str, allowed: set[str], allowed_az: set[str]) -> list[tuple[int, s
     try:
         text = path.read_text()
     except (UnicodeDecodeError, OSError):
-        return []  # binary or unreadable; carries no prose
+        # Binary or unreadable; carries no prose. Returns the same 2-tuple shape as
+        # every other exit from this function — a bare [] here unpacks as zero
+        # values at the call site and crashes, which is how this shipped: the path
+        # only fires on an unreadable file, so no run had reached it.
+        return [], set()
 
     lines = text.splitlines()
 

@@ -68,6 +68,7 @@ no control, or the scan could not see the tree.
 from __future__ import annotations
 
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -578,8 +579,17 @@ def main() -> int:
 
             # The gate must be clean BEFORE the mutation, or a non-zero exit
             # afterwards proves nothing about the matcher.
-            if run_gate(tree, gate)[0] != 0:
-                broken.append((gate, "does not pass on the unmutated tree"))
+            clean_code, clean_output = run_gate(tree, gate)
+            if clean_code != 0:
+                why = (
+                    "crashes on the unmutated tree"
+                    if "Traceback (most recent call last)" in clean_output
+                    else "does not pass on the unmutated tree"
+                )
+                broken.append((
+                    gate,
+                    f"{why}: {clean_output.strip().splitlines()[-1][:120] if clean_output.strip() else '<no output>'}",
+                ))
                 continue
 
             # A marker that is ALREADY present cannot prove the control planted
@@ -664,6 +674,23 @@ def main() -> int:
                 blind.append((gate, m.what))
                 continue
 
+            # A non-zero exit is not by itself a rejection: a gate that CRASHES
+            # exits non-zero too, and the floor would read the traceback as
+            # "detected the violation". That is the exit-code-conflates-causes
+            # defect arriving inside the thing that checks for it. A rejection is
+            # exit 1 with a diagnosis; anything else, or a Python traceback in the
+            # output, means the gate did not answer the question.
+            if code != 1 or "Traceback (most recent call last)" in output:
+                misreported.append(
+                    (
+                        gate,
+                        f"exited {code} on the mutated tree without answering — a "
+                        f"crash, not a rejection. Tail: "
+                        f"{output.strip().splitlines()[-1][:120] if output.strip() else '<no output>'}",
+                    )
+                )
+                continue
+
             # Property, not mechanism: a gate that rejects but cites the wrong
             # line sends a reader to the wrong place, and no exit code shows it.
             # This is the check that survives a refactor — it asserts what a
@@ -674,6 +701,52 @@ def main() -> int:
             # Only asked of gates that cite lines at all: some report a whole
             # file, or a missing artifact, and demanding a line of them would be
             # asserting a shape they never claimed.
+            # The rejection must NAME what was planted. Exit status alone is not
+            # enough: a gate can reject the mutated fixture for a reason that has
+            # nothing to do with the mutation — a pre-existing condition, an
+            # unrelated file — and the floor would score that as proof it caught
+            # the thing planted. Requiring the touched path in the output closes
+            # the gap between "it failed" and "it found this".
+            touched_files = {
+                m.group(1)
+                for m in re.finditer(
+                    r"^\+\+\+ b/(\S+)",
+                    subprocess.run(
+                        ["git", "-C", str(tree), "diff", "--cached", "HEAD"],
+                        capture_output=True, text=True, check=True,
+                    ).stdout,
+                    re.M,
+                )
+            }
+            # Matched at the granularity gates actually report. A gate names the
+            # thing it reasons about — a component, a live leaf, a module — which
+            # is often the touched file's DIRECTORY rather than its full path:
+            # "components/aws/ holds components no table names: undocumented-thing"
+            # is a correct rejection naming the mutation. Requiring the exact path
+            # would have failed four gates that were all reporting properly, which
+            # is the rule being too strict rather than the gates being wrong.
+            named = set()
+            for f in touched_files:
+                parts = pathlib.PurePosixPath(f).parts
+                named.add(f)
+                for i in range(1, len(parts)):
+                    named.add("/".join(parts[:i]))
+                    named.add(parts[i - 1])
+                named.add(parts[-1])
+            if touched_files and not any(
+                n in output for n in named if len(n) > 3
+            ):
+                misreported.append(
+                    (
+                        gate,
+                        f"rejected, but its output never names any file the "
+                        f"mutation touched ({sorted(touched_files)[:3]}) — so it "
+                        f"failed for some other reason, and this control proves "
+                        f"nothing about the violation it planted.",
+                    )
+                )
+                continue
+
             if CITES_LINES.search(output):
                 cited = {int(x) for x in re.findall(r"(?:line=|:)(\d+)", output)}
                 planted = touched_lines(tree)
@@ -700,7 +773,7 @@ def main() -> int:
         return 1
 
     if misreported:
-        print("Gate(s) that rejected but cited the wrong line:\n", file=sys.stderr)
+        print("Gate(s) that did not answer, or cited the wrong line:\n", file=sys.stderr)
         for gate, why in misreported:
             print(f"  {gate}: {why}", file=sys.stderr)
         print(

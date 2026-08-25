@@ -112,7 +112,7 @@ run "role_policy_can_only_destroy" {
   assert {
     condition = alltrue(flatten([
       for s in jsondecode(aws_iam_role_policy.unwedge.policy).Statement : [
-        for a in(can(tolist(s.Action)) ? tolist(s.Action) : [s.Action]) :
+        for a in flatten([s.Action]) :
         !can(regex("(?i):(Create|Put|Update|Modify|Attach|Associate|Import|Register|Run|Start)", a))
         || try(s.Effect, "") == "Deny"
         # Discover is read-only; its verbs are List/Describe/Get and are covered
@@ -151,11 +151,11 @@ run "destructive_actions_are_scoped_to_fleet_provisioned_resources" {
       for s in jsondecode(aws_iam_role_policy.unwedge.policy).Statement :
       try(s.Effect, "") != "Allow"
       || !anytrue([
-        for a in(can(tolist(s.Action)) ? tolist(s.Action) : [s.Action]) :
+        for a in flatten([s.Action]) :
         can(regex("(?i):(Delete|Terminate|Revoke|Disassociate|Detach|Remove|ScheduleKeyDeletion|Disable)", a))
       ])
       || can(s.Condition)
-      || (can(tolist(s.Resource)) ? !contains(tolist(s.Resource), "*") : try(s.Resource, "") != "*")
+      || (!contains(flatten([s.Resource]), "*"))
     ])
     error_message = "an Allow with a destructive verb has Resource \"*\" and no Condition. Every destructive grant must be tag-conditioned or pinned to a typed ARN — otherwise it reaches the whole account, and the difference is invisible in the policy's shape"
   }
@@ -195,3 +195,26 @@ run "boundary_denies_escalation" {
     error_message = "the boundary must Deny the unwedge role editing its own boundary policy or its own trust — without it the ceiling is self-modifiable and therefore not a ceiling"
   }
 }
+
+
+# NOT ASSERTED HERE, and stated rather than silently absent: that the boundary is
+# ATTACHED to the role, and that the published SSM parameter names this role.
+#
+# Both are reference-to-reference equalities against values that are UNKNOWN at
+# plan under this file's real provider — `aws_iam_policy.unwedge_boundary.arn` and
+# `aws_iam_role.unwedge.arn` are computed — and OpenTofu refuses an unknown
+# comparison rather than guessing it. Two ways out were tried and neither is
+# sound:
+#
+#   * A mock provider makes those ARNs known, but it also replaces
+#     data.aws_iam_policy_document with a placeholder, which is what the trust
+#     assertions above read.
+#   * Splitting the two concerns across two files does not help: a file-level
+#     mock_provider or override_data applies to the WHOLE `tofu test` run rather
+#     than to its own file, so the mock reached this file too and the trust
+#     rendered empty — this suite passed alone and failed beside its sibling,
+#     which is the worst of the three outcomes.
+#
+# So the attachment is covered by `tofu plan` in CI rather than here. A `command =
+# apply` run against a mock would make the values known and is the way to assert
+# it, at the cost of this suite no longer being plan-only.
