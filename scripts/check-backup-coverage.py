@@ -48,6 +48,8 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+
+from _hcl import blank_comments as blank_comment_bodies
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,35 +102,6 @@ EXEMPT: dict[str, str] = {
         "Workflow run artifacts, reproducible by re-running the workflow.",
 }
 
-
-def blank_comment_bodies(text: str) -> str:
-    """Blank comment interiors, preserving length and line breaks.
-
-    Tag wiring is code. A comment that explains why a bucket is not backed up
-    must not be able to read as the wiring that backs it up — which is exactly
-    the shape this gate would otherwise agree with.
-    """
-    out, quote, i = [], None, 0
-    while i < len(text):
-        c = text[i]
-        if quote:
-            if c == "\\" and i + 1 < len(text):
-                out.append(text[i : i + 2]); i += 2; continue
-            if c == quote:
-                quote = None
-            out.append(c)
-        elif c in "\"'":
-            quote = c
-            out.append(c)
-        elif c == "#" or text[i : i + 2] == "//":
-            while i < len(text) and text[i] != "\n":
-                out.append(" ")
-                i += 1
-            continue
-        else:
-            out.append(c)
-        i += 1
-    return "".join(out)
 
 
 def tracked_tf() -> list[str]:

@@ -25,47 +25,14 @@ in ALLOW below with the reason.
 import re
 import subprocess
 import sys
+
+from _hcl import blank_comments as strip_comments
 from pathlib import Path
 
 # Attributes that legitimately have no resource reader, and why.
 ALLOW = {}
 
 
-
-def strip_comments(text):
-    """Blank comment interiors, preserving every line and every line's length.
-
-    Prose is not a reader. A field explained in a comment — including one saying
-    it is NOT implemented — would otherwise satisfy this gate, which is the exact
-    defect it exists to catch, agreed with rather than reported.
-
-    Bodies are blanked rather than deleted so offsets and line numbers survive.
-    An earlier version consumed the comment and emitted its own newline without
-    consuming the original, which added a line per comment and shifted everything
-    below it — harmless while this gate cites files rather than lines, and a trap
-    the moment that changes.
-    """
-    out, quote, i = [], None, 0
-    while i < len(text):
-        c = text[i]
-        if quote:
-            if c == "\\" and i + 1 < len(text):
-                out.append(text[i : i + 2]); i += 2; continue
-            if c == quote:
-                quote = None
-            out.append(c)
-        elif c in "\"'":
-            quote = c
-            out.append(c)
-        elif c == "#" or text[i : i + 2] == "//":
-            while i < len(text) and text[i] != "\n":
-                out.append(" ")
-                i += 1
-            continue
-        else:
-            out.append(c)
-        i += 1
-    return "".join(out)
 
 
 def tracked(repo, *globs):

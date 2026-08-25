@@ -46,53 +46,14 @@ import json
 import re
 import subprocess
 import sys
+
+from _hcl import blank_comments as blank_comment_bodies
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 WAIVER = re.compile(r"#\s*renovate-ok:\s*\S")
 
-
-def blank_comment_bodies(text: str) -> str:
-    """Replace the inside of every comment with spaces, keeping length and lines.
-
-    Two views of the same file, because two different questions are being asked
-    of it and one view cannot answer both:
-
-      raw       — for the waiver and for the manager match. A `renovate-ok:`
-                  waiver IS a comment, so a stripped view cannot see it. And
-                  Renovate matches raw file content, so a manager check that read
-                  anything else would be answering a different question than the
-                  tool it is modelling.
-
-      blanked   — for pin DETECTION. A version quoted inside a comment is prose
-                  about a pin, not a pin, and reporting it sends someone to add a
-                  customManager for a line that installs nothing.
-
-    Bodies are blanked rather than deleted so offsets and line numbers survive
-    and the file:line in a finding still points where it says it does.
-    """
-    out, quote, i = [], None, 0
-    while i < len(text):
-        c = text[i]
-        if quote:
-            if c == "\\" and i + 1 < len(text):
-                out.append(text[i : i + 2]); i += 2; continue
-            if c == quote:
-                quote = None
-            out.append(c)
-        elif c in "\"'":
-            quote = c
-            out.append(c)
-        elif c == "#" or text[i : i + 2] == "//":
-            while i < len(text) and text[i] != "\n":
-                out.append(" ")
-                i += 1
-            continue
-        else:
-            out.append(c)
-        i += 1
-    return "".join(out)
 
 # Attribute names that carry a version an upstream can retire. Curated rather
 # than inferred: a bare "version-shaped string" matcher reports every CIDR,
