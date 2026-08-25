@@ -11,19 +11,19 @@ mock_provider "aws" {
   # ARN-shaped values (the mock's default random value is not).
   mock_resource "aws_ec2_transit_gateway" {
     defaults = {
-      arn = "arn:aws:ec2:us-west-2:111111111111:transit-gateway/tgw-mock"
+      arn = "arn:aws:ec2:us-east-1:111111111111:transit-gateway/tgw-mock"
     }
   }
   mock_resource "aws_ram_resource_share" {
     defaults = {
-      arn = "arn:aws:ram:us-west-2:111111111111:resource-share/mock"
+      arn = "arn:aws:ram:us-east-1:111111111111:resource-share/mock"
     }
   }
 }
 
 variables {
   environment = "org"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
 }
 

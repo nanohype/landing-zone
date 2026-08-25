@@ -511,6 +511,24 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-engine-version-pins.py
 
+  # The region a reader believes this repo targets comes from prose and examples —
+  # a `task plan REGION=...` in a README, a path in a skill, an ARN in a runbook —
+  # not from the tree. Retargeting the live tree is a mechanical rename CI notices
+  # at once; retargeting the prose is a hand edit across dozens of files that
+  # nothing checked, so the prose is what survived a region move and every copied
+  # command landed on a directory that did not exist. The gate reads the deployed
+  # regions out of live/aws/ rather than naming one, so it keeps holding through
+  # the next move.
+  region-consistency:
+    name: Prose Names Only Deployed Regions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-region-consistency.py
+
   # A Deny whose Condition can never be satisfied is not a guardrail. IAM ANDs every
   # key inside one Condition block, so a Deny with several required-absent Null keys
   # fires only when ALL of them are missing — a resource carrying one and missing
@@ -707,6 +725,7 @@ jobs:
         architecture-components,
         smoke-outputs,
         documented-oidc-trust,
+        region-consistency,
         scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,

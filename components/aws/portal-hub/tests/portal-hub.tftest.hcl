@@ -30,7 +30,7 @@ mock_provider "aws" {
   }
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/portal-state"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/portal-state"
     }
   }
   mock_resource "aws_iam_role" {
@@ -48,8 +48,8 @@ mock_provider "aws" {
 variables {
   environment       = "development"
   team              = "platform"
-  oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/TEST"
-  oidc_issuer       = "https://oidc.eks.us-west-2.amazonaws.com/id/TEST"
+  oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/TEST"
+  oidc_issuer       = "https://oidc.eks.us-east-1.amazonaws.com/id/TEST"
   state_bucket_name = "test-portal-state"
 }
 
@@ -61,7 +61,7 @@ run "state_bucket_is_sse_kms" {
       for r in aws_s3_bucket_server_side_encryption_configuration.portal_state.rule : anytrue([
         for d in r.apply_server_side_encryption_by_default :
         d.sse_algorithm == "aws:kms"
-        && d.kms_master_key_id == "arn:aws:kms:us-west-2:123456789012:key/portal-state"
+        && d.kms_master_key_id == "arn:aws:kms:us-east-1:123456789012:key/portal-state"
       ])
     ])
     error_message = "portal state bucket must use aws:kms SSE referencing the dedicated CMK ARN, not AES256"

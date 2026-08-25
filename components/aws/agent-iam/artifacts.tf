@@ -21,7 +21,7 @@
 # S3's namespace is GLOBAL: two accounts — or one account in two regions —
 # standing up a cluster of the same name must not collide. model-artifacts is
 # the tightest cluster-scoped name in the org and sets the clusterName length
-# cap (12 chars of base in us-west-2, fewer in a longer region); the
+# cap (12 chars of base in us-east-1, fewer in a longer region); the
 # preconditions below assert every derived name against S3's 63-char limit.
 #
 # Teardown posture: force_destroy unconditionally in development, and elsewhere only

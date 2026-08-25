@@ -10,8 +10,8 @@ locals {
 
   azs = slice(data.aws_availability_zones.available.names, 0, var.max_azs)
 
-  # AZ IDs parallel to local.azs. Names (us-west-2a) map to different physical zones per
-  # account; IDs (usw2-az1) are the only cross-account-stable zone identifier, which is
+  # AZ IDs parallel to local.azs. Names (us-east-1a) map to different physical zones per
+  # account; IDs (use1-az1) are the only cross-account-stable zone identifier, which is
   # what a cross-account subnet consumer must pin on. aws_availability_zones returns names
   # and zone_ids in the same order, so the same slice lines them up.
   az_ids = slice(data.aws_availability_zones.available.zone_ids, 0, var.max_azs)

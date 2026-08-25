@@ -15,8 +15,8 @@
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = {
-      names    = ["us-west-2a", "us-west-2b", "us-west-2c", "us-west-2d"]
-      zone_ids = ["usw2-az1", "usw2-az2", "usw2-az3", "usw2-az4"]
+      names    = ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d"]
+      zone_ids = ["use1-az1", "use1-az2", "use1-az3", "use1-az4"]
     }
   }
   # aws_flow_log ARN-validates iam_role_arn + log_destination at plan, and the
@@ -29,14 +29,14 @@ mock_provider "aws" {
   }
   mock_resource "aws_cloudwatch_log_group" {
     defaults = {
-      arn = "arn:aws:logs:us-west-2:123456789012:log-group:flow-logs-mock"
+      arn = "arn:aws:logs:us-east-1:123456789012:log-group:flow-logs-mock"
     }
   }
 }
 
 variables {
   environment        = "hub"
-  region             = "us-west-2"
+  region             = "us-east-1"
   team               = "platform"
   transit_gateway_id = "tgw-0abc123def4567890"
 }

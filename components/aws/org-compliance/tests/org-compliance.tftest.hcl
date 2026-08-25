@@ -11,6 +11,8 @@
 #     trail leaves every other region (and global services like IAM/STS)
 #     completely unlogged. This is the classic "attacker operates in us-east-2
 #     while you only watch us-east-1" blind spot.
+#     region-ok: us-east-2 is the unwatched region in the example, and naming a
+#     second region is the whole point of the sentence.
 #   * enable_log_file_validation: without it the CloudTrail digest chain is
 #     gone, so log tampering/deletion is undetectable — the logs stop being
 #     evidence.
@@ -60,10 +62,10 @@ mock_provider "aws" {
 
   mock_data "aws_region" {
     defaults = {
-      name        = "us-west-2"
-      region      = "us-west-2"
+      name        = "us-east-1"
+      region      = "us-east-1"
       description = "US West (Oregon)"
-      endpoint    = "ec2.us-west-2.amazonaws.com"
+      endpoint    = "ec2.us-east-1.amazonaws.com"
     }
   }
 
@@ -94,14 +96,14 @@ mock_provider "aws" {
   # for real (they are what we assert on).
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/mock-compliance-key"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/mock-compliance-key"
     }
   }
 }
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
 
   # Drop the CloudWatch Logs delivery path: it creates a log group + role whose

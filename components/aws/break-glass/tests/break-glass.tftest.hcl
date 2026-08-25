@@ -49,7 +49,7 @@ mock_provider "aws" {
   # security assertions — boundary attachment is proven by equality, not by value).
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:us-west-2:123456789012:development-break-glass-alert"
+      arn = "arn:aws:sns:us-east-1:123456789012:development-break-glass-alert"
     }
   }
   mock_resource "aws_iam_policy" {
@@ -59,21 +59,21 @@ mock_provider "aws" {
   }
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/break-glass"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/break-glass"
     }
   }
-  # The EventBridge topic policy scopes aws:SourceArn to this rule's ARN; pin it so
-  # the jsonencode'd policy is fully known at plan and the SourceArn assertion is real.
+  # The delivery-failure alarm keys its RuleName dimension on this rule and the
+  # provider validates the ARN shape at plan time, so pin a real one.
   mock_resource "aws_cloudwatch_event_rule" {
     defaults = {
-      arn = "arn:aws:events:us-west-2:123456789012:rule/development-break-glass-detection"
+      arn = "arn:aws:events:us-east-1:123456789012:rule/development-break-glass-detection"
     }
   }
 }
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
   # A different account from the mocked self (123456789012), which is the point:
   # break-glass exists to survive THIS account's IAM being broken, so a principal
@@ -161,7 +161,7 @@ run "alert_topic_encrypted_with_publisher_grant" {
   command = plan
 
   assert {
-    condition     = aws_sns_topic.break_glass.kms_master_key_id == "arn:aws:kms:us-west-2:123456789012:key/break-glass"
+    condition     = aws_sns_topic.break_glass.kms_master_key_id == "arn:aws:kms:us-east-1:123456789012:key/break-glass"
     error_message = "break-glass alert topic must set kms_master_key_id to the CMK ARN (SSE-KMS)"
   }
 

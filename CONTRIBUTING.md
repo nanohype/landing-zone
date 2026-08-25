@@ -10,7 +10,7 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 
 1. **Branch** -- create a feature branch from `main`
 2. **Validate locally** -- `task fmt:check && task validate && task lint`
-3. **Plan against development** -- `task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=<name>`
+3. **Plan against development** -- `task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=<name>`
 4. **Open a PR** -- CI runs fmt, validate (per-component matrix), tflint, checkov, and the plan matrix
 5. **Review** -- get approval, verify plan output in CI
 6. **Merge** -- deploy via `deploy.yml` workflow dispatch
@@ -93,7 +93,7 @@ Existing multi-tenant components to reference: `druid`, `pipeline`, `governance`
 Edit the environment's `terragrunt.hcl` for the component and add an entry to the `tenants` map:
 
 ```hcl
-# live/aws/workload-staging/us-west-2/staging/druid/terragrunt.hcl
+# live/aws/workload-staging/us-east-1/staging/druid/terragrunt.hcl
 inputs = {
   tenants = {
     existing-tenant = { ... }

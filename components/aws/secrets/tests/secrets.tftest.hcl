@@ -22,7 +22,7 @@ mock_provider "aws" {
 
 variables {
   environment  = "development"
-  region       = "us-west-2"
+  region       = "us-east-1"
   cluster_name = "development-platform"
   team         = "platform"
 }
@@ -148,24 +148,24 @@ run "the_logs_output_follows_the_flag" {
   override_resource {
     target = aws_kms_key.secrets
     values = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/SENTINEL-SECRETS"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/SENTINEL-SECRETS"
     }
   }
 
   override_resource {
     target = aws_kms_key.logs
     values = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/SENTINEL-LOGS"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/SENTINEL-LOGS"
     }
   }
 
   assert {
-    condition     = output.logs_kms_key_arn == "arn:aws:kms:us-west-2:123456789012:key/SENTINEL-LOGS"
+    condition     = output.logs_kms_key_arn == "arn:aws:kms:us-east-1:123456789012:key/SENTINEL-LOGS"
     error_message = "logs_kms_key_arn must resolve to the LOGS key when separated — publishing the secrets key here silently encrypts every log group under the data key, which is the exact posture the separation was set to end"
   }
 
   assert {
-    condition     = output.kms_key_arn == "arn:aws:kms:us-west-2:123456789012:key/SENTINEL-SECRETS"
+    condition     = output.kms_key_arn == "arn:aws:kms:us-east-1:123456789012:key/SENTINEL-SECRETS"
     error_message = "kms_key_arn must stay the SECRETS key when separated — repointing it at the logs key would re-encrypt platform data under the key the log readers hold"
   }
 }
@@ -177,12 +177,12 @@ run "the_logs_output_is_the_secrets_key_when_shared" {
   override_resource {
     target = aws_kms_key.secrets
     values = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/SENTINEL-SECRETS"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/SENTINEL-SECRETS"
     }
   }
 
   assert {
-    condition     = output.logs_kms_key_arn == "arn:aws:kms:us-west-2:123456789012:key/SENTINEL-SECRETS"
+    condition     = output.logs_kms_key_arn == "arn:aws:kms:us-east-1:123456789012:key/SENTINEL-SECRETS"
     error_message = "logs_kms_key_arn must fall back to the secrets key when sharing — a null or absent handle forces every consumer to branch on the mode, which is how one of them ends up branching wrong"
   }
 }

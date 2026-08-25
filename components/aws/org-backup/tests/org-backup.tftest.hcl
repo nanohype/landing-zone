@@ -24,7 +24,7 @@ mock_provider "aws" {
 
 variables {
   environment = "org"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "sre"
   target_ids  = ["r-mock"]
   backup_policy = {

@@ -75,12 +75,12 @@ output "public_subnet_azs" {
 }
 
 output "private_subnet_az_ids" {
-  description = "AWS AZ IDs (e.g. usw2-az1) of the private subnets, in the same order as private_subnet_ids. AZ IDs are cross-account-stable — AZ names map to different physical zones per account — so cross-account consumers must key on these, not private_subnet_azs."
+  description = "AWS AZ IDs (e.g. use1-az1) of the private subnets, in the same order as private_subnet_ids. AZ IDs are cross-account-stable — AZ names map to different physical zones per account — so cross-account consumers must key on these, not private_subnet_azs."
   value       = local.resolved_private_subnet_az_ids
 }
 
 output "public_subnet_az_ids" {
-  description = "AWS AZ IDs (e.g. usw2-az1) of the public subnets, in the same order as public_subnet_ids. Cross-account-stable, unlike public_subnet_azs (names)."
+  description = "AWS AZ IDs (e.g. use1-az1) of the public subnets, in the same order as public_subnet_ids. Cross-account-stable, unlike public_subnet_azs (names)."
   value       = local.resolved_public_subnet_az_ids
 }
 

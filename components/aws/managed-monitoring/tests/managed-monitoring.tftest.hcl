@@ -45,7 +45,7 @@ mock_provider "aws" {
 variables {
   cluster_name = "development-platform"
   environment  = "development"
-  region       = "us-west-2"
+  region       = "us-east-1"
   team         = "platform"
 }
 
@@ -65,12 +65,12 @@ run "athena_grant_can_write_its_own_query_results" {
         "/eks-agent-platform/org/cost-pipeline/data_kms_key_arn",
       ]
       values = [
-        "org-123456789012-us-west-2-cost",
+        "org-123456789012-us-east-1-cost",
         "org_123456789012_us_west_2_cost",
-        "arn:aws:glue:us-west-2:123456789012:database/org_123456789012_us_west_2_cost",
-        "arn:aws:s3:::org-123456789012-us-west-2-cost-athena-123456789012",
+        "arn:aws:glue:us-east-1:123456789012:database/org_123456789012_us_west_2_cost",
+        "arn:aws:s3:::org-123456789012-us-east-1-cost-athena-123456789012",
         "arn:aws:s3:::org-123456789012-cur-export",
-        "arn:aws:kms:us-west-2:123456789012:key/11111111-2222-3333-4444-555555555555",
+        "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555",
       ]
     }
   }
@@ -86,7 +86,7 @@ run "athena_grant_can_write_its_own_query_results" {
     condition = anytrue([
       for s in jsondecode(aws_iam_role_policy.grafana_workspace_athena[0].policy).Statement :
       contains(s.Action, "s3:PutObject") &&
-      contains(s.Resource, "arn:aws:s3:::org-123456789012-us-west-2-cost-athena-123456789012/*")
+      contains(s.Resource, "arn:aws:s3:::org-123456789012-us-east-1-cost-athena-123456789012/*")
     ])
     error_message = "Athena stages results in the output bucket before any row is returned; without s3:PutObject on it every query fails at the write"
   }
@@ -95,7 +95,7 @@ run "athena_grant_can_write_its_own_query_results" {
     condition = anytrue([
       for s in jsondecode(aws_iam_role_policy.grafana_workspace_athena[0].policy).Statement :
       contains(s.Action, "kms:GenerateDataKey") &&
-      contains(s.Resource, "arn:aws:kms:us-west-2:123456789012:key/11111111-2222-3333-4444-555555555555")
+      contains(s.Resource, "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555")
     ])
     error_message = "both buckets are SSE-KMS under the pipeline's data key; without GenerateDataKey the result write is denied"
   }
@@ -106,7 +106,7 @@ run "athena_grant_can_write_its_own_query_results" {
     condition = anytrue([
       for s in jsondecode(aws_iam_role_policy.grafana_workspace_athena[0].policy).Statement :
       contains(s.Action, "athena:StartQueryExecution") &&
-      contains(s.Resource, "arn:aws:athena:us-west-2:123456789012:workgroup/org-123456789012-us-west-2-cost")
+      contains(s.Resource, "arn:aws:athena:us-east-1:123456789012:workgroup/org-123456789012-us-east-1-cost")
     ])
     error_message = "query execution must be scoped to the account cost workgroup"
   }
@@ -121,9 +121,9 @@ run "athena_grant_can_write_its_own_query_results" {
   # eks-gitops only through this secret — a GrafanaDatasource cannot read SSM.
   assert {
     condition = alltrue([
-      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_WORKGROUP"] == "org-123456789012-us-west-2-cost",
+      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_WORKGROUP"] == "org-123456789012-us-east-1-cost",
       jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_DATABASE"] == "org_123456789012_us_west_2_cost",
-      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_RESULTS_LOCATION"] == "s3://org-123456789012-us-west-2-cost-athena-123456789012/grafana/",
+      jsondecode(aws_secretsmanager_secret_version.monitoring_endpoints.secret_string)["ATHENA_RESULTS_LOCATION"] == "s3://org-123456789012-us-east-1-cost-athena-123456789012/grafana/",
     ])
     error_message = "the endpoints secret must carry the workgroup, database and results location; the datasource has no other way to reach them"
   }

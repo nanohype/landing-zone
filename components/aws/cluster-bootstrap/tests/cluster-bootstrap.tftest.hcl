@@ -50,9 +50,9 @@ mock_provider "kubectl" {}
 
 variables {
   environment                        = "staging"
-  region                             = "us-west-2"
+  region                             = "us-east-1"
   cluster_name                       = "staging-platform"
-  cluster_endpoint                   = "https://example.eks.us-west-2.amazonaws.com"
+  cluster_endpoint                   = "https://example.eks.us-east-1.amazonaws.com"
   cluster_certificate_authority_data = "dGVzdA==" # base64("test") — decodes cleanly for the provider config
   vpc_id                             = "vpc-0123456789abcdef0"
   gitops_repo_url                    = "https://github.com/nanohype/eks-gitops.git"

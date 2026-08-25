@@ -21,8 +21,8 @@
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = {
-      names    = ["us-west-2a", "us-west-2b", "us-west-2c", "us-west-2d"]
-      zone_ids = ["usw2-az1", "usw2-az2", "usw2-az3", "usw2-az4"]
+      names    = ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d"]
+      zone_ids = ["use1-az1", "use1-az2", "use1-az3", "use1-az4"]
     }
   }
   mock_data "aws_vpc_ipam_preview_next_cidr" {
@@ -45,7 +45,7 @@ mock_provider "aws" {
         description                       = "org-ipam-development"
         ipam_scope_id                     = "ipam-scope-mock"
         ipam_scope_type                   = "private"
-        locale                            = "us-west-2"
+        locale                            = "us-east-1"
         pool_depth                        = 2
         publicly_advertisable             = false
         source_ipam_pool_id               = "ipam-pool-toplevel"
@@ -58,14 +58,14 @@ mock_provider "aws" {
   # so the share's computed arn must be ARN-shaped — the mock's default random value is not.
   mock_resource "aws_ram_resource_share" {
     defaults = {
-      arn = "arn:aws:ram:us-west-2:444444444444:resource-share/mock"
+      arn = "arn:aws:ram:us-east-1:444444444444:resource-share/mock"
     }
   }
   # The RAM subnet associations validate resource_arn as an ARN, so the subnets the VPC
   # module creates must carry ARN-shaped values (the mock's default random value is not).
   mock_resource "aws_subnet" {
     defaults = {
-      arn = "arn:aws:ec2:us-west-2:444444444444:subnet/subnet-mock"
+      arn = "arn:aws:ec2:us-east-1:444444444444:subnet/subnet-mock"
     }
   }
   # aws_flow_log ARN-validates iam_role_arn + log_destination at plan, and the
@@ -78,14 +78,14 @@ mock_provider "aws" {
   }
   mock_resource "aws_cloudwatch_log_group" {
     defaults = {
-      arn = "arn:aws:logs:us-west-2:444444444444:log-group:flow-logs-mock"
+      arn = "arn:aws:logs:us-east-1:444444444444:log-group:flow-logs-mock"
     }
   }
 }
 
 variables {
   environment  = "development"
-  region       = "us-west-2"
+  region       = "us-east-1"
   team         = "platform"
   ipam_pool_id = "ipam-pool-05mock"
 }

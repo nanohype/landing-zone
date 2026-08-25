@@ -29,7 +29,7 @@ mock_provider "aws" {
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
   vpc_id      = "vpc-00ee11ff22aa33bb4"
 }

@@ -27,19 +27,19 @@ mock_provider "aws" {
   }
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:777777777777:key/mock"
+      arn = "arn:aws:kms:us-east-1:777777777777:key/mock"
     }
   }
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:us-west-2:777777777777:mock"
+      arn = "arn:aws:sns:us-east-1:777777777777:mock"
     }
   }
 }
 
 variables {
   environment     = "shared"
-  region          = "us-west-2"
+  region          = "us-east-1"
   team            = "sre"
   organization_id = "o-abcdef1234"
 }

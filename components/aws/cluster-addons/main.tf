@@ -28,7 +28,7 @@ locals {
   #   account_id    the bucket namespace is global; the account id makes the name
   #                 unique to this account, fixing the BucketAlreadyExists above.
   #   region        the account-qualified name STILL collides with itself: the same
-  #                 account deploying one environment into us-west-2 and us-east-1
+  #                 account deploying one environment into us-east-1 and us-east-1
   #                 produces the identical name twice. Global namespace, regional
   #                 deployments.
   #

@@ -43,22 +43,22 @@ mock_provider "aws" {
     defaults = { account_id = "123456789012", arn = "arn:aws:iam::123456789012:user/test", user_id = "AIDTEST" }
   }
   mock_data "aws_region" {
-    defaults = { name = "us-west-2", id = "us-west-2" }
+    defaults = { name = "us-east-1", id = "us-east-1" }
   }
 }
 mock_provider "tls" {}
 
 variables {
-  region                             = "us-west-2"
+  region                             = "us-east-1"
   environment                        = "development"
   team                               = "platform"
   cluster_name                       = "platform"
-  cluster_endpoint                   = "https://EXAMPLE.gr7.us-west-2.eks.amazonaws.com"
+  cluster_endpoint                   = "https://EXAMPLE.gr7.us-east-1.eks.amazonaws.com"
   cluster_certificate_authority_data = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJlRENDQVIrZ0F3SUJBZ0lVQzBqN3dtOU55YXFORnJ1U2tWNUVYUVdFenE4d0NnWUlLb1pJemowRUF3SXcKRWpFUU1BNEdBMVVFQXd3SGRHVnpkQzFqWVRBZUZ3MHlOakEzTVRnd09EQTNNREJhRncwek5qQTNNVFV3T0RBMwpNREJhTUJJeEVEQU9CZ05WQkFNTUIzUmxjM1F0WTJFd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DCkFBUloyalRvc2hPM0RmTmNYT2FMNnVJOENuSEUwWWFQTzFPdXFqTXB4c3EzSWxqR3JUM1dxbUhYRmRFTk5mNXUKTmJycUxTYmtqTHJvdmIvbDRYNXJCQ2tjbzFNd1VUQWRCZ05WSFE0RUZnUVVlWWo1c0NsNFJmdjRhRmEvaTY4QwpvNVlMcGZjd0h3WURWUjBqQkJnd0ZvQVVlWWo1c0NsNFJmdjRhRmEvaTY4Q281WUxwZmN3RHdZRFZSMFRBUUgvCkJBVXdBd0VCL3pBS0JnZ3Foa2pPUFFRREFnTkhBREJFQWlCTHRqUVA4NWg2VWsrQklKU2JXelBHdGVIL09yRmYKSS9pZ2tWTjllTlc2TEFJZ0lMd3VTankrNXhuVm4xMk5sSEh1bC9NQWtjcStodXBjdnNFZ0N0NmdZbnM9Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
-  oidc_provider_arn                  = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/TEST"
-  oidc_issuer                        = "oidc.eks.us-west-2.amazonaws.com/id/TEST"
+  oidc_provider_arn                  = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/TEST"
+  oidc_issuer                        = "oidc.eks.us-east-1.amazonaws.com/id/TEST"
   vpc_id                             = "vpc-0123456789abcdef0"
-  data_kms_key_arn                   = "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+  data_kms_key_arn                   = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
   operator_permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/eks-fleet/eks-fleet-hub-boundary"
   gitops_repo_url                    = "https://github.com/nanohype/eks-gitops"
 }

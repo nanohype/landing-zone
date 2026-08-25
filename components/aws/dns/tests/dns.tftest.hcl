@@ -34,14 +34,14 @@ mock_provider "aws" {
   # is not a valid ARN, so pin a well-formed one for the DNSSEC path.
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:111111111111:key/mock-dnssec-0000-0000-000000000000"
+      arn = "arn:aws:kms:us-east-1:111111111111:key/mock-dnssec-0000-0000-000000000000"
     }
   }
   # domain_validation_options is computed; the mock leaves it empty, so the validation-record
   # for_each would flatten to nothing. Populate it so the ACM validation path is exercised.
   mock_resource "aws_acm_certificate" {
     defaults = {
-      arn = "arn:aws:acm:us-west-2:111111111111:certificate/mock-cert-0000-0000-000000000000"
+      arn = "arn:aws:acm:us-east-1:111111111111:certificate/mock-cert-0000-0000-000000000000"
       domain_validation_options = [
         {
           domain_name           = "app.example.com"
@@ -56,7 +56,7 @@ mock_provider "aws" {
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   domain_name = "example.com"
   team        = "platform"
 }

@@ -24,12 +24,12 @@ output "private_subnet_azs" {
 }
 
 output "private_subnet_az_ids" {
-  description = "AWS AZ IDs (e.g. usw2-az1) of the private subnets, in the same order as private_subnet_ids. Cross-account-stable — this is the field a consumer keys on, not private_subnet_azs (names)."
+  description = "AWS AZ IDs (e.g. use1-az1) of the private subnets, in the same order as private_subnet_ids. Cross-account-stable — this is the field a consumer keys on, not private_subnet_azs (names)."
   value       = local.az_ids
 }
 
 output "public_subnet_az_ids" {
-  description = "AWS AZ IDs (e.g. usw2-az1) of the public subnets, in the same order as public_subnet_ids. Cross-account-stable, unlike the AZ names."
+  description = "AWS AZ IDs (e.g. use1-az1) of the public subnets, in the same order as public_subnet_ids. Cross-account-stable, unlike the AZ names."
   value       = local.az_ids
 }
 

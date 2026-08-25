@@ -30,7 +30,7 @@ mock_provider "aws" {
   }
   mock_data "aws_region" {
     defaults = {
-      name = "us-west-2"
+      name = "us-east-1"
     }
   }
 }
@@ -47,7 +47,7 @@ mock_provider "random" {
 # ── shared component-level inputs for the validation runs ──
 variables {
   environment        = "development"
-  region             = "us-west-2"
+  region             = "us-east-1"
   vpc_id             = "vpc-0123456789abcdef0"
   private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
   cluster_sg_id      = "sg-0123456789abcdef0"
@@ -429,10 +429,10 @@ run "relational_publishes_its_master_secret_arn_and_no_other_kind_does" {
   override_module {
     target = module.tenant.module.relational
     outputs = {
-      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-alpha-main"
-      cluster_endpoint = "development-alpha-main.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_arn      = "arn:aws:rds:us-east-1:123456789012:cluster:development-alpha-main"
+      cluster_endpoint = "development-alpha-main.cluster-cxyz.us-east-1.rds.amazonaws.com"
       cluster_master_user_secret = [{
-        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
       }]
     }
   }
@@ -477,10 +477,10 @@ run "every_tenant_gets_its_own_key_published_for_the_operator" {
   override_module {
     target = module.tenant.module.relational
     outputs = {
-      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-alpha-main"
-      cluster_endpoint = "development-alpha-main.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_arn      = "arn:aws:rds:us-east-1:123456789012:cluster:development-alpha-main"
+      cluster_endpoint = "development-alpha-main.cluster-cxyz.us-east-1.rds.amazonaws.com"
       cluster_master_user_secret = [{
-        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
       }]
     }
   }
@@ -605,10 +605,10 @@ run "the_rendered_development_map_is_accepted_and_provisions_every_declared_stor
   override_module {
     target = module.tenant.module.relational
     outputs = {
-      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-rendered-main"
-      cluster_endpoint = "development-rendered-main.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_arn      = "arn:aws:rds:us-east-1:123456789012:cluster:development-rendered-main"
+      cluster_endpoint = "development-rendered-main.cluster-cxyz.us-east-1.rds.amazonaws.com"
       cluster_master_user_secret = [{
-        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
       }]
     }
   }
@@ -749,10 +749,10 @@ run "accepts_auto_pause_floor" {
   override_module {
     target = module.tenant.module.relational
     outputs = {
-      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-t1-db"
-      cluster_endpoint = "development-t1-db.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_arn      = "arn:aws:rds:us-east-1:123456789012:cluster:development-t1-db"
+      cluster_endpoint = "development-t1-db.cluster-cxyz.us-east-1.rds.amazonaws.com"
       cluster_master_user_secret = [{
-        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
       }]
     }
   }
@@ -777,10 +777,10 @@ run "accepts_full_acu_range" {
   override_module {
     target = module.tenant.module.relational
     outputs = {
-      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-t1-db"
-      cluster_endpoint = "development-t1-db.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_arn      = "arn:aws:rds:us-east-1:123456789012:cluster:development-t1-db"
+      cluster_endpoint = "development-t1-db.cluster-cxyz.us-east-1.rds.amazonaws.com"
       cluster_master_user_secret = [{
-        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
       }]
     }
   }
@@ -947,10 +947,10 @@ run "accepts_old_engine_with_nonzero_floor" {
   override_module {
     target = module.tenant.module.relational
     outputs = {
-      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-t1-db"
-      cluster_endpoint = "development-t1-db.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_arn      = "arn:aws:rds:us-east-1:123456789012:cluster:development-t1-db"
+      cluster_endpoint = "development-t1-db.cluster-cxyz.us-east-1.rds.amazonaws.com"
       cluster_master_user_secret = [{
-        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
       }]
     }
   }
@@ -978,10 +978,10 @@ run "accepts_auto_pause_on_double_digit_minor" {
   override_module {
     target = module.tenant.module.relational
     outputs = {
-      cluster_arn      = "arn:aws:rds:us-west-2:123456789012:cluster:development-t1-db"
-      cluster_endpoint = "development-t1-db.cluster-cxyz.us-west-2.rds.amazonaws.com"
+      cluster_arn      = "arn:aws:rds:us-east-1:123456789012:cluster:development-t1-db"
+      cluster_endpoint = "development-t1-db.cluster-cxyz.us-east-1.rds.amazonaws.com"
       cluster_master_user_secret = [{
-        secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-4f9c2b1a-Ab3xYz"
       }]
     }
   }

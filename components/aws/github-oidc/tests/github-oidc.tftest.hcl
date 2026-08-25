@@ -19,7 +19,7 @@
 # — the actual rendered, wired-up trust JSON — never an override'd stub value.
 
 provider "aws" {
-  region                      = "us-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -40,7 +40,7 @@ override_data {
 
 variables {
   environment          = "development"
-  region               = "us-west-2"
+  region               = "us-east-1"
   team                 = "platform"
   github_org           = "nanohype"
   github_repos         = ["landing-zone", "rackctl"]

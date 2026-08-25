@@ -31,19 +31,19 @@ mock_provider "aws" {
   # policies (topic ARN) plan cleanly.
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/mock"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/mock"
     }
   }
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:us-west-2:123456789012:mock"
+      arn = "arn:aws:sns:us-east-1:123456789012:mock"
     }
   }
 }
 
 variables {
   environment  = "development"
-  region       = "us-west-2"
+  region       = "us-east-1"
   cluster_name = "development-platform"
   team         = "platform"
 }
@@ -215,9 +215,9 @@ run "adopt_mode_points_alarms_at_central_topics" {
   variables {
     observability_mode = "adopt"
     adopt_topic_arns = {
-      critical = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-critical"
-      warning  = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-warning"
-      info     = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-info"
+      critical = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-critical"
+      warning  = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-warning"
+      info     = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-info"
     }
   }
 
@@ -231,7 +231,7 @@ run "adopt_mode_points_alarms_at_central_topics" {
   assert {
     condition = contains(
       aws_cloudwatch_composite_alarm.cluster_health_critical[0].alarm_actions,
-      "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-critical"
+      "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-critical"
     )
     error_message = "adopt-mode critical composite must publish to the central critical topic"
   }
@@ -239,13 +239,13 @@ run "adopt_mode_points_alarms_at_central_topics" {
   assert {
     condition = contains(
       aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_actions,
-      "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-warning"
+      "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-warning"
     )
     error_message = "adopt-mode degraded composite must publish to the central warning topic"
   }
 
   assert {
-    condition     = output.sns_topic_arns.critical == "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-critical"
+    condition     = output.sns_topic_arns.critical == "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-critical"
     error_message = "sns_topic_arns must re-export the adopted central ARNs, the same shape as create mode"
   }
 }
@@ -325,9 +325,9 @@ run "create_mode_rejects_adopt_topics" {
 
   variables {
     adopt_topic_arns = {
-      critical = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-critical"
-      warning  = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-warning"
-      info     = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-info"
+      critical = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-critical"
+      warning  = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-warning"
+      info     = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-info"
     }
   }
 
@@ -342,7 +342,7 @@ run "adopt_mode_requires_all_severities" {
   variables {
     observability_mode = "adopt"
     adopt_topic_arns = {
-      critical = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-critical"
+      critical = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-critical"
     }
   }
 
@@ -357,9 +357,9 @@ run "adopt_mode_rejects_local_email" {
   variables {
     observability_mode = "adopt"
     adopt_topic_arns = {
-      critical = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-critical"
-      warning  = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-warning"
-      info     = "arn:aws:sns:us-west-2:777777777777:platform-fleet-alerts-info"
+      critical = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-critical"
+      warning  = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-warning"
+      info     = "arn:aws:sns:us-east-1:777777777777:platform-fleet-alerts-info"
     }
     alert_email_endpoints = ["on-call@example.com"]
   }

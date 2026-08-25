@@ -121,7 +121,7 @@ inputs = {
               StringNotEquals = {
                 "aws:RequestedRegion" = [
                   "us-east-1",
-                  "us-west-2",
+                  "us-east-1",
                 ]
               }
             }
@@ -214,7 +214,7 @@ inputs = {
     }
 
     # Bedrock is reached in-region (agentgateway + IRSA callers all invoke in
-    # us-west-2 / us-east-1); there is no Bedrock VPC endpoint to key on, and
+    # us-east-1 / us-east-1); there is no Bedrock VPC endpoint to key on, and
     # SCPs gate API actions, not the cloudflared MCP tunnel's network egress.
     # So the sanctioned-egress guardrail is region-pinning, mirroring
     # RegionRestriction but scoped to model invocation.
@@ -238,7 +238,7 @@ inputs = {
               StringNotEquals = {
                 "aws:RequestedRegion" = [
                   "us-east-1",
-                  "us-west-2",
+                  "us-east-1",
                 ]
               }
             }

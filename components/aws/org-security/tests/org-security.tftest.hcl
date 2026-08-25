@@ -26,7 +26,7 @@ mock_provider "aws" {
   }
   mock_data "aws_region" {
     defaults = {
-      name = "us-west-2"
+      name = "us-east-1"
     }
   }
   # The SNS topic .arn is consumed as a real ARN by the topic policy and the
@@ -35,19 +35,19 @@ mock_provider "aws" {
   # policy's Resource is compared against, so the scoping assertion stays real.
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:us-west-2:123456789012:org-security-alerts"
+      arn = "arn:aws:sns:us-east-1:123456789012:org-security-alerts"
     }
   }
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/org-security-alerts"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/org-security-alerts"
     }
   }
 }
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
 }
 
@@ -137,7 +137,7 @@ run "alerts_topic_encrypted_with_publisher_grants" {
   command = plan
 
   assert {
-    condition     = aws_sns_topic.security_alerts.kms_master_key_id == "arn:aws:kms:us-west-2:123456789012:key/org-security-alerts"
+    condition     = aws_sns_topic.security_alerts.kms_master_key_id == "arn:aws:kms:us-east-1:123456789012:key/org-security-alerts"
     error_message = "org-security alerts topic must set kms_master_key_id to the CMK ARN (SSE-KMS)"
   }
 

@@ -28,7 +28,7 @@
 # with a mock provider.
 
 provider "aws" {
-  region                      = "us-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -57,10 +57,10 @@ override_data {
 
 variables {
   environment       = "development"
-  region            = "us-west-2"
+  region            = "us-east-1"
   team              = "platform"
-  oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/TEST"
-  oidc_issuer       = "https://oidc.eks.us-west-2.amazonaws.com/id/TEST"
+  oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/TEST"
+  oidc_issuer       = "https://oidc.eks.us-east-1.amazonaws.com/id/TEST"
   state_bucket_name = "test-fleet-state"
 }
 

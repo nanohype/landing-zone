@@ -12,7 +12,7 @@ Add a new tenant to a multi-tenant component.
 - `$ARGUMENTS[1]` — tenant name (e.g., "analytics", "ml-team")
 - `$ARGUMENTS[2]` — environment (default: all environments)
 
-Map the environment to its account (region is `us-west-2`):
+Map the environment to its account (region is `us-east-1`):
 development → `workload-development`, staging → `workload-staging`,
 production → `workload-production`.
 
@@ -26,6 +26,6 @@ production → `workload-production`.
 
 4. **Ask** which options they want to customize (or accept all defaults)
 
-5. **Add the tenant** to the `tenants` map in `live/aws/<account>/us-west-2/<env>/$ARGUMENTS[0]/terragrunt.hcl`'s `inputs` block. If `$ARGUMENTS[2]` is provided, only add to that environment — otherwise add to all three (development, staging, production)
+5. **Add the tenant** to the `tenants` map in `live/aws/<account>/us-east-1/<env>/$ARGUMENTS[0]/terragrunt.hcl`'s `inputs` block. If `$ARGUMENTS[2]` is provided, only add to that environment — otherwise add to all three (development, staging, production)
 
 6. **Show a plan preview**: suggest running `/plan {env} $ARGUMENTS[0]` to see what will be created

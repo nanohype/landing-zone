@@ -16,7 +16,7 @@
 mock_provider "aws" {
   mock_data "aws_vpc_endpoint_service" {
     defaults = {
-      service_name = "com.amazonaws.us-west-2.mock"
+      service_name = "com.amazonaws.us-east-1.mock"
     }
   }
 }

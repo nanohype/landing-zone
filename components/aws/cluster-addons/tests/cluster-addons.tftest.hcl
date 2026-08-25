@@ -47,7 +47,7 @@ mock_provider "aws" {
 
 variables {
   environment         = "development"
-  region              = "us-west-2"
+  region              = "us-east-1"
   cluster_name        = "development-platform"
   team                = "platform"
   argo_events_enabled = true
@@ -126,7 +126,7 @@ run "argo_events_sqs_sns_are_arn_scoped" {
     condition = anytrue([
       for s in jsondecode(output.argo_events_policy_json).Statement :
       contains(try(s.Action, []), "sqs:ReceiveMessage")
-      && contains(tolist(s.Resource), "arn:aws:sqs:us-west-2:123456789012:*")
+      && contains(tolist(s.Resource), "arn:aws:sqs:us-east-1:123456789012:*")
       && !contains(tolist(s.Resource), "*")
     ])
     error_message = "argo-events SQS grant must be scoped to arn:aws:sqs:<region>:<account>:*, never Resource=[\"*\"]"
@@ -137,7 +137,7 @@ run "argo_events_sqs_sns_are_arn_scoped" {
     condition = anytrue([
       for s in jsondecode(output.argo_events_policy_json).Statement :
       contains(try(s.Action, []), "sns:Subscribe")
-      && contains(tolist(s.Resource), "arn:aws:sns:us-west-2:123456789012:*")
+      && contains(tolist(s.Resource), "arn:aws:sns:us-east-1:123456789012:*")
       && !contains(tolist(s.Resource), "*")
     ])
     error_message = "argo-events SNS grant must be scoped to arn:aws:sns:<region>:<account>:*, never Resource=[\"*\"]"
