@@ -26,14 +26,27 @@ rather than merely erroring.
 
 WHAT A LINTER DOES NOT CATCH
 
-shellcheck parses; it does not run, and it cannot know which bash the reader
-has. Given a script using mapfile, `declare -A` and `${x^^}` together it reports
-none of them as a version requirement — it may object to something else on the
-same line, which is worse, because the line gets attention and the portability
-defect still ships. Being clean under shellcheck is not evidence of portability:
-version compatibility is outside what it evaluates. The same question is worth
-asking of every linter in a toolchain — what it actually evaluates, against what
-it is assumed to cover.
+shellcheck decides by DIALECT, and it has no model of bash VERSIONS. Measured
+on one script using mapfile, `declare -A` and `${x^^}` together, changing only
+the shebang:
+
+    #!/bin/sh      SC3044, SC3059, SC3040 — each construct named precisely
+    #!/bin/bash    nothing about any of them
+
+Both runs exit 1, because an unrelated unused-variable diagnostic fires on the
+same lines either way. That is the trap: the file is not silent, so it reads as
+reviewed, and the finding that gets attention is not the one that matters.
+
+The asymmetry is by design rather than by threshold. Bash 4 builtins ARE legal
+bash, so a bash-shebang script gets a clean bill however old the interpreter it
+must run on, and no severity or confidence setting changes that — the question
+is outside what shellcheck evaluates. Only a version-aware check answers it,
+which is what this gate is.
+
+It also explains the shebang precondition below. shellcheck already covers the
+POSIX-dialect class well; this gate covers the bash-version class shellcheck
+cannot see. A script that declares neither is checked by neither, so it is
+refused rather than passed.
 
 WHAT IT CHECKS
 

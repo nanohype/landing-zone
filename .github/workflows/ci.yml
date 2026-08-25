@@ -811,17 +811,24 @@ jobs:
       # Verified in both directions: the tree is clean at this setting, and a
       # workflow carrying pull_request_target with a head-sha checkout and a
       # template-injected run block exits 14.
-      # Two tiers, deliberately. The first REPORTS everything the auditor
-      # persona finds and never fails: those are informational and low-severity
-      # findings in workflows that only a maintainer can trigger (schedule and
-      # workflow_dispatch), so gating on them would keep this job permanently
-      # red for things nobody is going to close, and a permanently red gate
-      # teaches people to bypass it.
+      # The two flags point in OPPOSITE directions, measured against a planted
+      # workflow-level `id-token: write` rather than assumed:
       #
-      # The second GATES on high severity. Splitting them this way keeps a pass
-      # from reading as nothing-found: the reporting step prints the
-      # sub-threshold findings into the log every run, so the count below the
-      # line is visible rather than merely ignored.
+      #   no flag / --persona=regular   exit 0, 35 suppressed — the default does
+      #                                 not run excessive-permissions at all
+      #   --persona=auditor             exit 14, names the high — ADDS audits
+      #   --min-severity=high           REMOVES tiers; it can only suppress
+      #
+      # So the persona is what surfaces this class and the severity floor is a
+      # deliberate reduction on top of it. Naming a tier is not tightening, and
+      # only measurement distinguishes the two.
+      #
+      # Two steps, deliberately. The first REPORTS every tier and never fails:
+      # the sub-threshold findings sit in workflows only a maintainer can
+      # trigger, so gating on them would keep this job permanently red for
+      # things nobody is going to close, and a permanently red gate teaches
+      # people to bypass it. Printing them every run keeps a pass from reading
+      # as nothing-found.
       - name: Report (all severities, never fails)
         run: zizmor --offline --persona=auditor .github/workflows/ || true
       - name: Gate (high severity)
