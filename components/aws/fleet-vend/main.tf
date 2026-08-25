@@ -138,7 +138,9 @@ resource "aws_iam_policy" "vend_boundary" {
           # and floor is the default tier for a vended cluster — so without these
           # the common case drops every span while its metrics and logs keep
           # working, which reads as a healthy tier. Same ceiling hazard as the
-          # aps reads above, and it has to be fixed in the same two places.
+          # aps reads above: both ceilings cap the same roles, so an action in
+          # one and not the other is clipped on every vended cluster.
+          # scripts/check-fleet-ceiling-parity.py holds the two in agreement.
           "xray:PutTraceSegments",
           "xray:PutTelemetryRecords",
           "xray:GetSamplingRules",
