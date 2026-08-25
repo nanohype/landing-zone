@@ -29,12 +29,12 @@ mock_provider "aws" {
   # backup vault (vault CMK ARN) and vault notifications (topic ARN) plan cleanly.
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/mock"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/mock"
     }
   }
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:us-west-2:123456789012:mock"
+      arn = "arn:aws:sns:us-east-1:123456789012:mock"
     }
   }
   # The backup plan/selection references the backup service IAM role ARN.
@@ -47,14 +47,14 @@ mock_provider "aws" {
   # the random mock default doesn't fail the parse.
   mock_resource "aws_backup_vault" {
     defaults = {
-      arn = "arn:aws:backup:us-west-2:123456789012:backup-vault:mock"
+      arn = "arn:aws:backup:us-east-1:123456789012:backup-vault:mock"
     }
   }
 }
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
 }
 

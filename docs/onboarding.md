@@ -45,10 +45,10 @@ CI uses GitHub OIDC federation -- no long-lived credentials.
 Run the local validation suite -- no cloud credentials needed:
 
 ```bash
-task fmt:check && task validate && task lint
+task check
 ```
 
-All three should pass. If `tflint` fails, make sure you ran `tflint --init -c .tflint-aws.hcl` to install the plugin.
+This is the sequence CI runs: formatting, validation, lint, the `tofu test` suites, and every gate under `scripts/`. If `tflint` fails, make sure you ran `tflint --init -c .tflint-aws.hcl` to install the plugin.
 
 ## Your First Plan
 
@@ -62,7 +62,7 @@ This runs `terragrunt plan` for the network component in development. You need v
 
 ### `components/`
 
-OpenTofu root modules under `components/aws/`. Each is self-contained with `main.tf`, `variables.tf`, `outputs.tf`, and `versions.tf`. A multi-tenant component — one taking a `tenants` map and using `for_each` — also has a `modules/tenant/` sub-module holding the per-tenant resources.
+OpenTofu root modules under `components/aws/`. Each is self-contained with `main.tf`, `variables.tf`, `outputs.tf`, and `versions.tf`. A multi-tenant component — one taking a `tenants` map and using `for_each` — also has a `components/aws/<name>/modules/tenant/` sub-module holding the per-tenant resources. The path is written in full because `modules/` is also a top-level directory in this repo, holding the shared modules components compose — a different thing entirely.
 
 Components define **what** to create. They are environment-agnostic -- no hardcoded account IDs, regions, or environment names.
 
@@ -80,6 +80,8 @@ Terragrunt configuration that wires components to environments.
 Shared sub-modules used across components:
 
 - **`aws/workload-identity/`** -- EKS Pod Identity role factory. Creates an IAM role trusted by `pods.eks.amazonaws.com` (no OIDC provider) and binds it to a specific Kubernetes namespace and service account through an EKS Pod Identity association.
+- **`aws/eks-vpc-endpoints/`** -- the private interface-endpoint set both create-mode `network` and `shared-network` build, so a cluster with no public egress can still reach the AWS APIs it needs.
+- **`aws/vpc-flow-logs/`** -- the flow-log destination and its delivery role, attached by whichever component owns the VPC.
 
 ### Key Files
 
@@ -95,9 +97,12 @@ Pods assume IAM roles via EKS Pod Identity — the EKS control plane injects cre
 
 ### Multi-Tenant Pattern
 
-A few components still accept a `var.tenants` map (`druid`, `pipeline`, `governance`) and mint
-per-tenant resources via `for_each`. The default path for a new Platform tenant is
-**`tenant-substrate`**: declare datastores on the Platform CR; the component provisions them.
+Four components accept a `var.tenants` map and mint per-tenant resources via `for_each`:
+`druid`, `pipeline`, `governance`, and `tenant-substrate`. The first three are
+purpose-built — a tenant's Druid cluster, its pipeline, its governance guardrails —
+and their tenant maps are hand-authored. `tenant-substrate` is the generic one and the
+default path for a new Platform tenant: declare the stores on the Platform CR and its
+`var.tenants` is rendered from those declarations rather than written by hand.
 Tenants are isolated at the resource level (separate databases, buckets, queues, caches with AUTH,
 IAM roles).
 

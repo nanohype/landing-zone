@@ -7,20 +7,20 @@ include "envcommon" {
   merge_strategy = "deep"
 }
 
-# Empty, and nothing renders it yet.
+# Generated from the Platform CRs, never edited here.
 #
-# The component provisions a tenant's declared stores from this map, and the
+# The component provisions a tenant's declared stores from this map and the
 # eks-agent-platform operator generates the scoped IAM from the same
-# declaration. What does not exist is the step between: nothing carries a
-# Platform CR's spec.datastores into this input. So a tenant that declares
-# datastores gets none, in any environment, and the failure is silence — the
-# apply succeeds with nothing to do.
+# declaration, so both halves read one source: each tenant's own Platform CR.
+# `tenants.selection.yaml` names the tenants this environment carries;
+# `scripts/render-tenants.py` resolves each to its CR and writes
+# tenants.generated.json. CI re-renders and fails on drift, so a CR that
+# changes without a re-render cannot leave the declaration and the provisioned
+# stores disagreeing.
 #
-# Until that renderer lands, a map written by hand here is the only way a
-# tenant gets a datastore, and it will be overwritten when one does. Building
-# it is tracked work; the guardrails that used to describe it as already
-# happening (nanohype/standards/platform-tenant-contract.json, fab's
-# FACTORY_PREAMBLE) now say so.
+# The selection is empty here — no tenant is promoted to this environment yet —
+# so the rendered map is empty and the component provisions nothing. Adding a
+# name to the selection file is the whole act.
 #
 # Environment-specific overrides land here.
 inputs = {

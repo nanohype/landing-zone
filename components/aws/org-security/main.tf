@@ -37,7 +37,6 @@ resource "aws_kms_key" "security_alerts" {
         Effect = "Allow"
         Principal = {
           Service = [
-            "events.amazonaws.com",
             "guardduty.amazonaws.com",
             "securityhub.amazonaws.com",
           ]
@@ -52,6 +51,23 @@ resource "aws_kms_key" "security_alerts" {
             "aws:SourceAccount" = local.account_id
           }
         }
+      },
+      {
+        # EventBridge is a separate, unconditioned statement, matching the
+        # observability and break-glass key policies. AWS does not document
+        # whether EventBridge populates condition context on the KMS call it
+        # makes to encrypt into an SSE-KMS topic, and an unpopulated key fails
+        # closed — the finding is accepted and dropped with no error at the rule.
+        # GuardDuty and Security Hub do populate it, which is why they keep their
+        # guard above; this is a per-principal fact, not a house style.
+        Sid       = "AllowEventBridgePublish"
+        Effect    = "Allow"
+        Principal = { Service = "events.amazonaws.com" }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
       },
     ]
   })
@@ -81,16 +97,24 @@ resource "aws_sns_topic_policy" "security_alerts" {
     Version = "2012-10-17"
     Statement = [
       {
+        # No Condition, deliberately. AWS documents that EventBridge does not
+        # populate condition context on the SNS publish path — "You can't use
+        # Condition blocks in Amazon SNS topic policies for EventBridge" — so an
+        # aws:SourceAccount guard here never evaluates true and the statement
+        # never allows. The rule reports success and the finding is dropped, with
+        # the only trace a FailedInvocations counter on whichever rule targeted
+        # the topic: a security alert path that looks installed and delivers
+        # nothing.
+        #
+        # The GuardDuty and Security Hub statements below keep their guard
+        # because those principals do populate it. This is a per-principal fact,
+        # not a house style, and the topic ARN this statement names is what
+        # bounds the grant in EventBridge's place.
         Sid       = "AllowEventBridgePublish"
         Effect    = "Allow"
         Principal = { Service = "events.amazonaws.com" }
         Action    = "sns:Publish"
         Resource  = aws_sns_topic.security_alerts.arn
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = local.account_id
-          }
-        }
       },
       {
         Sid       = "AllowGuardDutyPublish"

@@ -26,7 +26,7 @@ module "deepstorage_bucket" {
 
   attach_deny_insecure_transport_policy = true
 
-  tags = local.tenant_tags
+  tags = local.data_tags
 }
 
 module "indexlogs_bucket" {
@@ -62,7 +62,7 @@ module "indexlogs_bucket" {
 
   attach_deny_insecure_transport_policy = true
 
-  tags = local.tenant_tags
+  tags = local.data_tags
 }
 
 module "msq_bucket" {
@@ -98,5 +98,5 @@ module "msq_bucket" {
 
   attach_deny_insecure_transport_policy = true
 
-  tags = local.tenant_tags
+  tags = local.data_tags
 }

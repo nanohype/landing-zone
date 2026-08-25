@@ -1,4 +1,112 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>nanohype/.github"]
+  "extends": [
+    "github>nanohype/.github"
+  ],
+  "customManagers": [
+    {
+      "description": "OpenTofu CLI version passed to opentofu/setup-opentofu and gruntwork-io/terragrunt-action. The github-actions manager updates the action reference, never the version an action is told to install, so without this the toolchain the whole build runs on is unwatched.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "tofu_version:\\s*[\"']?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)[\"']?"
+      ],
+      "depNameTemplate": "opentofu/opentofu",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Terragrunt CLI version, in both spellings the workflows use: the tg_version input to gruntwork-io/terragrunt-action, and the TERRAGRUNT_VERSION env the e2e job installs from directly. Straddles the run-all to run --all CLI change, so a drift here changes what every live leaf renders.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "tg_version:\\s*[\"']?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)[\"']?",
+        "TERRAGRUNT_VERSION:\\s*[\"']?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)[\"']?"
+      ],
+      "depNameTemplate": "gruntwork-io/terragrunt",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "TFLint version passed to terraform-linters/setup-tflint. The lint gate runs at --minimum-failure-severity=notice, so a version change can add or drop a hard failure.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "tflint_version:\\s*[\"']?v?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)[\"']?"
+      ],
+      "depNameTemplate": "terraform-linters/tflint",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "TFLint AWS ruleset pinned in .tflint-aws.hcl. tflint's own plugin block is not a manifest any built-in manager reads.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.tflint-aws\\.hcl$/"
+      ],
+      "matchStrings": [
+        "version\\s*=\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "depNameTemplate": "terraform-linters/tflint-ruleset-aws",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Python packages installed by a bare pip install in a workflow step \u2014 the workflow-security and YAML-parsing gates among them. No manifest exists for these, so the pin is invisible to every built-in manager. The pattern skips pip's own flags: `pip install --quiet x==y` is the same pin as `pip install x==y`, and a matcher that only knows the bare form leaves the flagged one unwatched while reading as coverage.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "pip install (?:-[-\\w]+ )*(?<depName>[a-zA-Z0-9._-]+)==(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Language runtimes pinned in setup-* action inputs. These are the versions CI actually executes, distinct from the action that installs them.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "python-version:\\s*[\"'](?<currentValue>[0-9]+\\.[0-9]+)[\"']"
+      ],
+      "depNameTemplate": "python",
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "python/cpython",
+      "extractVersionTemplate": "^v(?<version>[0-9]+\\.[0-9]+)"
+    },
+    {
+      "description": "Go toolchain pinned in actions/setup-go. e2e.sh builds the operator with it.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "go-version:\\s*[\"'](?<currentValue>[0-9]+\\.[0-9]+)[\"']"
+      ],
+      "depNameTemplate": "golang/go",
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^go(?<version>[0-9]+\\.[0-9]+)"
+    },
+    {
+      "description": "Kubernetes control-plane version the cluster component defaults to. EKS retires minors on a published schedule, so this is the pin with a deadline rather than merely an upgrade. Keyed on the `# k8s-version` marker so the match is one line, which is what makes it checkable.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^components/aws/cluster/variables\\.tf$/"
+      ],
+      "matchStrings": [
+        "default\\s*=\\s*\"(?<currentValue>1\\.[0-9]+)\"\\s*#\\s*k8s-version"
+      ],
+      "depNameTemplate": "kubernetes/kubernetes",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>[0-9]+\\.[0-9]+)"
+    }
+  ]
 }

@@ -32,9 +32,8 @@ variable "state_bucket_name" {
   description = <<-EOT
     S3 bucket holding the vended clusters' OpenTofu state (provider-opentofu
     backend). Unlike the repo's per-cluster/per-tenant buckets, this name carries
-    NO account-id element by deliberate exception: it is a singleton in exactly one
-    always-hub (management) account, so there is no per-account collision to guard
-    against, and it is a cross-repo bootstrap contract — the eks-fleet
+    NO account-id element by deliberate exception: it is a cross-repo bootstrap
+    contract — the eks-fleet
     provider-opentofu backend and rackctl's preflight resolve state against this
     name before any in-cluster SSM lookup is possible, so an account-qualified name
     would break discovery-free bootstrap. Global S3 uniqueness comes from the

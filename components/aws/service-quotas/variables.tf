@@ -55,9 +55,9 @@ variable "monitored_quotas" {
     description  = string
   }))
   # Only quotas AWS publishes a usage metric for. Verified against the live API
-  # in us-west-2: eips_per_region (ec2/L-0263D0A3), nat_gateways_per_az
+  # in us-east-1: eips_per_region (ec2/L-0263D0A3), nat_gateways_per_az
   # (vpc/L-FE5A380F) and eks_clusters (eks/L-1194D53C) all return an empty
-  # UsageMetric, so the alarms this component used to build for them could never
+  # UsageMetric, so an alarm built for one of them could never
   # have fired. Their utilization has to come from somewhere else — a Cost
   # Explorer/Config view, or polling DescribeAccountAttributes — not CloudWatch.
   default = {

@@ -16,7 +16,7 @@ include "root" {
 # a copy — and the environment token is this environment's, which is what makes the
 # two tenant-boundary wildcards in the hub policy match the clusters it will vend.
 #
-# ONE PER ACCOUNT. var.state_bucket_name defaults to nanohype-eks-fleet-tfstate and
+# ONE PER ORG, not one per account. var.state_bucket_name defaults to nanohype-eks-fleet-tfstate and
 # carries no account or environment element, by deliberate exception documented on
 # the variable: it is the cross-repo bootstrap contract that eks-fleet's
 # provider-opentofu backend and rackctl's preflight resolve before any in-cluster

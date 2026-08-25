@@ -25,3 +25,8 @@ output "composite_alarm_arns" {
     warning  = aws_cloudwatch_composite_alarm.cluster_health_degraded[0].arn
   } : {}
 }
+
+output "alerts_kms_key_arn" {
+  description = "CMK encrypting the severity topics in create mode; empty in adopt mode, where shared-observability owns the topics and their key. A publisher that signs its own SNS calls (the AMP Alertmanager, for one) needs kms:GenerateDataKey* on this key as well as sns:Publish on the topic — without it the publish is accepted and the encrypt is denied, which surfaces nowhere."
+  value       = local.create_mode ? aws_kms_key.alerts[0].arn : ""
+}

@@ -2,6 +2,11 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
+  # BackupPolicy goes on the record buckets only when an operator names a plan.
+  # A tag that matches no plan selects nothing and reads as protected regardless,
+  # so the absent case is an absent tag rather than an empty one.
+  record_tags = var.backup_policy == "" ? local.tags : merge(local.tags, { BackupPolicy = var.backup_policy })
+
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.region
 

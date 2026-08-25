@@ -75,11 +75,15 @@ landing-zone/
 │       ├── workload-staging/
 │       ├── workload-production/
 │       ├── fleet/                # Hub control plane (fleet/portal, managed-monitoring)
-│       └── network/              # Network-owner account (shared-network, egress-network)
+│       ├── network/              # Network-owner account (shared-network, egress-network)
+│       ├── backup/               # Shared backup vault account
+│       ├── shared-services/      # Fleet-wide alert topics (shared-observability)
+│       └── reference-adopt/      # Worked adopt-mode wiring; CI renders it, nothing applies it
 ├── modules/
 │   └── aws/
 │       ├── workload-identity/    # EKS Pod Identity role factory
-│       └── eks-vpc-endpoints/    # Private endpoint set (create-mode network + shared-network)
+│       ├── eks-vpc-endpoints/    # Private endpoint set (create-mode network + shared-network)
+│       └── vpc-flow-logs/        # Flow-log destination + delivery role for both VPC owners
 ├── scripts/
 │   └── init-backend-aws.sh
 ├── Taskfile.yaml
@@ -104,10 +108,10 @@ git clone <repo-url> && cd landing-zone
 ./scripts/init-backend-aws.sh <account_id> <region>
 
 # 3. Plan all development components
-task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
+task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development
 
 # 4. Apply a single component
-task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
+task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=network
 ```
 
 ## Task Targets

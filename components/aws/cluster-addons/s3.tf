@@ -308,9 +308,13 @@ resource "aws_ssm_parameter" "argo_workflows_bucket" {
 # warning, which is not a gate. So the assertion lives on a terraform_data resource,
 # which creates nothing and fails the plan.
 #
-# Worst case today is 62 chars (production-platform-<12-digit-account>-ap-southeast-4-
-# argo-workflows). The headroom is one character — a longer cluster_name is the
-# thing that will break this, and this is what will tell you so.
+# The budget is tightest for the longest of everything at once: the longest
+# environment and cluster_name, a 12-digit account id, the longest region name AWS
+# publishes, and the longest bucket suffix (argo-workflows). Nothing in the repo
+# holds that combination, so the number is not written here — the precondition
+# computes it from the values actually in play and names the overflowing bucket
+# and its length when it fires. cluster_name is the input that consumes the
+# headroom, which is why it carries a 12-character validation of its own.
 ################################################################################
 
 resource "terraform_data" "bucket_name_guard" {

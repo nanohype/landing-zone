@@ -39,16 +39,37 @@ locals {
 
   # Expand the model allowlist into the resource ARNs a Bedrock invoke grant
   # needs: the foundation-model ARN (AWS-owned, so an empty account segment; any
-  # region) plus the account's cross-region inference profiles that route to it
-  # (their IDs carry a us./eu./apac. region-set prefix, hence the leading
-  # wildcard). Invoking through an inference profile authorizes against BOTH the
-  # profile and the underlying model, so a usable allowlist must grant both forms.
-  # Empty allowlist => ["*"], the explicit any-model escape hatch.
-  bedrock_baseline_invoke_resources = length(var.bedrock_allowed_model_ids) == 0 ? ["*"] : flatten([
-    for id in var.bedrock_allowed_model_ids : [
-      "arn:${local.partition}:bedrock:*::foundation-model/${id}",
-      "arn:${local.partition}:bedrock:*:${local.account_id}:inference-profile/*${id}",
-    ]
+  # region) plus the account's cross-region inference profiles that route to it.
+  # Invoking through an inference profile authorizes against BOTH the profile and
+  # the underlying model, so a usable allowlist must grant both forms.
+  #
+  # The profile ARN is prefixed with an explicit geo set rather than a bare `*`.
+  # `inference-profile/*anthropic.*` reads as "the geo prefix, whatever it is",
+  # but IAM does not read intent — it matches any profile name CONTAINING the
+  # family, so a profile called `staging-anthropic.rerouted` satisfies it. Profiles
+  # are account-scoped and a tenant role cannot create one, so this is a second
+  # line rather than the first; it is cheap, and the first line is one grant away
+  # from being someone else's mistake.
+  #
+  # The default is us. alone because llm-policy names us-east-1 as the only
+  # preferred region and requires the geo prefix to match the deploy region. A
+  # fork deploying elsewhere widens this deliberately, which is the point of it
+  # being a variable rather than a literal.
+  # An empty allowlist grants nothing: the BedrockInvoke statement is dropped from
+  # the baseline entirely (see the conditional in the policy below) rather than
+  # emitted with Resource=["*"]. Empty meaning "everything" is the wrong direction
+  # for a grant — the reading a caller expects from [] is none, and it is the value
+  # an allowlist rendered from a set of Platform CRs takes whenever that set is
+  # empty. Any-model is still reachable by writing ["*"] in the list, where an
+  # auditor reading the config can see it.
+  bedrock_baseline_invoke_resources = flatten([
+    for id in var.bedrock_allowed_model_ids : concat(
+      ["arn:${local.partition}:bedrock:*::foundation-model/${id}"],
+      [
+        for geo in var.bedrock_inference_profile_geos :
+        "arn:${local.partition}:bedrock:*:${local.account_id}:inference-profile/${geo}${id}"
+      ],
+    )
   ])
 
   tags = merge(var.tags, {
@@ -193,65 +214,73 @@ resource "aws_iam_policy" "tenant_baseline" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "BedrockInvoke"
-        Effect = "Allow"
-        Action = [
-          "bedrock:InvokeModel",
-          "bedrock:InvokeModelWithResponseStream",
-          "bedrock:Converse",
-          "bedrock:ConverseStream",
-        ]
-        Resource = local.bedrock_baseline_invoke_resources
-      },
-      {
-        # ApplyGuardrail acts on a guardrail resource, not a model ARN, so it
-        # cannot ride on the model-scoped Resource above. Guardrails are minted
-        # out-of-band (operator / separate component); scope to this account's
-        # guardrails rather than "*".
-        Sid      = "BedrockGuardrail"
-        Effect   = "Allow"
-        Action   = ["bedrock:ApplyGuardrail"]
-        Resource = "arn:${local.partition}:bedrock:*:${local.account_id}:guardrail/*"
-      },
-      {
-        Sid    = "Telemetry"
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "xray:PutTraceSegments",
-          "xray:PutTelemetryRecords",
-        ]
-        Resource = "*"
-      },
-      {
-        # The model-artifacts bucket is SSE-KMS with the data CMK, and the
-        # operator writes each tenant a bucket-policy grant scoped to
-        # tenants/<platform>/*. To read or write those objects the tenant must
-        # use the data CMK — but only through S3. The ViaService condition
-        # confines this to S3 (the tenant cannot decrypt cmk-data content
-        # directly), and the operator's per-prefix bucket policy is the actual
-        # tenant boundary. S3 SSE-KMS uses the aws:s3:arn encryption context,
-        # which the operator's per-tenant KMS grant (scoped to the PlatformId
-        # context, for a tenant's own direct KMS usage) deliberately does not
-        # cover — so this baseline grant is what authorizes the S3 path.
-        Sid    = "ModelArtifactsDataKMS"
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey",
-          "kms:DescribeKey",
-        ]
-        Resource = var.data_kms_key_arn
-        Condition = {
-          StringEquals = {
-            "kms:ViaService" = "s3.${var.region}.amazonaws.com"
+    Statement = concat(
+      # Omitted, not widened, when the allowlist is empty: a statement is only
+      # emitted when there is something to scope it to. An Allow with an empty
+      # Resource list is not valid IAM, and an Allow with Resource=["*"] is the
+      # opposite of what an empty allowlist asks for.
+      length(local.bedrock_baseline_invoke_resources) == 0 ? [] : [
+        {
+          Sid    = "BedrockInvoke"
+          Effect = "Allow"
+          Action = [
+            "bedrock:InvokeModel",
+            "bedrock:InvokeModelWithResponseStream",
+            "bedrock:Converse",
+            "bedrock:ConverseStream",
+          ]
+          Resource = local.bedrock_baseline_invoke_resources
+        },
+      ],
+      [
+        {
+          # ApplyGuardrail acts on a guardrail resource, not a model ARN, so it
+          # cannot ride on the model-scoped Resource above. Guardrails are minted
+          # out-of-band (operator / separate component); scope to this account's
+          # guardrails rather than "*".
+          Sid      = "BedrockGuardrail"
+          Effect   = "Allow"
+          Action   = ["bedrock:ApplyGuardrail"]
+          Resource = "arn:${local.partition}:bedrock:*:${local.account_id}:guardrail/*"
+        },
+        {
+          Sid    = "Telemetry"
+          Effect = "Allow"
+          Action = [
+            "logs:CreateLogStream",
+            "logs:PutLogEvents",
+            "xray:PutTraceSegments",
+            "xray:PutTelemetryRecords",
+          ]
+          Resource = "*"
+        },
+        {
+          # The model-artifacts bucket is SSE-KMS with the data CMK, and the
+          # operator writes each tenant a bucket-policy grant scoped to
+          # tenants/<platform>/*. To read or write those objects the tenant must
+          # use the data CMK — but only through S3. The ViaService condition
+          # confines this to S3 (the tenant cannot decrypt cmk-data content
+          # directly), and the operator's per-prefix bucket policy is the actual
+          # tenant boundary. S3 SSE-KMS uses the aws:s3:arn encryption context,
+          # which the operator's per-tenant KMS grant (scoped to the PlatformId
+          # context, for a tenant's own direct KMS usage) deliberately does not
+          # cover — so this baseline grant is what authorizes the S3 path.
+          Sid    = "ModelArtifactsDataKMS"
+          Effect = "Allow"
+          Action = [
+            "kms:Decrypt",
+            "kms:GenerateDataKey",
+            "kms:DescribeKey",
+          ]
+          Resource = var.data_kms_key_arn
+          Condition = {
+            StringEquals = {
+              "kms:ViaService" = "s3.${var.region}.amazonaws.com"
+            }
           }
-        }
-      },
-    ]
+        },
+      ],
+    )
   })
 
   tags = local.tags
@@ -373,7 +402,7 @@ resource "aws_iam_role_policy" "operator" {
       # There is deliberately no kms:CreateGrant here. The operator issues no KMS
       # grants — a tenant's access to its own key is an IAM policy the operator
       # writes (tenant-key-access, naming exactly one key ARN), not a grant it
-      # creates. The statement that used to sit here covered CreateGrant,
+      # creates. A CreateGrant statement does not belong here:
       # ListGrants, RevokeGrant and DescribeKey on `key/*`: every key in the
       # region, with no condition narrowing which. Granting decrypt on the
       # platform data key to an attacker-controlled role was the third entry in

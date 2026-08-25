@@ -213,5 +213,5 @@ Leave them unset for a private endpoint.
    `live/aws/<account>/<region>/<env>/` path.
 2. Fill the six required `env.hcl` locals above.
 3. Set `AWS_ROLE_ARN` (repo Variable) and the OIDC trust for the new repo/env.
-4. `terragrunt run-all plan` from the env dir; deploy components in dependency
+4. `terragrunt run --all -- plan` from the env dir; deploy components in dependency
    order (see [architecture.md](architecture.md) Dependency Graph).

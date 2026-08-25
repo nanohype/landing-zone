@@ -49,7 +49,7 @@ mock_provider "aws" {
   # security assertions — boundary attachment is proven by equality, not by value).
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:us-west-2:123456789012:development-break-glass-alert"
+      arn = "arn:aws:sns:us-east-1:123456789012:development-break-glass-alert"
     }
   }
   mock_resource "aws_iam_policy" {
@@ -59,21 +59,21 @@ mock_provider "aws" {
   }
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/break-glass"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/break-glass"
     }
   }
-  # The EventBridge topic policy scopes aws:SourceArn to this rule's ARN; pin it so
-  # the jsonencode'd policy is fully known at plan and the SourceArn assertion is real.
+  # The delivery-failure alarm keys its RuleName dimension on this rule and the
+  # provider validates the ARN shape at plan time, so pin a real one.
   mock_resource "aws_cloudwatch_event_rule" {
     defaults = {
-      arn = "arn:aws:events:us-west-2:123456789012:rule/development-break-glass-detection"
+      arn = "arn:aws:events:us-east-1:123456789012:rule/development-break-glass-detection"
     }
   }
 }
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
   # A different account from the mocked self (123456789012), which is the point:
   # break-glass exists to survive THIS account's IAM being broken, so a principal
@@ -146,10 +146,11 @@ run "boundary_denies_self_escalation" {
       && contains(try(s.Action, []), "iam:CreatePolicyVersion")
       && contains(try(s.Action, []), "iam:UpdateAssumeRolePolicy")
       && contains(try(s.Action, []), "iam:PutRolePermissionsBoundary")
+      && contains(try(s.Action, []), "iam:DeleteRolePermissionsBoundary")
       && contains(try(s.Action, []), "sts:AssumeRole")
       && contains(try(s.Action, []), "organizations:*")
     ]) == 1
-    error_message = "break-glass boundary DenyIAMModifications must Deny all IAM identity-write, session-persistence, and escalation verbs (CreateAccessKey, Attach/PutUserPolicy, CreatePolicyVersion, UpdateAssumeRolePolicy, PutRolePermissionsBoundary, sts:AssumeRole) plus organizations:*"
+    error_message = "break-glass boundary DenyIAMModifications must Deny all IAM identity-write, session-persistence, and escalation verbs plus organizations:* — including BOTH boundary verbs: Put replaces a boundary and Delete strips it, so denying only Put leaves the ceiling removable in one call from the AdministratorAccess session it exists to cap"
   }
 }
 
@@ -161,30 +162,58 @@ run "alert_topic_encrypted_with_publisher_grant" {
   command = plan
 
   assert {
-    condition     = aws_sns_topic.break_glass.kms_master_key_id == "arn:aws:kms:us-west-2:123456789012:key/break-glass"
+    condition     = aws_sns_topic.break_glass.kms_master_key_id == "arn:aws:kms:us-east-1:123456789012:key/break-glass"
     error_message = "break-glass alert topic must set kms_master_key_id to the CMK ARN (SSE-KMS)"
   }
 
+  # CloudWatch populates aws:SourceAccount on the KMS call, so its grant carries
+  # the guard.
   assert {
     condition = length([
       for s in jsondecode(aws_kms_key.break_glass.policy).Statement :
-      s if try(s.Effect, "") == "Allow"
-      && contains(try(s.Principal.Service, []), "cloudwatch.amazonaws.com")
-      && contains(try(s.Principal.Service, []), "events.amazonaws.com")
+      s if try(s.Sid, "") == "AllowAlarmPublish"
+      && try(s.Effect, "") == "Allow"
+      && try(s.Principal.Service, "") == "cloudwatch.amazonaws.com"
       && contains(try(s.Action, []), "kms:GenerateDataKey*")
       && contains(try(s.Action, []), "kms:Decrypt")
       && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
     ]) == 1
-    error_message = "break-glass alert CMK policy must grant cloudwatch + events kms:GenerateDataKey*/Decrypt scoped by SourceAccount"
+    error_message = "break-glass alert CMK policy must grant cloudwatch kms:GenerateDataKey*/Decrypt scoped by SourceAccount"
+  }
+
+  # EventBridge must be a SEPARATE, unconditioned statement. An unpopulated
+  # condition key fails closed, so folding it back in with the CloudWatch grant
+  # silently disables encryption for the publish path the detection rule uses —
+  # the alert is accepted and dropped. The assertion is that no condition is
+  # present, because the failure it guards against is a condition reappearing.
+  assert {
+    condition = length([
+      for s in jsondecode(aws_kms_key.break_glass.policy).Statement :
+      s if try(s.Sid, "") == "AllowEventBridgePublish"
+      && try(s.Effect, "") == "Allow"
+      && try(s.Principal.Service, "") == "events.amazonaws.com"
+      && contains(try(s.Action, []), "kms:GenerateDataKey*")
+      && contains(try(s.Action, []), "kms:Decrypt")
+      && !can(s.Condition)
+    ]) == 1
+    error_message = "break-glass alert CMK must grant events.amazonaws.com kms:GenerateDataKey*/Decrypt in its own statement with NO Condition — EventBridge does not populate condition context, so a guard here fails closed and the assumption alert is dropped"
   }
 }
 
-# INVARIANT 6 — the assumption-alert topic's resource policy scopes the EventBridge
-# publish grant by aws:SourceAccount AND aws:SourceArn (the specific detection rule).
-# Those are the confused-deputy guards: without them the events service principal
-# acting for any account/rule could publish to (or forge alerts on) the break-glass
-# topic. Located by Sid, so statement reordering can't mask a regression.
-run "eventbridge_publish_scoped_by_source" {
+# INVARIANT 6 — the assumption-alert topic's resource policy grants the EventBridge
+# publish UNCONDITIONED, and a delivery failure pages.
+#
+# A confused-deputy guard is the intuitive shape here and it is the wrong one: AWS
+# does not populate condition context on the EventBridge-to-SNS publish path, so an
+# aws:SourceAccount or aws:SourceArn key evaluates empty, the statement never allows,
+# and the break-glass assumption alert is accepted by the rule and silently dropped.
+# The topic ARN in the statement is what bounds the grant in the guard's place.
+#
+# Because that removes a control, the pairing assertion is that the delivery failure
+# is itself alarmed — on FailedInvocations, which EventBridge emits and which reaches
+# the topic through cloudwatch.amazonaws.com, a principal whose guard does evaluate.
+# The watcher must not share the failure mode it watches.
+run "eventbridge_publish_unconditioned_and_failure_alarmed" {
   command = plan
 
   assert {
@@ -194,10 +223,21 @@ run "eventbridge_publish_scoped_by_source" {
       && try(s.Effect, "") == "Allow"
       && try(s.Principal.Service, "") == "events.amazonaws.com"
       && try(s.Action, "") == "SNS:Publish"
-      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
-      && try(s.Condition.ArnEquals["aws:SourceArn"], "") == "arn:aws:events:us-west-2:123456789012:rule/development-break-glass-detection"
+      && try(s.Resource, "") == aws_sns_topic.break_glass.arn
+      && !can(s.Condition)
     ]) == 1
-    error_message = "break-glass EventBridge topic policy must grant SNS:Publish to events.amazonaws.com scoped by both aws:SourceAccount and aws:SourceArn (the detection rule ARN)"
+    error_message = "break-glass EventBridge topic policy must grant SNS:Publish to events.amazonaws.com on this topic ARN with NO Condition — a condition key EventBridge does not populate makes the statement never allow, and the assumption alert is dropped with no error at the rule"
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.break_glass_delivery_failed.namespace == "AWS/Events"
+      && aws_cloudwatch_metric_alarm.break_glass_delivery_failed.metric_name == "FailedInvocations"
+      && aws_cloudwatch_metric_alarm.break_glass_delivery_failed.threshold == 0
+      && aws_cloudwatch_metric_alarm.break_glass_delivery_failed.dimensions["RuleName"] == aws_cloudwatch_event_rule.break_glass.name
+      && contains(aws_cloudwatch_metric_alarm.break_glass_delivery_failed.alarm_actions, aws_sns_topic.break_glass.arn)
+    )
+    error_message = "a failed delivery from the break-glass detection rule must alarm on AWS/Events FailedInvocations for that rule and publish to the alert topic — otherwise the only trace of an unannounced assumption is an unwatched counter"
   }
 }
 

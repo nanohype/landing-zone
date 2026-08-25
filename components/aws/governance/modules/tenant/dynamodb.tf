@@ -49,7 +49,7 @@ resource "aws_dynamodb_table" "audit" {
   # down together instead of the buckets emptying against a table that refuses.
   deletion_protection_enabled = local.allow_teardown ? false : var.tenant_config.deletion_protection
 
-  tags = local.tenant_tags
+  tags = local.data_tags
 }
 
 resource "aws_dynamodb_table" "cost" {
@@ -90,5 +90,5 @@ resource "aws_dynamodb_table" "cost" {
   # Same lever as the buckets — see audit_storage.tf.
   deletion_protection_enabled = local.allow_teardown ? false : var.tenant_config.deletion_protection
 
-  tags = local.tenant_tags
+  tags = local.data_tags
 }

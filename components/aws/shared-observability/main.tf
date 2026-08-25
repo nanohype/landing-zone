@@ -1,10 +1,16 @@
 # shared-observability — the fleet-wide destination for alarm delivery.
 #
 # A shared-services account runs one set of severity-routed SNS topics
-# (critical / warning / info) that every workload account's CloudWatch alarms
+# (critical / warning / info) that a workload account's CloudWatch alarms can
 # publish to directly, so a fleet-wide on-call watches one topic set instead of
 # one per cluster. Alarm *definitions* stay local to the resources they watch
 # (they reference local ARNs and dimensions); only the *destination* centralizes.
+#
+# Publishing here is opt-in per cluster, not automatic: a workload cluster's
+# `observability` component defaults to `create` mode and builds its own private
+# topics. It publishes here only when its leaf sets `observability_mode = "adopt"`
+# and passes this component's `sns_topic_arns` as `adopt_topic_arns`. Creating this
+# component grants the capability; it does not redirect anything on its own.
 #
 # Cross-account publish is authorized by org membership, not an account list: the
 # topic policies and the topics' CMK admit the CloudWatch service principal under
@@ -60,7 +66,7 @@ resource "aws_kms_key" "alerts" {
         Resource  = "*"
         Condition = { StringEquals = { "aws:SourceOrgID" = var.organization_id } }
       },
-      # CloudWatch alarms are no longer the only publisher. A workload cluster's
+      # CloudWatch alarms are not the only publisher. A workload cluster's
       # agent-platform kill-switch bus routes governance events — a budget
       # breach, an SLO burn-rate breach — straight to these topics, and an adopt-
       # mode cluster resolves those targets to THESE central topics rather than

@@ -21,21 +21,21 @@ mock_provider "aws" {
   mock_resource "aws_route53profiles_profile" {
     defaults = {
       id  = "rp-mock0000000001"
-      arn = "arn:aws:route53profiles:us-west-2:111111111111:profile/rp-mock0000000001"
+      arn = "arn:aws:route53profiles:us-east-1:111111111111:profile/rp-mock0000000001"
     }
   }
   # aws_ram_resource_association / _principal_association validate the share ARN prefix at plan;
   # the mock's random string is not a valid ARN, so pin a well-formed one.
   mock_resource "aws_ram_resource_share" {
     defaults = {
-      arn = "arn:aws:ram:us-west-2:111111111111:resource-share/mock-0000-0000-000000000000"
+      arn = "arn:aws:ram:us-east-1:111111111111:resource-share/mock-0000-0000-000000000000"
     }
   }
 }
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
   seed_vpc_id = "vpc-00aa11bb22cc33dd4"
 

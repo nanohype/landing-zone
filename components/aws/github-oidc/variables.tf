@@ -80,7 +80,7 @@ variable "create_oidc_provider" {
 }
 
 variable "oidc_thumbprints" {
-  description = "GitHub Actions OIDC TLS thumbprints. AWS no longer verifies these for this issuer, but the provider resource requires a value."
+  description = "GitHub Actions OIDC TLS thumbprints. AWS does not verify these for this issuer, but the provider resource requires a value."
   type        = list(string)
   default = [
     "6938fd4d98bab03faadb97b34396831e3780aea1",

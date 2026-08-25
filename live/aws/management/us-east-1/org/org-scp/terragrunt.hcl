@@ -7,6 +7,17 @@ include "envcommon" {
   merge_strategy = "deep"
 }
 
+# Every policy below ships with `target_ids = []`, and that is the shipped shape
+# rather than an omission: this repo authors the Deny policies, and an operator
+# decides where they bind. Attaching an SCP is an org-wide act with no undo path
+# for whoever it locks out, and the OU ids it would name are estate values a
+# substrate repo does not hold.
+#
+# The consequence to hold onto: a created policy governs nothing. Nothing in AWS
+# reports an unattached SCP as a gap, so the only signal is this file. Supply the
+# OU or account ids in `target_ids` to put a policy in force, and read
+# `docs/threat-model.md` section 6 first — several of these deny verbs the deploy
+# role itself uses.
 inputs = {
   policies = {
     DenyLeavingOrg = {
@@ -110,7 +121,6 @@ inputs = {
               StringNotEquals = {
                 "aws:RequestedRegion" = [
                   "us-east-1",
-                  "us-west-2",
                 ]
               }
             }
@@ -203,7 +213,7 @@ inputs = {
     }
 
     # Bedrock is reached in-region (agentgateway + IRSA callers all invoke in
-    # us-west-2 / us-east-1); there is no Bedrock VPC endpoint to key on, and
+    # us-east-1 / us-east-1); there is no Bedrock VPC endpoint to key on, and
     # SCPs gate API actions, not the cloudflared MCP tunnel's network egress.
     # So the sanctioned-egress guardrail is region-pinning, mirroring
     # RegionRestriction but scoped to model invocation.
@@ -227,7 +237,6 @@ inputs = {
               StringNotEquals = {
                 "aws:RequestedRegion" = [
                   "us-east-1",
-                  "us-west-2",
                 ]
               }
             }
@@ -303,8 +312,6 @@ inputs = {
     # GenerateDataKey/Decrypt by design (see tenant-key-access), so denying direct
     # use of those would break the thing they exist for.
     #
-    # target_ids stays empty. Attaching an SCP is an org-wide act with no undo path
-    # for whoever is locked out, and this repo does not decide that.
     DenyDirectUseOfPlatformKeys = {
       description = "Deny direct KMS use of the platform CMKs — service-mediated access only"
       target_ids  = []

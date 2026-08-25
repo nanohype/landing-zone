@@ -70,7 +70,7 @@ resource "aws_kms_key" "alerts" {
           }
         }
       },
-      # CloudWatch alarms are no longer the only publisher: the agent platform's
+      # CloudWatch alarms are not the only publisher: the agent platform's
       # kill-switch bus routes governance events (a budget breach, an SLO
       # burn-rate breach) straight to these topics. EventBridge needs the same
       # data key, and without this grant the publish is accepted and then
@@ -254,8 +254,7 @@ resource "aws_sns_topic_policy" "info" {
 # shared-observability owns in adopt mode, so one publish serves either shape and
 # a consumer wires against one interface regardless.
 #
-# All three tiers are published, not just the two the kill-switch rules consume
-# today. The severity set is the unit the observability-slo standard defines
+# All three tiers are published, not only the two the kill-switch rules consume. The severity set is the unit the observability-slo standard defines
 # (critical pages, warning tickets, info records recovery), and a discovery
 # contract that carries two thirds of it invites a consumer to guess the third.
 ################################################################################
@@ -333,6 +332,14 @@ resource "aws_cloudwatch_metric_alarm" "cluster_api_server_errors" {
   threshold         = var.alarm_config.api_server_error_threshold
   alarm_description = "EKS API server 5xx responses exceed ${var.alarm_config.api_server_error_threshold} per 5 minutes"
 
+  # Missing data is a fault here, not health. Every metric this component alarms on
+  # comes from the amazon-cloudwatch-observability agent; if that stops publishing —
+  # node exhaustion, an addon rollback, a broken Pod Identity binding — CloudWatch's
+  # default of `missing` drops these alarms to INSUFFICIENT_DATA, which a composite
+  # does not treat as ALARM. The cluster then reads healthy precisely because it has
+  # stopped reporting. A silent workload and a well workload must not look alike.
+  treat_missing_data = "breaching"
+
   dimensions = {
     ClusterName = var.cluster_name
   }
@@ -352,6 +359,11 @@ resource "aws_cloudwatch_metric_alarm" "node_cpu_utilization" {
   statistic           = "Average"
   threshold           = var.alarm_config.cpu_utilization_threshold
   alarm_description   = "EKS node CPU utilization exceeds ${var.alarm_config.cpu_utilization_threshold}%"
+
+  # Saturation, not liveness: absence of a utilization datapoint says nothing about
+  # whether the cluster is saturated, and treating it as breaching would page on the
+  # same missing-agent condition the liveness alarms above already cover once.
+  treat_missing_data = "missing"
 
   dimensions = {
     ClusterName = var.cluster_name
@@ -373,6 +385,11 @@ resource "aws_cloudwatch_metric_alarm" "node_memory_utilization" {
   threshold           = var.alarm_config.memory_utilization_threshold
   alarm_description   = "EKS node memory utilization exceeds ${var.alarm_config.memory_utilization_threshold}%"
 
+  # Saturation, not liveness: absence of a utilization datapoint says nothing about
+  # whether the cluster is saturated, and treating it as breaching would page on the
+  # same missing-agent condition the liveness alarms above already cover once.
+  treat_missing_data = "missing"
+
   dimensions = {
     ClusterName = var.cluster_name
   }
@@ -392,6 +409,10 @@ resource "aws_cloudwatch_metric_alarm" "cluster_failed_node_count" {
   statistic           = "Maximum"
   threshold           = 0
   alarm_description   = "EKS cluster has failed/not-ready nodes"
+
+  # Same reasoning as the API-server alarm: this is a liveness signal, so no data
+  # is a fault rather than an all-clear.
+  treat_missing_data = "breaching"
 
   dimensions = {
     ClusterName = var.cluster_name
@@ -420,10 +441,19 @@ resource "aws_cloudwatch_composite_alarm" "cluster_health_critical" {
   alarm_actions     = [local.topic_arns.critical]
   ok_actions        = [local.topic_arns.info]
 
-  alarm_rule = join(" OR ", [
-    "ALARM(\"${aws_cloudwatch_metric_alarm.cluster_api_server_errors[0].alarm_name}\")",
-    "ALARM(\"${aws_cloudwatch_metric_alarm.cluster_failed_node_count[0].alarm_name}\")",
-  ])
+  # The page-tier SLO burn-rate pairs roll up here rather than notifying on their
+  # own, so a cluster that is both hard-down and burning its budget still pages
+  # once. slo.tf builds them; the lookup is empty when the SLO is disabled.
+  alarm_rule = join(" OR ", concat(
+    [
+      "ALARM(\"${aws_cloudwatch_metric_alarm.cluster_api_server_errors[0].alarm_name}\")",
+      "ALARM(\"${aws_cloudwatch_metric_alarm.cluster_failed_node_count[0].alarm_name}\")",
+    ],
+    [
+      for key, c in aws_cloudwatch_composite_alarm.slo_burn :
+      "ALARM(\"${c.alarm_name}\")" if local.slo_burn_windows[key].severity == "critical"
+    ],
+  ))
 
   tags = local.alarm_tags.critical
 }
@@ -436,10 +466,19 @@ resource "aws_cloudwatch_composite_alarm" "cluster_health_degraded" {
   alarm_actions     = [local.topic_arns.warning]
   ok_actions        = [local.topic_arns.info]
 
-  alarm_rule = join(" OR ", [
-    "ALARM(\"${aws_cloudwatch_metric_alarm.node_cpu_utilization[0].alarm_name}\")",
-    "ALARM(\"${aws_cloudwatch_metric_alarm.node_memory_utilization[0].alarm_name}\")",
-  ])
+  # The ticket-tier SLO burn-rate pairs roll up here for the same reason the
+  # page-tier pairs roll up into the critical composite: one ticket per cluster,
+  # not one per window pair.
+  alarm_rule = join(" OR ", concat(
+    [
+      "ALARM(\"${aws_cloudwatch_metric_alarm.node_cpu_utilization[0].alarm_name}\")",
+      "ALARM(\"${aws_cloudwatch_metric_alarm.node_memory_utilization[0].alarm_name}\")",
+    ],
+    [
+      for key, c in aws_cloudwatch_composite_alarm.slo_burn :
+      "ALARM(\"${c.alarm_name}\")" if local.slo_burn_windows[key].severity == "warning"
+    ],
+  ))
 
   tags = local.alarm_tags.warning
 }
@@ -448,93 +487,272 @@ resource "aws_cloudwatch_composite_alarm" "cluster_health_degraded" {
 # CloudWatch Dashboard
 ################################################################################
 
+# The board a cluster represents itself with.
+#
+# Row order is the reading order: the SLO first, then what moves it (errors,
+# traffic, latency), then the resources that explain those (saturation). The
+# failure-state panel sits with the saturation row rather than last on its own,
+# because the end of a scan is where a load-bearing panel goes unseen.
+#
+# Every series is a cluster-substrate noun — the API server, its request stream,
+# its nodes — rather than generic infrastructure. A board of node CPU and memory
+# alone shows the host of the system rather than the system, which the
+# observability-slo standard names as not representing it at all.
 resource "aws_cloudwatch_dashboard" "eks" {
   count = var.enable_dashboard ? 1 : 0
 
   dashboard_name = "${var.cluster_name}-overview"
 
   dashboard_body = jsonencode({
-    widgets = [
-      {
-        type   = "metric"
-        x      = 0
-        y      = 0
-        width  = 12
-        height = 6
-        properties = {
-          title   = "Node CPU Utilization"
-          metrics = [["ContainerInsights", "node_cpu_utilization", "ClusterName", var.cluster_name]]
-          period  = 300
-          stat    = "Average"
-          region  = var.region
-          view    = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 12
-        y      = 0
-        width  = 12
-        height = 6
-        properties = {
-          title   = "Node Memory Utilization"
-          metrics = [["ContainerInsights", "node_memory_utilization", "ClusterName", var.cluster_name]]
-          period  = 300
-          stat    = "Average"
-          region  = var.region
-          view    = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 0
-        y      = 6
-        width  = 12
-        height = 6
-        properties = {
-          title = "Pod Count"
-          metrics = [
-            ["ContainerInsights", "cluster_node_count", "ClusterName", var.cluster_name],
-            ["ContainerInsights", "namespace_number_of_running_pods", "ClusterName", var.cluster_name],
-          ]
-          period = 300
-          stat   = "Average"
-          region = var.region
-          view   = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 12
-        y      = 6
-        width  = 12
-        height = 6
-        properties = {
-          title = "Network (Bytes/sec)"
-          metrics = [
-            ["ContainerInsights", "node_network_total_bytes", "ClusterName", var.cluster_name],
-          ]
-          period = 300
-          stat   = "Average"
-          region = var.region
-          view   = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 12
-        y      = 12
-        width  = 12
-        height = 6
-        properties = {
-          title   = "Cluster Failed Nodes"
-          metrics = [["ContainerInsights", "cluster_failed_node_count", "ClusterName", var.cluster_name]]
-          period  = 300
-          stat    = "Maximum"
-          region  = var.region
-          view    = "timeSeries"
-        }
-      },
-    ]
+    widgets = concat(
+      # ── SLO ──────────────────────────────────────────────────────────────────
+      # Present only when the SLO is declared: a budget gauge with no objective
+      # behind it is a number with no meaning.
+      #
+      # `slice(..., 0, n)` rather than a ternary. The three widgets below are
+      # objects with different attribute sets — one carries `annotations`, one
+      # `yAxis` — so the list is a TUPLE, and OpenTofu cannot unify a tuple type
+      # with the empty tuple a ternary's other branch produces. Slicing to zero
+      # yields the same empty result without asking for that unification.
+      slice([
+        {
+          type   = "metric"
+          x      = 0
+          y      = 0
+          width  = 8
+          height = 6
+          properties = {
+            title = "Availability SLI vs objective (30d)"
+            metrics = [
+              [{ id = "e", expression = "SUM(errors)", visible = false }],
+              [{ id = "r", expression = "SUM(requests)", visible = false }],
+              [{ id = "sli", expression = "IF(r > 0, (1 - e / r) * 100, 100)", label = "SLI %" }],
+              ["ContainerInsights", "apiserver_request_total_5xx", "ClusterName", var.cluster_name, { id = "errors", visible = false }],
+              ["ContainerInsights", "apiserver_request_total", "ClusterName", var.cluster_name, { id = "requests", visible = false }],
+            ]
+            period = 2592000
+            stat   = "Sum"
+            region = var.region
+            view   = "singleValue"
+            annotations = {
+              horizontal = [{
+                label = "objective"
+                value = var.slo_availability_objective * 100
+              }]
+            }
+          }
+        },
+        {
+          type   = "metric"
+          x      = 8
+          y      = 0
+          width  = 8
+          height = 6
+          properties = {
+            title = "Error budget remaining (30d)"
+            metrics = [
+              [{ id = "e2", expression = "SUM(be)", visible = false }],
+              [{ id = "r2", expression = "SUM(br)", visible = false }],
+              [{ id = "budget", expression = "IF(r2 > 0, (1 - (e2 / r2) / ${local.slo_error_budget}) * 100, 100)", label = "Budget remaining %" }],
+              ["ContainerInsights", "apiserver_request_total_5xx", "ClusterName", var.cluster_name, { id = "be", visible = false }],
+              ["ContainerInsights", "apiserver_request_total", "ClusterName", var.cluster_name, { id = "br", visible = false }],
+            ]
+            period = 2592000
+            stat   = "Sum"
+            region = var.region
+            view   = "gauge"
+            yAxis  = { left = { min = 0, max = 100 } }
+          }
+        },
+        {
+          type   = "metric"
+          x      = 16
+          y      = 0
+          width  = 8
+          height = 6
+          properties = {
+            title = "Budget burn rate — fast (1h) and slow (6h)"
+            metrics = [
+              [{ id = "fb", expression = "IF(fr > 0, (fe / fr) / ${local.slo_error_budget}, 0)", label = "1h burn" }],
+              [{ id = "sb", expression = "IF(sr > 0, (se / sr) / ${local.slo_error_budget}, 0)", label = "6h burn" }],
+              ["ContainerInsights", "apiserver_request_total_5xx", "ClusterName", var.cluster_name, { id = "fe", period = 3600, visible = false }],
+              ["ContainerInsights", "apiserver_request_total", "ClusterName", var.cluster_name, { id = "fr", period = 3600, visible = false }],
+              ["ContainerInsights", "apiserver_request_total_5xx", "ClusterName", var.cluster_name, { id = "se", period = 21600, visible = false }],
+              ["ContainerInsights", "apiserver_request_total", "ClusterName", var.cluster_name, { id = "sr", period = 21600, visible = false }],
+            ]
+            stat   = "Sum"
+            region = var.region
+            view   = "timeSeries"
+            annotations = {
+              horizontal = [
+                { label = "page (14.4x)", value = 14.4 },
+                { label = "ticket (3x)", value = 3 },
+              ]
+            }
+          }
+        },
+      ], 0, local.slo_enabled ? 3 : 0),
+
+      # ── Errors and traffic ───────────────────────────────────────────────────
+      [
+        {
+          type   = "metric"
+          x      = 0
+          y      = 6
+          width  = 12
+          height = 6
+          properties = {
+            title = "API server error ratio"
+            metrics = [
+              [{ id = "ratio", expression = "IF(tr > 0, (te / tr) * 100, 0)", label = "5xx %" }],
+              ["ContainerInsights", "apiserver_request_total_5xx", "ClusterName", var.cluster_name, { id = "te", visible = false }],
+              ["ContainerInsights", "apiserver_request_total", "ClusterName", var.cluster_name, { id = "tr", visible = false }],
+            ]
+            period = 300
+            stat   = "Sum"
+            region = var.region
+            view   = "timeSeries"
+          }
+        },
+        {
+          type   = "metric"
+          x      = 12
+          y      = 6
+          width  = 12
+          height = 6
+          properties = {
+            title = "API server request rate and 5xx"
+            metrics = [
+              ["ContainerInsights", "apiserver_request_total", "ClusterName", var.cluster_name, { label = "requests" }],
+              ["ContainerInsights", "apiserver_request_total_5xx", "ClusterName", var.cluster_name, { label = "5xx" }],
+            ]
+            period = 300
+            stat   = "Sum"
+            region = var.region
+            view   = "timeSeries"
+          }
+        },
+
+        # ── Latency ────────────────────────────────────────────────────────────
+        # Quantiles from the request-duration series, never an average: an average
+        # latency hides the tail that the requests people notice live in.
+        {
+          type   = "metric"
+          x      = 0
+          y      = 12
+          width  = 12
+          height = 6
+          properties = {
+            title = "API server request duration (p50 / p95 / p99)"
+            metrics = [
+              ["ContainerInsights", "apiserver_request_duration_seconds", "ClusterName", var.cluster_name, { label = "p50", stat = "p50" }],
+              ["...", { label = "p95", stat = "p95" }],
+              ["...", { label = "p99", stat = "p99" }],
+            ]
+            period = 300
+            region = var.region
+            view   = "timeSeries"
+          }
+        },
+        {
+          type   = "metric"
+          x      = 12
+          y      = 12
+          width  = 12
+          height = 6
+          properties = {
+            title   = "API server in-flight requests"
+            metrics = [["ContainerInsights", "apiserver_current_inflight_requests", "ClusterName", var.cluster_name]]
+            period  = 300
+            stat    = "Maximum"
+            region  = var.region
+            view    = "timeSeries"
+          }
+        },
+
+        # ── Saturation ─────────────────────────────────────────────────────────
+        {
+          type   = "metric"
+          x      = 0
+          y      = 18
+          width  = 8
+          height = 6
+          properties = {
+            title   = "Node CPU utilization"
+            metrics = [["ContainerInsights", "node_cpu_utilization", "ClusterName", var.cluster_name]]
+            period  = 300
+            stat    = "Average"
+            region  = var.region
+            view    = "timeSeries"
+          }
+        },
+        {
+          type   = "metric"
+          x      = 8
+          y      = 18
+          width  = 8
+          height = 6
+          properties = {
+            title   = "Node memory utilization"
+            metrics = [["ContainerInsights", "node_memory_utilization", "ClusterName", var.cluster_name]]
+            period  = 300
+            stat    = "Average"
+            region  = var.region
+            view    = "timeSeries"
+          }
+        },
+        {
+          type   = "metric"
+          x      = 16
+          y      = 18
+          width  = 8
+          height = 6
+          properties = {
+            # Titled for both series it draws. A panel titled for one of two
+            # metrics sends a reader to the wrong runbook: a node scale-down and a
+            # pod eviction look identical under a title that claims only one.
+            title = "Nodes and running pods"
+            metrics = [
+              ["ContainerInsights", "cluster_node_count", "ClusterName", var.cluster_name, { label = "nodes" }],
+              ["ContainerInsights", "namespace_number_of_running_pods", "ClusterName", var.cluster_name, { label = "running pods" }],
+            ]
+            period = 300
+            stat   = "Average"
+            region = var.region
+            view   = "timeSeries"
+          }
+        },
+        {
+          type   = "metric"
+          x      = 0
+          y      = 24
+          width  = 12
+          height = 6
+          properties = {
+            title   = "Failed / not-ready nodes"
+            metrics = [["ContainerInsights", "cluster_failed_node_count", "ClusterName", var.cluster_name]]
+            period  = 300
+            stat    = "Maximum"
+            region  = var.region
+            view    = "timeSeries"
+          }
+        },
+        {
+          type   = "metric"
+          x      = 12
+          y      = 24
+          width  = 12
+          height = 6
+          properties = {
+            title   = "Node network throughput (bytes/sec)"
+            metrics = [["ContainerInsights", "node_network_total_bytes", "ClusterName", var.cluster_name]]
+            period  = 300
+            stat    = "Average"
+            region  = var.region
+            view    = "timeSeries"
+          }
+        },
+      ],
+    )
   })
 }

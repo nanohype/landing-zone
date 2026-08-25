@@ -152,7 +152,7 @@ variable "tenants" {
 
   # Aurora Serverless v2 capacity is 0.5–256 ACU in half-ACU steps, plus 0 on the
   # floor only, which is the auto-pause setting. The Platform CRD carries the same
-  # bounds, and this is not redundant with it: var.tenants is rendered from the
+  # bounds, and both are needed: var.tenants is rendered from the
   # CRs but the leaf can be edited directly, and the CRD's own comment used to
   # claim this boundary enforced the range while nothing here did. A capacity AWS
   # rejects should fail at plan, not part-way through an apply.

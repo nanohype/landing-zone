@@ -34,7 +34,6 @@ on:
         default: "e2e-smoke"
 
 permissions:
-  id-token: write
   contents: read
 
 # Never let two runs race on the same region's substrate.
@@ -44,6 +43,12 @@ concurrency:
 
 jobs:
   e2e:
+    permissions:
+      # Scoped to this job rather than the workflow: a job added here later
+      # would otherwise inherit the right to mint an OIDC token and assume
+      # the AWS deploy role without anyone granting it.
+      id-token: write
+      contents: read
     runs-on: ubuntu-latest
     # Two jobs at once. It scopes the OIDC subject claim to
     # `repo:nanohype/landing-zone:environment:e2e`, which is what the deploy role
@@ -54,32 +59,53 @@ jobs:
     environment: e2e
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: nanohype/eks-agent-platform
           path: .siblings/eks-agent-platform
           token: ${{ secrets.E2E_GITHUB_TOKEN }}
-      - uses: actions/checkout@v4
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: nanohype/cloudgov
           path: .siblings/cloudgov
           token: ${{ secrets.E2E_GITHUB_TOKEN }}
+          persist-credentials: false
 
-      - uses: opentofu/setup-opentofu@v1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.11.5"
+      # The same version ci.yml validates every leaf against. It was 0.99.4 here
+      # while ci.yml pinned 1.0.8 — and the `run-all` to `run --all` CLI change
+      # straddles that boundary, so this workflow, the only one that spends real
+      # money, was applying config that had been validated by a different tool.
       - name: install terragrunt
         run: |
-          curl -fsSL -o /usr/local/bin/terragrunt \
-            https://github.com/gruntwork-io/terragrunt/releases/download/v0.99.4/terragrunt_linux_amd64
-          chmod +x /usr/local/bin/terragrunt
-      - uses: actions/setup-go@v5
+          set -euo pipefail
+          # Bounded and verified. An unverified binary fetched over the network is
+          # the widest hole in this workflow: it runs next, holding an OIDC
+          # credential for a real AWS account. The published SHA256SUMS is fetched
+          # from the same release and checked before the binary is made executable.
+          curl -fsSL --max-time 120 -o /tmp/terragrunt \
+            "https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64"
+          curl -fsSL --max-time 60 -o /tmp/terragrunt.SHA256SUMS \
+            "https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/SHA256SUMS"
+          grep ' terragrunt_linux_amd64$' /tmp/terragrunt.SHA256SUMS \
+            | sed 's| terragrunt_linux_amd64$|  /tmp/terragrunt|' \
+            | sha256sum -c -
+          install -m 0755 /tmp/terragrunt /usr/local/bin/terragrunt
+          terragrunt --version
+        env:
+          TERRAGRUNT_VERSION: "1.0.8"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.26"
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
         with:
           role-to-assume: ${{ vars.E2E_AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}

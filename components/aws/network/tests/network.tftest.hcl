@@ -31,8 +31,8 @@
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = {
-      names    = ["us-west-2a", "us-west-2b", "us-west-2c", "us-west-2d"]
-      zone_ids = ["usw2-az1", "usw2-az2", "usw2-az3", "usw2-az4"]
+      names    = ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d"]
+      zone_ids = ["use1-az1", "use1-az2", "use1-az3", "use1-az4"]
     }
   }
   mock_data "aws_vpc_ipam_preview_next_cidr" {
@@ -58,8 +58,8 @@ mock_provider "aws" {
   mock_data "aws_subnet" {
     defaults = {
       vpc_id               = "vpc-adopt"
-      availability_zone    = "us-west-2a"
-      availability_zone_id = "usw2-az1"
+      availability_zone    = "us-east-1a"
+      availability_zone_id = "use1-az1"
     }
   }
   # A route object carries the full aws_route_table.routes schema; the mock must supply
@@ -116,14 +116,14 @@ mock_provider "aws" {
   }
   mock_resource "aws_cloudwatch_log_group" {
     defaults = {
-      arn = "arn:aws:logs:us-west-2:123456789012:log-group:flow-logs-mock"
+      arn = "arn:aws:logs:us-east-1:123456789012:log-group:flow-logs-mock"
     }
   }
 }
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
 }
 
@@ -148,8 +148,8 @@ run "create_default" {
     error_message = "no IPAM carving-base pin should exist when ipam_pool_id is unset"
   }
   assert {
-    condition     = join(",", output.private_subnet_az_ids) == "usw2-az1,usw2-az2,usw2-az3"
-    error_message = "create mode must resolve subnet AZ IDs (usw2-azN) from the AZ data source's zone_ids, in order"
+    condition     = join(",", output.private_subnet_az_ids) == "use1-az1,use1-az2,use1-az3"
+    error_message = "create mode must resolve subnet AZ IDs (use1-azN) from the AZ data source's zone_ids, in order"
   }
   assert {
     condition     = length(output.nat_gateway_ids) == 1
@@ -393,8 +393,8 @@ run "adopt_happy" {
     error_message = "adopt mode must resolve private_subnet_ids from the supplied IDs, in order"
   }
   assert {
-    condition     = output.private_subnet_az_ids[0] == "usw2-az1"
-    error_message = "adopt mode must expose cross-account-stable AZ IDs (usw2-azN) from the subnet data sources, not AZ names"
+    condition     = output.private_subnet_az_ids[0] == "use1-az1"
+    error_message = "adopt mode must expose cross-account-stable AZ IDs (use1-azN) from the subnet data sources, not AZ names"
   }
   assert {
     condition     = output.network_mode == "adopt"
@@ -418,7 +418,7 @@ run "adopt_subnet_wrong_vpc" {
     target = data.aws_subnet.adopt_private
     values = {
       vpc_id            = "vpc-someone-else"
-      availability_zone = "us-west-2a"
+      availability_zone = "us-east-1a"
     }
   }
 

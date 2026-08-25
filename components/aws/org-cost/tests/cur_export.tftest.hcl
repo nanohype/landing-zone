@@ -16,7 +16,7 @@ mock_provider "aws" {
   }
   mock_data "aws_region" {
     defaults = {
-      region = "us-west-2"
+      region = "us-east-1"
     }
   }
   # The S3 bucket module builds its policy from a policy document. A generated
@@ -39,7 +39,7 @@ mock_provider "aws" {
 
 variables {
   environment      = "org"
-  region           = "us-west-2"
+  region           = "us-east-1"
   team             = "platform"
   tags             = {}
   org_budget_limit = 10000

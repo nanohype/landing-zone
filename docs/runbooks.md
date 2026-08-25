@@ -367,7 +367,7 @@ None of them reads a region out of the middle of a string.
 
 The one that bit this repo: `org-security` enrolled
 
-    arn:aws:securityhub:us-west-2::standards/aws-foundational-security-best-practices/v/1.0.0
+    arn:aws:securityhub:us-east-1::standards/aws-foundational-security-best-practices/v/1.0.0
 
 That names a *regional standard*, not a path. Left alone it would have applied
 cleanly from a us-east-1 account and enrolled a standard in a region the org SCP

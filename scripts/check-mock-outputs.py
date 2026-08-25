@@ -19,6 +19,8 @@ import os
 import re
 import sys
 
+from _hcl import blank_comments
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENVCOMMON = os.path.join(REPO, "live", "_envcommon", "aws")
 COMPONENTS = os.path.join(REPO, "components", "aws")
@@ -35,8 +37,11 @@ def component_outputs(component):
     if not os.path.isfile(path):
         return None
     names = set()
+    # The consumer's view: OpenTofu does not see comments, so a commented-out
+    # `output` block is not a declared output. Reading raw text here would count
+    # one as present and report agreement between two sets that do not agree.
     with open(path) as fh:
-        for line in fh:
+        for line in blank_comments(fh.read()).splitlines():
             m = OUTPUT_RE.match(line)
             if m:
                 names.add(m.group(1))

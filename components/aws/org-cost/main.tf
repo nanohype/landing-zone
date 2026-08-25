@@ -3,6 +3,11 @@ data "aws_region" "current" {}
 data "aws_partition" "current" {}
 
 locals {
+  # BackupPolicy goes on the record buckets only when an operator names a plan.
+  # A tag that matches no plan selects nothing and reads as protected regardless,
+  # so the absent case is an absent tag rather than an empty one.
+  record_tags = var.backup_policy == "" ? local.tags : merge(local.tags, { BackupPolicy = var.backup_policy })
+
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.region
 
@@ -229,7 +234,7 @@ module "cur_bucket" {
   attach_policy = true
   policy        = local.cur_bucket_policy
 
-  tags = merge(local.tags, { Name = "org-cur-export" })
+  tags = merge(local.record_tags, { Name = "org-cur-export" })
 }
 
 resource "aws_bcmdataexports_export" "cur" {

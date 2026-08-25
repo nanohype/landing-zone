@@ -12,10 +12,21 @@ echo "Creating S3 bucket: ${BUCKET}"
 if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
   echo "Bucket already exists."
 else
-  aws s3api create-bucket \
-    --bucket "${BUCKET}" \
-    --region "${REGION}" \
-    --create-bucket-configuration LocationConstraint="${REGION}"
+  # us-east-1 is the one region that must NOT carry a LocationConstraint. It is
+  # S3's implicit default, and CreateBucket rejects a request naming it with
+  # InvalidLocationConstraint — so the unconditional form fails in exactly the
+  # region every tree in this repo deploys into, on the documented first step of
+  # standing up an account.
+  if [ "${REGION}" = "us-east-1" ]; then
+    aws s3api create-bucket \
+      --bucket "${BUCKET}" \
+      --region "${REGION}"
+  else
+    aws s3api create-bucket \
+      --bucket "${BUCKET}" \
+      --region "${REGION}" \
+      --create-bucket-configuration LocationConstraint="${REGION}"
+  fi
 
   aws s3api put-bucket-versioning \
     --bucket "${BUCKET}" \

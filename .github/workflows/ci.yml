@@ -6,30 +6,39 @@ on:
   push:
     branches: [main]
 
+# The workflow default is read-only. Every job that needs to write says so at the
+# job level, so a new job inherits no ability to comment on a pull request or mint
+# an OIDC token — the plan job is the only one that needs either, and it declares
+# both itself.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   placeholders:
     name: Zero-placeholder gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: ./scripts/no-placeholders.sh
 
   fmt:
     name: Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.11.5"
       - run: tofu fmt -check -recursive components/
       - run: tofu fmt -check -recursive modules/
       - run: tofu fmt -check -recursive fleet/
-      - uses: gruntwork-io/terragrunt-action@v3
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
           tg_version: "1.0.8"
           tofu_version: "1.11.5"
@@ -49,11 +58,14 @@ jobs:
   discover:
     name: Discover Matrices
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       validate: ${{ steps.matrices.outputs.validate }}
       plan: ${{ steps.matrices.outputs.plan }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - id: matrices
         run: |
           validate=$(
@@ -83,26 +95,52 @@ jobs:
                   })
               '
           )
+          # Every value here becomes a matrix entry, and matrix entries reach
+          # both `run:` blocks and `working-directory:`. They are derived from
+          # PATH COMPONENTS of files in the checked-out tree, and on a
+          # pull_request that tree is the contributor's — so a directory named
+          # with a quote and a semicolon is an injection into every job that
+          # interpolates it. `working-directory:` cannot be made safe with env
+          # indirection, so the names are constrained here, at the source, where
+          # one check covers every consumer.
+          for set in "$validate" "$plan"; do
+            # Counted, not tested for emptiness: an offending value that is
+            # itself the empty string (a doubled slash, a path shorter than the
+            # split expects) renders as an empty line, and a `[ -n "$bad" ]`
+            # test reads that as "no offenders" — the offender that hides is the
+            # one whose rendering is indistinguishable from finding none.
+            bad_count=$(printf '%s' "$set" | jq '[ .[] | .[] | select(type != "string" or (test("^[A-Za-z0-9][A-Za-z0-9._-]*$") | not)) ] | length')
+            if [ "$bad_count" -ne 0 ]; then
+              echo "::error::Refusing to build a matrix from $bad_count unsafe path component(s):" >&2
+              printf '%s' "$set" | jq -r '.[] | .[] | select(type != "string" or (test("^[A-Za-z0-9][A-Za-z0-9._-]*$") | not)) | "  [" + (. | tostring) + "]"' >&2
+              echo "A matrix value reaches run: and working-directory:. Path components must match ^[A-Za-z0-9][A-Za-z0-9._-]*$." >&2
+              exit 1
+            fi
+          done
+
           echo "validate=$validate" >> "$GITHUB_OUTPUT"
           echo "plan=$plan" >> "$GITHUB_OUTPUT"
 
   validate:
     name: Validate (${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: discover
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.discover.outputs.validate) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.11.5"
       - name: Init and Validate
         working-directory: ${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }}
         run: |
-          tofu init -backend=false -input=false
+          tofu init -backend=false -input=false -lockfile=readonly
           tofu validate
 
   # `tofu test` unit tests. They run at command = plan against dummy/mocked
@@ -114,9 +152,12 @@ jobs:
   test:
     name: Unit Tests (tofu test)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.11.5"
       - name: tofu test
@@ -126,7 +167,7 @@ jobs:
           while IFS= read -r dir; do
             found=1
             echo "::group::tofu test — $dir"
-            ( cd "$dir" && tofu init -backend=false -input=false && tofu test )
+            ( cd "$dir" && tofu init -backend=false -input=false -lockfile=readonly && tofu test )
             echo "::endgroup::"
           done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' 'fleet/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
           if [ "$found" -eq 0 ]; then
@@ -137,6 +178,7 @@ jobs:
   tflint:
     name: TFLint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # tflint --init fetches the aws ruleset from the GitHub releases API. Without a
     # token that call is UNauthenticated (60/hr per runner IP), so on a shared-IP
     # runner it intermittently 403s ("API rate limit exceeded") and reds the build
@@ -145,8 +187,10 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: terraform-linters/setup-tflint@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6
         with:
           tflint_version: v0.63.1
       - run: tflint --init --config .tflint-aws.hcl
@@ -163,8 +207,12 @@ jobs:
   checkov:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+        with:
+          persist-credentials: false
       # HARD gate across every Terraform tree — components, the fleet vend roots,
       # and the shared modules. Any finding not covered by .checkov.yaml fails the
       # build. The deliberately-accepted posture trade-offs (single-region
@@ -174,21 +222,21 @@ jobs:
       # never silently advisory. The same config_file (its global skip list)
       # applies to all three scans.
       - name: Scan components/aws
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@59b9d7edfcad5b87fbe3f473a9a134a721ad03f8 # v12
         with:
           directory: components/aws/
           framework: terraform
           soft_fail: false
           config_file: .checkov.yaml
       - name: Scan fleet/aws
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@59b9d7edfcad5b87fbe3f473a9a134a721ad03f8 # v12
         with:
           directory: fleet/aws/
           framework: terraform
           soft_fail: false
           config_file: .checkov.yaml
       - name: Scan modules/aws
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@59b9d7edfcad5b87fbe3f473a9a134a721ad03f8 # v12
         with:
           directory: modules/aws/
           framework: terraform
@@ -205,14 +253,17 @@ jobs:
   evaluate:
     name: Terragrunt Evaluate (live)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       TERRAGRUNT_ACCOUNT_ID: "111111111111"
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.11.5"
-      - uses: gruntwork-io/terragrunt-action@v3
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
           tg_version: "1.0.8"
           tofu_version: "1.11.5"
@@ -335,9 +386,12 @@ jobs:
   mock-outputs:
     name: Mock Outputs Cross-check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-mock-outputs.py
@@ -353,9 +407,12 @@ jobs:
   account-local-deps:
     name: Workload Deps Are Account-Local
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-account-local-deps.py
@@ -373,8 +430,11 @@ jobs:
   foreign-placeholders:
     name: Appliable Leaves Name No Foreign Placeholder
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: ./scripts/check-foreign-placeholders.py
 
   # The adjacent shape: not a placeholder that reaches AWS, but a reference that
@@ -388,8 +448,11 @@ jobs:
   escaped-interpolations:
     name: Every Escaped Interpolation Is Explained
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: python3 scripts/check-escaped-interpolations.py
 
   # A tenant declares its stateful substrate once, in its Platform CR, and two
@@ -406,33 +469,40 @@ jobs:
   tenant-substrate-render:
     name: Rendered Substrate Matches The Platform CRs
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: nanohype/competitive-intelligence
           path: tenant-crs/competitive-intelligence
           sparse-checkout: platform.yaml
           sparse-checkout-cone-mode: false
-      - uses: actions/checkout@v4
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: nanohype/digest-pipeline
           path: tenant-crs/digest-pipeline
           sparse-checkout: platform.yaml
           sparse-checkout-cone-mode: false
-      - uses: actions/checkout@v4
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: nanohype/incident-response
           path: tenant-crs/incident-response
           sparse-checkout: platform.yaml
           sparse-checkout-cone-mode: false
-      - uses: actions/checkout@v4
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: nanohype/slack-knowledge-bot
           path: tenant-crs/slack-knowledge-bot
           sparse-checkout: platform.yaml
           sparse-checkout-cone-mode: false
-      - run: pip install --quiet pyyaml
+          persist-credentials: false
+      - run: pip install --quiet pyyaml==6.0.3
       - name: re-render every environment that selects tenants
         run: |
           set -euo pipefail
@@ -460,8 +530,11 @@ jobs:
   architecture-components:
     name: Architecture Doc Matches The Tree
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: ./scripts/check-architecture-components.sh
 
   # Guards the component smoke tests: every output key a smoke test reads out of
@@ -471,9 +544,12 @@ jobs:
   smoke-outputs:
     name: Smoke Test Outputs Cross-check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-smoke-outputs.py
@@ -487,9 +563,12 @@ jobs:
   datastore-ingress-source:
     name: Datastores Admit The Node SG
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-datastore-ingress-source.py
@@ -504,12 +583,299 @@ jobs:
   engine-version-pins:
     name: No Minor-Version Engine Pins
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-engine-version-pins.py
+
+  # The region a reader believes this repo targets comes from prose and examples —
+  # a `task plan REGION=...` in a README, a path in a skill, an ARN in a runbook —
+  # not from the tree. Retargeting the live tree is a mechanical rename CI notices
+  # at once; retargeting the prose is a hand edit across dozens of files that
+  # nothing checked, so the prose is what survived a region move and every copied
+  # command landed on a directory that did not exist. The gate reads the deployed
+  # regions out of live/aws/ rather than naming one, so it keeps holding through
+  # the next move.
+  region-consistency:
+    name: Prose Names Only Deployed Regions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-region-consistency.py
+
+  # The test job DISCOVERS suites, which is right for running them and wrong for
+  # guaranteeing them: a root with no tests/ contributes nothing to the glob, so
+  # it is never mentioned and the job goes green having tested everything that
+  # asked to be tested. Four roots sat that way, three minting IAM. Discovery
+  # cannot see an absence, so the absence is asserted here.
+  roots-tested:
+    name: Every Root Has A Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-roots-tested.py
+
+  # `|| true` handles a failure and does nothing about a hang. kubectl and curl
+  # are unbounded by default, and in the e2e teardown the caller is holding an EKS
+  # cluster and NAT gateways that keep billing while it waits. The claim that
+  # every call was bounded was written into a comment before it was true, which is
+  # what made the gap invisible — so it is a gate now rather than a sentence.
+  network-deadlines:
+    name: Network Calls Are Bounded
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-network-deadlines.py
+
+  # Both fleet boundaries cap the same cluster and agent-platform operator roles,
+  # so an action granted in one ceiling and not the other is accepted at the
+  # grant and denied at call time on every vended cluster. That constraint was
+  # written in a comment in both files for two prior grants; a comment records a
+  # class, it does not close one.
+  fleet-ceiling-parity:
+    name: Fleet Ceilings Agree
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-fleet-ceiling-parity.py
+
+  # These scripts declare `env bash` and CI runs bash 5, but macOS ships 3.2, so
+  # CI passing is not evidence a developer or an incident responder can run them.
+  # shellcheck does not cover this: it flags none of these constructs as a
+  # version requirement, so being clean under it proves nothing about portability.
+  bash-portability:
+    name: Scripts Run On Bash 3.2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-bash-portability.py
+
+  # Branch protection watches `merge gate` alone, so a job outside its needs list
+  # runs, goes red, and does not block the merge — a gate that reports and cannot
+  # reject. Adding a gate is two edits and forgetting the second looks like
+  # nothing at all, which is why this is checked rather than remembered.
+  merge-gate-complete:
+    name: Merge Gate Requires Every Job
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet pyyaml==6.0.3
+      - run: python3 scripts/check-merge-gate-complete.py
+
+  # A gate that fails closed on a missing module is behaving correctly, and the
+  # job around it cannot tell that refusal apart from a real finding — the build
+  # goes red pointing at the tree when the fault is a missing install step.
+  # Adding a gate is two edits and the second is easy to miss, because the module
+  # is usually present on the machine where the gate was written.
+  gate-deps-installed:
+    name: Jobs Install What Their Gates Import
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-gate-deps-installed.py
+
+  # Prose that names a thing is a claim about the world, and it rots in one
+  # direction: renaming a file updates every import and no sentence. So the prose
+  # is always the half that goes stale, silently, in the documents a newcomer
+  # reads first. This repo learned it once already — CLAUDE.md named a gate as
+  # .sh when the file is .py, in the document every session here loads.
+  named-paths:
+    name: Paths Named In Prose Resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-named-paths-resolve.py
+
+  # The central backup plan selects on the BackupPolicy tag, so a data store no
+  # tag can reach cannot be backed up at all — and nothing reports that. No apply
+  # fails, no drift appears; the gap surfaces at the restore that does not happen.
+  # This gates the reachability, not the choice: whether a store IS enrolled is an
+  # operator's decision, whether it CAN be is the component's responsibility.
+  backup-coverage:
+    name: Every Data Store Can Be Backed Up
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-backup-coverage.py
+
+  # A job with no timeout-minutes inherits GitHub's 360-minute default, which is a
+  # six-hour bill for a job that stopped making progress. On drift.yml's weekday
+  # schedule a hung run is still holding a runner when the next one starts, so the
+  # failure presents as a queue rather than as the hang it is. The value is the
+  # author's judgement; that a bound exists is not.
+  workflow-budgets:
+    name: Every Workflow Job Is Bounded
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.3
+      - run: python3 scripts/check-workflow-budgets.py
+
+  # A pin nobody watches keeps working and keeps passing CI until the upstream it
+  # names is retired or a CVE lands on it, at which point it is found by the
+  # outage. Renovate's built-in managers read .tf files and the `uses:` line of a
+  # step; they do not read the version an action is TOLD to install, which is the
+  # toolchain every job here runs on, nor a bare `pip install x==y`. This asserts
+  # both halves: every pin is matched by a manager, and every file classified as
+  # carrying no version actually carries none.
+  version-coverage:
+    name: Every Version Pin Is Watched
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-version-coverage.py
+
+  # This repository ships no package manifest, so its dependency surface IS these
+  # workflows: the actions they call and the tokens those actions hold. zizmor is
+  # the gate over that surface — template injection into a `run:` block, tokens
+  # persisted into the git config after checkout, permissions granted at the
+  # workflow level that only one job needs, and actions referenced by a mutable
+  # tag the upstream owner can repoint.
+  #
+  # --offline is load-bearing rather than a speed choice: it makes the verdict a
+  # function of the commit under test instead of of what the network answered, so
+  # the same commit cannot pass today and fail tomorrow for reasons outside it.
+  # The version is pinned for the same reason.
+  workflows:
+    name: Workflow Security (zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install zizmor==1.16.3
+      # --persona=auditor with a high-severity floor, not the default persona.
+      # `regular` does not run the excessive-permissions audit at all, so a
+      # workflow-level `id-token: write` — every job in the file able to mint an
+      # OIDC token and assume the deploy role — passed it silently. Raising the
+      # persona surfaces that class; the severity floor keeps the 35 low-severity
+      # style findings out of a gate that must stay a hard failure.
+      #
+      # Verified in both directions: the tree is clean at this setting, and a
+      # workflow carrying pull_request_target with a head-sha checkout and a
+      # template-injected run block exits 14.
+      # The two flags point in OPPOSITE directions, measured against a planted
+      # workflow-level `id-token: write` rather than assumed:
+      #
+      #   no flag / --persona=regular   exit 0, 35 suppressed — the default does
+      #                                 not run excessive-permissions at all
+      #   --persona=auditor             exit 14, names the high — ADDS audits
+      #   --min-severity=high           REMOVES tiers; it can only suppress
+      #
+      # So the persona is what surfaces this class and the severity floor is a
+      # deliberate reduction on top of it. Naming a tier is not tightening, and
+      # only measurement distinguishes the two.
+      #
+      # Two steps, deliberately. The first REPORTS every tier and never fails:
+      # the sub-threshold findings sit in workflows only a maintainer can
+      # trigger, so gating on them would keep this job permanently red for
+      # things nobody is going to close, and a permanently red gate teaches
+      # people to bypass it. Printing them every run keeps a pass from reading
+      # as nothing-found.
+      - name: Report (all severities, never fails)
+        run: zizmor --offline --persona=auditor .github/workflows/ || true
+      - name: Gate (high severity)
+        run: zizmor --offline --persona=auditor --min-severity=high .github/workflows/
+
+  # The gates above are the assertions no `tofu test` can reach, and they are regex
+  # over HCL — a matcher that stops matching keeps exiting 0, and the summary line
+  # reports files scanned rather than violations found, so a blind gate is
+  # indistinguishable from a clean tree. Each gate's own anti-vacuity floor catches
+  # a scan that sees nothing; this catches the narrower break where the scan sees
+  # the tree and the matcher no longer recognises it. One positive control per
+  # gate: copy the tree, introduce the violation, require a non-zero exit.
+  gate-controls:
+    name: Gates Detect Their Own Violations
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      # The floor runs every shipped gate as a subprocess, so this job needs
+      # what any of them needs. Two gates parse workflow YAML and fail closed
+      # without PyYAML — correctly, but that refusal reaches the floor as a
+      # gate that does not pass on the unmutated tree.
+      - run: pip install --quiet pyyaml==6.0.3
+      - run: python3 scripts/check-gates-detect.py
 
   # A Deny whose Condition can never be satisfied is not a guardrail. IAM ANDs every
   # key inside one Condition block, so a Deny with several required-absent Null keys
@@ -521,9 +887,12 @@ jobs:
   scp-deny-can-fire:
     name: SCP Denies Can Actually Fire
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-scp-deny-can-fire.py
@@ -539,9 +908,12 @@ jobs:
   documented-oidc-trust:
     name: Docs Match The OIDC Trust Policy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-documented-oidc-trust.py
@@ -556,9 +928,12 @@ jobs:
   teardown-gates:
     name: Teardown Gates Move Together
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-teardown-gates.py
@@ -570,9 +945,12 @@ jobs:
   tenant-schema-readers:
     name: Tenant Fields Reach A Resource
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-tenant-schema-readers.py
@@ -587,9 +965,12 @@ jobs:
   e2e-covers-leaves:
     name: E2E Covers Every Live Leaf
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - run: python3 scripts/check-e2e-covers-leaves.py
@@ -598,6 +979,7 @@ jobs:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # The credential this job assumes is the READ-ONLY plan role, and the
     # environment is what makes that safe. The job runs on pull_request; declaring
     # `environment: plan` makes its OIDC token present
@@ -629,11 +1011,13 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.11.5"
-      - uses: gruntwork-io/terragrunt-action@v3
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
           tg_version: "1.0.8"
           # gruntwork-io/terragrunt-action@v3 manages its own tool versions
@@ -649,7 +1033,7 @@ jobs:
       # (Actions → Variables) to enable real plans.
       - name: Configure AWS credentials
         if: vars.AWS_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ matrix.region }}
@@ -663,16 +1047,27 @@ jobs:
           # backend init with NoSuchBucket before any plan runs. Half-arming the
           # matrix is strictly worse than leaving it off: it reds every PR without
           # evaluating a single line of config.
-          if [ -n "${{ vars.AWS_ROLE_ARN }}" ] && [ -n "${{ vars.TERRAGRUNT_ACCOUNT_ID }}" ]; then
+          if [ -n "${VARS_AWS_ROLE_ARN}" ] && [ -n "${VARS_TERRAGRUNT_ACCOUNT_ID}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
+        env:
+          VARS_AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          VARS_TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
 
       - name: Skip notice (no cloud credentials configured)
         if: steps.creds.outputs.available != 'true'
+        # Matrix values reach the shell as environment variables rather than by
+        # expansion into the script text. The discover job already constrains
+        # them; this keeps the run block safe on its own terms rather than
+        # depending on a check in another job to stay correct.
+        env:
+          CLOUD: ${{ matrix.cloud }}
+          ENV: ${{ matrix.env }}
+          COMPONENT: ${{ matrix.component }}
         run: |
-          echo "::notice::Skipping plan for ${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }} — needs BOTH AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID in repo Variables."
+          echo "::notice::Skipping plan for ${CLOUD}/${ENV}/${COMPONENT} — needs BOTH AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID in repo Variables."
 
       - name: Plan
         if: steps.creds.outputs.available == 'true'
@@ -689,6 +1084,7 @@ jobs:
   merge-gate:
     name: merge gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs:
       [
         placeholders,
@@ -707,6 +1103,19 @@ jobs:
         architecture-components,
         smoke-outputs,
         documented-oidc-trust,
+        region-consistency,
+        gate-controls,
+        workflows,
+        version-coverage,
+        workflow-budgets,
+        backup-coverage,
+        named-paths,
+        network-deadlines,
+        fleet-ceiling-parity,
+        bash-portability,
+        merge-gate-complete,
+        gate-deps-installed,
+        roots-tested,
         scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,

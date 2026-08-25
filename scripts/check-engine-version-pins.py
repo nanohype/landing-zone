@@ -7,13 +7,13 @@ pinned to `engine_version = "16.6"` therefore encodes a bet on what AWS still
 offers in every region an adopter deploys into — and loses that bet silently,
 at apply time, after the expensive resources underneath it already exist.
 
-That is not hypothetical. `components/aws/druid/modules/tenant/aurora.tf` was
-pinned to "16.6" and failed every apply with `Cannot find version 16.6 for
-aurora-postgresql` once AWS withdrew it, after the VPC and the EKS cluster were
-already built and billing. The same reasoning is written out at
-`components/aws/tenant-substrate/variables.tf:79-84`, which is where the fix
-landed first; this gate exists because it landed in only one of the two places
-that needed it, and nothing noticed for eight days.
+The failure is `Cannot find version <minor> for <engine>` at apply, and it is
+total: every apply fails until the pin moves, including the one that would have
+torn the half-built environment down.
+
+A gate rather than a convention because the reasoning has to hold in every place a
+version is pinned at once. Written into one component's variables and not another's
+it is a comment, and a comment does not fail a build.
 
 The rule: a version LITERAL assigned to a managed-engine version attribute must
 name a major only. `"16"` passes. `"16.6"` fails. Anything non-literal --

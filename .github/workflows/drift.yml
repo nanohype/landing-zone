@@ -5,10 +5,12 @@ on:
     - cron: "0 6 * * 1-5"
   workflow_dispatch:
 
+# Read-only by default. detect-drift restates the three scopes it needs
+# (id-token for OIDC, contents for checkout, issues for the drift report), so the
+# discover job — which only lists files — holds neither the OIDC token nor the
+# ability to open issues.
 permissions:
-  id-token: write
   contents: read
-  issues: write
 
 jobs:
   # Auto-discovers the drift matrix from the working tree, mirroring ci.yml's
@@ -21,10 +23,13 @@ jobs:
   discover:
     name: Discover Matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - id: matrix
         run: |
           matrix=$(
@@ -49,6 +54,7 @@ jobs:
   detect-drift:
     name: Drift Check (${{ matrix.env }}/${{ matrix.component }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: discover
     # Credential guard, mirroring ci.yml's plan job: skip the whole job (green,
     # not red) until the OIDC role is wired up as the AWS_ROLE_ARN repo variable.
@@ -72,11 +78,13 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.11.5"
-      - uses: gruntwork-io/terragrunt-action@v3
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
           # terragrunt-action@v3 runs tofu inside its own container, so it needs
           # tofu_version told to it directly — the setup-opentofu step above only
@@ -86,7 +94,7 @@ jobs:
           tg_version: "1.0.8"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ matrix.region }}
@@ -113,7 +121,7 @@ jobs:
 
       - name: Report drift
         if: steps.plan.outputs.exitcode == '2'
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const fs = require('fs');
@@ -154,7 +162,7 @@ jobs:
       # report so a persistently-broken component doesn't spawn an issue per run.
       - name: Report plan error
         if: steps.plan.outputs.exitcode == '1'
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const fs = require('fs');

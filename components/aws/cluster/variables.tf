@@ -26,14 +26,32 @@ variable "cluster_name" {
 
   validation {
     condition     = length(var.cluster_name) <= 12
-    error_message = "cluster_name (the base token) must be <= 12 chars. The derived <environment>-<cluster_name> feeds cluster-scoped S3/IAM names; the tightest budget is agent-iam's account+region-qualified model-artifacts bucket (<cluster>-<account>-<region>-model-artifacts), which leaves 12 chars for the base in us-west-2 (fewer in a longer region — caught by the bucket precondition)."
+    error_message = "cluster_name (the base token) must be <= 12 chars. The derived <environment>-<cluster_name> feeds cluster-scoped S3/IAM names; the tightest budget is agent-iam's account+region-qualified model-artifacts bucket (<cluster>-<account>-<region>-model-artifacts), which leaves 12 chars for the base in us-east-1 (fewer in a longer region — caught by the bucket precondition)."
+  }
+
+  # no-doubled-env: reject a base name that repeats the environment token. This
+  # component composes local.cluster_name = "<environment>-<cluster_name>", so a
+  # value equal to or prefixed with "<environment>-" (cluster_name =
+  # "development-platform") produces a doubled "development-development-platform"
+  # and carries the doubling into every cluster-scoped IAM/KMS/S3 name derived
+  # from it. The guard belongs at the variable boundary because the composition is
+  # a plain string join with nothing downstream that can reject the result.
+  #
+  # fleet/aws/cluster-stack carries the same guard on the same variable, and the
+  # four multi-tenant components carry it on their tenant keys. This is the one
+  # composition site that did not, which is why a name-shaped defect could enter
+  # through the component every workload cluster is built from.
+  validation {
+    condition     = var.cluster_name != var.environment && !startswith(var.cluster_name, "${var.environment}-")
+    error_message = "cluster_name must not equal or be prefixed with the environment token '${var.environment}-': it composes into a doubled '<env>-<env>-...' cluster name."
   }
 }
 
 variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "1.36"
+  # renovate: datasource=github-releases depName=kubernetes/kubernetes
+  default = "1.36" # k8s-version
 
   # EKS takes the control-plane version as major.minor only ("1.36", not "1.36.2"
   # or "v1.36"). Reject the common malformed shapes at plan time rather than
@@ -57,19 +75,29 @@ variable "eks_addon_versions" {
     An addon omitted from this map falls back to most_recent for that addon only.
   EOT
   type        = map(string)
+  # EKS addon builds have no Renovate datasource. The authoritative source is
+  # `aws eks describe-addon-versions --kubernetes-version <ver>` — an AWS API
+  # rather than a registry — and the -eksbuild.N suffix corresponds to no upstream
+  # release. Each pin below therefore carries its own waiver rather than one
+  # waiver covering the block: a block-level waiver would silently adopt every
+  # addon added after it, which is the shape that lets an unwatched pin in.
+  #
+  # The one relationship that CAN be checked is asserted instead of described:
+  # scripts/check-version-coverage.py requires kube-proxy's minor to equal
+  # cluster_version, since those going out of step is what this map prevents.
   default = {
-    vpc-cni                = "v1.22.3-eksbuild.1"
-    coredns                = "v1.14.3-eksbuild.3"
-    kube-proxy             = "v1.36.0-eksbuild.13"
-    aws-ebs-csi-driver     = "v1.63.1-eksbuild.1"
-    eks-pod-identity-agent = "v1.3.10-eksbuild.3"
+    vpc-cni                = "v1.22.3-eksbuild.1"  # renovate-ok: no Renovate datasource for EKS addon builds
+    coredns                = "v1.14.3-eksbuild.3"  # renovate-ok: no Renovate datasource for EKS addon builds
+    kube-proxy             = "v1.36.0-eksbuild.13" # renovate-ok: no Renovate datasource for EKS addon builds
+    aws-ebs-csi-driver     = "v1.63.1-eksbuild.1"  # renovate-ok: no Renovate datasource for EKS addon builds
+    eks-pod-identity-agent = "v1.3.10-eksbuild.3"  # renovate-ok: no Renovate datasource for EKS addon builds
     # The pin also selects the Container Insights PIPELINE, not just a build.
     # From v6.2.0 the addon can run either the Classic (CloudWatch-format, EMF)
     # or the OTel (Prometheus-native names) pipeline, and they publish different
     # metric names. The observability component's alarms read CloudWatch-format
     # names, so this cluster runs Classic — which is what the addon's defaults
     # select at this version. Re-check that when bumping.
-    amazon-cloudwatch-observability = "v6.4.0-eksbuild.1"
+    amazon-cloudwatch-observability = "v6.4.0-eksbuild.1" # renovate-ok: no Renovate datasource for EKS addon builds
   }
 }
 

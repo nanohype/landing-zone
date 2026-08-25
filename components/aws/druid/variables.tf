@@ -129,3 +129,29 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "backup_policy" {
+  description = <<-EOT
+    Value of the BackupPolicy tag stamped on this component's data stores, matching
+    an aws_backup_selection key in the backup component so the central plan's tag
+    selector picks them up.
+
+    Empty (the default) stamps nothing and the stores are backed up by nothing.
+    That is opt-in rather than fail-safe on purpose: enrolling a resource in a plan
+    is a billed act, and a component that silently enrolled every store it created
+    would put backup cost in an account whose operator never asked for it. What the
+    default must not do is hide the choice — the tag's absence is visible in the
+    plan, and scripts/check-backup-coverage.py fails on any data store where the
+    tag can neither be set nor is exempt with a reason.
+  EOT
+  type        = string
+  default     = ""
+
+  # A value that matches no plan key selects nothing, so it reads as protected
+  # while being ignored. This root cannot see the backup component's keys, so it
+  # asserts the shape only.
+  validation {
+    condition     = var.backup_policy == "" || can(regex("^[a-z][a-z0-9-]*$", var.backup_policy))
+    error_message = "backup_policy must be empty, or a lowercase plan key (letters, digits, hyphens) matching a key in the backup component's backup_plans."
+  }
+}

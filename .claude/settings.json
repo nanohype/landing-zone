@@ -1,12 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(make *)",
+      "Bash(task *)",
       "Bash(tofu fmt *)",
       "Bash(tofu validate *)",
       "Bash(tflint *)",
       "Bash(terragrunt plan *)",
-      "Bash(terragrunt run-all plan *)",
+      "Bash(terragrunt render *)",
+      "Bash(terragrunt run --all -- plan *)",
+      "Bash(python3 scripts/check-*)",
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
@@ -18,8 +20,11 @@
     ],
     "deny": [
       "Bash(terragrunt destroy *)",
-      "Bash(terragrunt run-all destroy *)",
-      "Bash(terragrunt run-all apply *)",
+      "Bash(terragrunt apply *)",
+      "Bash(terragrunt run --all -- destroy *)",
+      "Bash(terragrunt run --all -- apply *)",
+      "Bash(task destroy *)",
+      "Bash(task apply *)",
       "Bash(tofu destroy *)",
       "Bash(rm -rf *)",
       "Bash(git push --force *)",

@@ -204,7 +204,7 @@ component: it is written on `Platform.spec.datastores` and provisioned by
 | **cost** | AWS Budgets alerts, Cost Anomaly Detection | finops |
 | **dns** | Route53 zones, subdomain delegation, ACM certificates | platform |
 | **github-oidc** | GitHub Actions OIDC provider + deploy role trusted from named contexts (`environment:*`, `ref:refs/tags/*`) in named repos — never a bare `:*` — plus a read-only plan role trusted from `environment:plan`; no long-lived keys | platform |
-| **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed on the hub. | *(required input)* |
+| **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed per environment — each workload environment runs its own for that environment's cluster, and the hub runs one for its own. | *(required input)* |
 | **private-dns** | Private hosted zones for a workload account, `create` or `adopt` mode, associated to the shared Route53 profile | platform |
 | **shared-dns** | Owner side of private DNS: the hosted zones plus the Route53 profile the workload accounts adopt | platform |
 | **shared-backup** | Owner side of central backup — the destination vault a workload account's plan copies into, in a second account and the DR region. See [What backs up what](#what-backs-up-what) | sre |
@@ -358,7 +358,7 @@ The `break-glass` component provisions emergency access IAM roles with SNS alert
 
 ### SSO / Identity
 
-The `org-identity` component manages IAM Identity Center -- 5 permission sets (Admin, PowerUser, ReadOnly, PlatformEngineer, Developer), groups, and account assignments.
+The `org-identity` component manages IAM Identity Center -- permission sets, groups, and account assignments. The set is defined in the org-identity leaf rather than listed here, because a list of them is a count that goes stale at the next one added: `grep -n '^    [A-Za-z].* = {' live/aws/management/*/org/org-identity/terragrunt.hcl` answers it.
 
 ## State Management
 
@@ -376,7 +376,7 @@ which component wrote it:
 |--------|---------|---------|
 | `/platform/<env>/<component>/*` | owner-account metadata and audit — same-account reads by that account's own automation, not a cross-account hand-off | `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`, `org-scp`, `cost`, `secrets`, `shared-network` |
 | `/eks-agent-platform/<cluster-or-env>/<component>/*` | the cluster-consumer contract surface — `cluster-bootstrap` reads these and stamps them onto the ArgoCD cluster registration Secret's annotations, where the `eks-agent-platform` operator and the `eks-gitops` addons consume them, and the `eks-agent-platform` terraform tree resolves them directly as data sources | `managed-monitoring`, `dns`, `cluster-addons`, `agent-iam`/eval-runtime, `observability` |
-| `/<env>/<component>/*` | standalone operational components that predate the `/platform/` convention | `break-glass`, `backup`, `service-quotas` |
+| `/<env>/<component>/*` | standalone operational components publishing under the bare environment root rather than `/platform/` | `break-glass`, `backup`, `service-quotas` |
 | `/aws/*` | AWS-reserved paths the repo names within or reads — CloudWatch log-group names (flow logs, CloudTrail, API Gateway) and the public Ubuntu AMI parameter — following AWS's own conventions, not a landing-zone namespace | (log groups; AMI data lookups) |
 
 The split is intentional for three of the four. `/eks-agent-platform/*` is named for the
@@ -385,17 +385,21 @@ cluster reads regardless of which landing-zone component produced the value — 
 producer from the reader is the point. `/platform/*` is the generic owner/org metadata
 namespace, read only inside the producing account. `/aws/*` is not ours to name.
 
-The one genuine inconsistency is the bare `/<env>/*` family (`break-glass`, `backup`,
-`service-quotas`): those three could sit under `/platform/<env>/<component>/*` like their
-siblings. It is cosmetic, not a defect — nothing reads them through a hardcoded `/platform/`
+The one genuine inconsistency is the bare `/<env>/*` family: those components could sit
+under `/platform/<env>/<component>/*` like their siblings. Which ones publish there is
+answered by `git grep -n 'aws_ssm_parameter' components/ -A2 | grep 'name.*\${var.environment}'`
+rather than listed here, because a list of them is a count that goes stale at the next
+component to publish a parameter. It is cosmetic, not a defect — nothing reads them through a hardcoded `/platform/`
 path, so the bare prefix breaks nothing; normalizing it is a low-priority cleanup, not a fix.
 
 ## Team Ownership
 
 Owning team per component. Most components take their `team` value from the
-`_envcommon/aws/` wiring; the four `*-platform` components are the exception —
-their `team` is a per-component `variables.tf` default (each app is owned by a
-different product team), not set in `_envcommon`.
+`_envcommon/aws/` wiring. The exceptions set it as a `variables.tf` default
+instead, which is the right shape wherever the owning team is a property of the
+component rather than of the environment it is deployed into. Which components
+those are is answered by `grep -l 'variable "team"' -A4 components/aws/*/variables.tf
+| xargs grep -l default` rather than enumerated here.
 
 | Team | Components |
 |------|-----------|

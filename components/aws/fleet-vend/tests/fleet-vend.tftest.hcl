@@ -25,7 +25,7 @@
 # real content at plan time. No assertion reads an override_data'd stub value.
 
 provider "aws" {
-  region                      = "us-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -54,7 +54,7 @@ override_data {
 
 variables {
   environment  = "development"
-  region       = "us-west-2"
+  region       = "us-east-1"
   team         = "platform"
   hub_role_arn = "arn:aws:iam::999999999999:role/development-eks-fleet-crossplane"
   external_id  = "test-external-id"

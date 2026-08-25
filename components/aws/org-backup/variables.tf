@@ -80,7 +80,7 @@ variable "backup_policy" {
   type = object({
     plan_name                 = optional(string, "org-baseline")
     rule_name                 = optional(string, "daily")
-    regions                   = optional(list(string), ["us-west-2"])
+    regions                   = optional(list(string), ["us-east-1"])
     schedule                  = optional(string, "cron(0 5 ? * * *)")
     start_window_minutes      = optional(number, 60)
     target_vault_name         = optional(string, "Default")

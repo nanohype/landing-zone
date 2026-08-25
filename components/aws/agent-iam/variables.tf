@@ -43,10 +43,19 @@ variable "bedrock_allowed_model_ids" {
     bedrock:Invoke*/Converse* is scoped to exactly these models instead of
     Resource="*". Entries are model families, not version-pinned IDs (e.g.
     "anthropic.*"), so a new revision inside an allowed family stays covered without
-    a policy change. Empty list = grant every model (Resource="*") — the explicit,
-    auditable escape hatch. This scopes the ATTACHED GRANT only; the tenant
-    permissions boundary stays a broad ceiling by design (the privilege that matters
-    is the grant, not the cap).
+    a policy change. This scopes the ATTACHED GRANT only; the tenant permissions
+    boundary stays a broad ceiling by design (the privilege that matters is the
+    grant, not the cap).
+
+    An EMPTY list grants nothing: the BedrockInvoke statement is omitted entirely
+    and tenant roles hold no Bedrock invoke permission. That is the reading a caller
+    expects from an empty allowlist, and it is the safe direction for a list that
+    can arrive empty by accident — one rendered from a set of Platform CRs is empty
+    whenever that set is.
+
+    To grant every model, write ["*"] in the list. The escape hatch stays
+    expressible, and it moves to the call site where an auditor reading the config
+    can see it, which an empty list never showed them.
 
     Scope notes: this is the fleet-wide baseline, so the default deliberately covers
     only Anthropic + Nova generation — a tenant needing another provider (Cohere
@@ -54,10 +63,40 @@ variable "bedrock_allowed_model_ids" {
     referenced in spec.identity.extraPolicyArns, not by widening this shared default. The expansion covers direct foundation
     models and system-defined cross-region inference profiles; application inference
     profiles, provisioned throughput, and custom/imported models are NOT matched —
-    add their ARNs explicitly (or use the empty-list escape hatch) if a fork uses them.
+    add their ARNs explicitly if a fork uses them.
   EOT
   type        = list(string)
   default     = ["anthropic.*", "amazon.nova-*"]
+}
+
+variable "bedrock_inference_profile_geos" {
+  description = <<-EOT
+    Geo-set prefixes the tenant baseline may invoke a cross-region inference
+    profile through. Each allowlisted model family expands to one profile ARN per
+    prefix, alongside its bare foundation-model ARN.
+
+    Named rather than wildcarded because IAM matches text, not intent. A bare
+    `inference-profile/*<family>` reads as "whatever the geo prefix is" and
+    matches any profile whose NAME contains the family — including one created
+    later with a name chosen to satisfy it.
+
+    Defaults to us. alone: llm-policy names us-east-1 as the only preferred region
+    and requires the geo prefix to match the deploy region, so a second entry here
+    would name a prefix no workload in this estate can reach. Widen it in a fork
+    that deploys elsewhere.
+  EOT
+  type        = list(string)
+  default     = ["us."]
+
+  validation {
+    condition     = length(var.bedrock_inference_profile_geos) > 0
+    error_message = "bedrock_inference_profile_geos must name at least one geo prefix; an empty list grants no inference-profile ARN at all, and every current Claude model is invoked through one."
+  }
+
+  validation {
+    condition     = alltrue([for g in var.bedrock_inference_profile_geos : can(regex("^[a-z]+\\.$", g))])
+    error_message = "each geo prefix is lowercase letters followed by a dot, e.g. \"us.\" or \"eu.\"."
+  }
 }
 
 variable "team" {

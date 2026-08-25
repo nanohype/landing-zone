@@ -13,19 +13,19 @@ happily. The plan job green-skips unless both cloud variables are set. So a leaf
 whose apply path cannot resolve stays green forever — which is how a deliberate,
 well-reviewed change once made the default environment un-installable.
 
-WHY THIS REPLACED A NARROWER CHECK. The previous version asked which SYNTAX was
-used. It began by inspecting `dependency` blocks, was widened to "every
-config_path in the file, whether or not it is on a dependency line" — and still
-missed `live/_envcommon/aws/backup.hcl`, which reaches into the backup account
-through `read_terragrunt_config`. Twice, on two independent counts: `_envcommon`
-is not under `live/aws/workload-*` so the scope skipped the file entirely, and
-`read_terragrunt_config` is not `config_path` so the mechanism would not have
-seen it even in scope.
+WHY IT ASKS ABOUT PATHS RATHER THAN SYNTAX. A check that asks which FUNCTION
+carried a path has to enumerate them, and enumeration does not converge: every
+pass adds the one form that just escaped. `config_path` on a `dependency` is the
+obvious one, but `read_terragrunt_config`, `file()` and anything not yet written
+reach across an account boundary just as effectively.
 
-Widening by enumeration does not converge — each pass adds the one pattern that
-just escaped. So this no longer asks which FUNCTION carried the path: any string
-literal is a candidate, whether it sat on a `config_path`, a
-`read_terragrunt_config`, a `file()`, or a function nobody has used yet.
+Scope has the same problem in the other direction. A check bounded to
+`live/aws/workload-*` cannot see `live/_envcommon/aws/*.hcl`, which is included
+INTO those leaves and can reach anywhere they can.
+
+So: any string literal in any tracked HCL under `live/` is a candidate path,
+whatever function it sits on, and the shared includes are in scope because the
+leaves that include them are.
 
 WHAT IT DOES NOT DO, stated because the sentence above would otherwise promise
 more than the code delivers. Having stopped enumerating functions, this still

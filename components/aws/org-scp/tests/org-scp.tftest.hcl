@@ -27,7 +27,7 @@ mock_provider "aws" {
   }
   mock_data "aws_region" {
     defaults = {
-      name        = "us-west-2"
+      name        = "us-east-1"
       description = "US West (Oregon)"
     }
   }
@@ -35,7 +35,7 @@ mock_provider "aws" {
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
 
   # A realistic org guardrail ceiling. Built with jsonencode() so the JSON is real
@@ -80,7 +80,7 @@ variables {
             Resource  = "*"
             Condition = {
               StringNotEquals = {
-                "aws:RequestedRegion" = ["us-west-2", "us-east-1"]
+                "aws:RequestedRegion" = ["us-east-1", "us-east-1"]
               }
             }
           },

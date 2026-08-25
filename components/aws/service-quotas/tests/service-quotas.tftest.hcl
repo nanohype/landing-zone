@@ -51,19 +51,19 @@ mock_provider "aws" {
   # CloudWatch alarm's alarm_actions (the topic ARN) plans cleanly.
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:us-west-2:123456789012:key/mock"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/mock"
     }
   }
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:us-west-2:123456789012:mock"
+      arn = "arn:aws:sns:us-east-1:123456789012:mock"
     }
   }
 }
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
 }
 

@@ -38,12 +38,12 @@ mock_provider "aws" {
 
 variables {
   environment = "development"
-  region      = "us-west-2"
+  region      = "us-east-1"
   network = {
     vpc_id             = "vpc-0123456789abcdef0"
     ownership_mode     = "create"
     private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
-    private_subnet_azs = ["us-west-2a", "us-west-2b"]
+    private_subnet_azs = ["us-east-1a", "us-east-1b"]
   }
   cluster_sg_id = "sg-0123456789abcdef0"
   node_sg_id    = "sg-0fedcba987654321f"
@@ -64,8 +64,8 @@ run "kafka_grants_scoped_to_tenant_cluster" {
       for s in jsondecode(output.tenant_outputs["t1"].ingestion_policy_json).Statement :
       contains(s.Action, "kafka-cluster:Connect")
       && can(tolist(s.Resource))
-      && contains(tolist(s.Resource), "arn:aws:kafka:us-west-2:123456789012:cluster/development-druid-t1-msk/*")
-      && contains(tolist(s.Resource), "arn:aws:kafka:us-west-2:123456789012:topic/development-druid-t1-msk/*")
+      && contains(tolist(s.Resource), "arn:aws:kafka:us-east-1:123456789012:cluster/development-druid-t1-msk/*")
+      && contains(tolist(s.Resource), "arn:aws:kafka:us-east-1:123456789012:topic/development-druid-t1-msk/*")
       && !contains(tolist(s.Resource), "*")
     ])
     error_message = "druid ingestion kafka-cluster grant must scope Resource to the tenant's own MSK cluster ARNs, never \"*\""
@@ -75,7 +75,7 @@ run "kafka_grants_scoped_to_tenant_cluster" {
     condition = anytrue([
       for s in jsondecode(output.tenant_outputs["t1"].msk_client_policy_json).Statement :
       contains(s.Action, "kafka-cluster:CreateTopic")
-      && contains(tolist(s.Resource), "arn:aws:kafka:us-west-2:123456789012:topic/development-druid-t1-msk/*")
+      && contains(tolist(s.Resource), "arn:aws:kafka:us-east-1:123456789012:topic/development-druid-t1-msk/*")
       && !contains(tolist(s.Resource), "*")
     ])
     error_message = "druid msk-client kafka-cluster grant must scope Resource to the tenant's own MSK cluster ARNs, never \"*\""
@@ -155,7 +155,7 @@ run "adopt_mode_plans_with_matching_placement" {
       vpc_id             = "vpc-adopt00000000000"
       ownership_mode     = "adopt"
       private_subnet_ids = ["subnet-adopt0000000a", "subnet-adopt0000000b"]
-      private_subnet_azs = ["us-west-2a", "us-west-2b"]
+      private_subnet_azs = ["us-east-1a", "us-east-1b"]
     }
   }
 
@@ -185,7 +185,7 @@ run "adopt_mode_rejects_foreign_subnet" {
       vpc_id             = "vpc-adopt00000000000"
       ownership_mode     = "adopt"
       private_subnet_ids = ["subnet-foreign00000a", "subnet-foreign00000b"]
-      private_subnet_azs = ["us-west-2a", "us-west-2b"]
+      private_subnet_azs = ["us-east-1a", "us-east-1b"]
     }
   }
 
@@ -211,7 +211,7 @@ run "adopt_mode_rejects_foreign_node_sg" {
       vpc_id             = "vpc-adopt00000000000"
       ownership_mode     = "adopt"
       private_subnet_ids = ["subnet-adopt0000000a", "subnet-adopt0000000b"]
-      private_subnet_azs = ["us-west-2a", "us-west-2b"]
+      private_subnet_azs = ["us-east-1a", "us-east-1b"]
     }
   }
 
@@ -237,7 +237,7 @@ run "rejects_single_az_coverage" {
       vpc_id             = "vpc-0123456789abcdef0"
       ownership_mode     = "create"
       private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
-      private_subnet_azs = ["us-west-2a", "us-west-2a"]
+      private_subnet_azs = ["us-east-1a", "us-east-1a"]
     }
   }
 

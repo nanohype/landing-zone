@@ -35,7 +35,6 @@ on:
           - apply
 
 permissions:
-  id-token: write
   contents: read
 
 # Serialize mutating runs against the same environment/component so two dispatched
@@ -50,30 +49,48 @@ concurrency:
 
 jobs:
   deploy:
+    permissions:
+      # Scoped to this job rather than the workflow: a job added here later
+      # would otherwise inherit the right to mint an OIDC token and assume
+      # the AWS deploy role without anyone granting it.
+      id-token: write
+      contents: read
     name: ${{ inputs.action }} ${{ inputs.environment }}/${{ inputs.component }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     environment: ${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.11.5"
-      - uses: gruntwork-io/terragrunt-action@v3
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
           tg_version: "1.0.8"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
 
       - name: Run Terragrunt
         working-directory: live/aws/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
+        # Dispatch inputs reach the shell through env, never through ${{ }} inside
+        # the script. A ${{ }} expansion is substituted into the script TEXT before
+        # bash sees it, so an input containing shell syntax becomes shell syntax —
+        # `cd ${{ inputs.component }}` with a crafted value runs arbitrary commands
+        # under the deploy role's AWS credentials. An env var is a value bash reads,
+        # not text bash parses.
+        env:
+          COMPONENT: ${{ inputs.component }}
+          ACTION: ${{ inputs.action }}
         run: |
-          if [ "${{ inputs.component }}" = "all" ]; then
-            terragrunt run --all --non-interactive -- ${{ inputs.action }}
+          if [ "$COMPONENT" = "all" ]; then
+            terragrunt run --all --non-interactive -- "$ACTION"
           else
-            cd ${{ inputs.component }}
-            terragrunt ${{ inputs.action }}
+            cd "$COMPONENT"
+            terragrunt "$ACTION"
           fi

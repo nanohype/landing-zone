@@ -41,25 +41,25 @@ mock_provider "aws" {
     defaults = { account_id = "123456789012", arn = "arn:aws:iam::123456789012:user/test", user_id = "AIDTEST" }
   }
   mock_data "aws_region" {
-    defaults = { name = "us-west-2", id = "us-west-2" }
+    defaults = { name = "us-east-1", id = "us-east-1" }
   }
   mock_data "aws_iam_session_context" {
     defaults = { issuer_arn = "arn:aws:iam::123456789012:role/creator" }
   }
   mock_data "aws_availability_zones" {
-    defaults = { names = ["us-west-2a", "us-west-2b", "us-west-2c"], zone_ids = ["usw2-az1", "usw2-az2", "usw2-az3"] }
+    defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c"], zone_ids = ["use1-az1", "use1-az2", "use1-az3"] }
   }
   mock_resource "aws_iam_role" { defaults = { arn = "arn:aws:iam::123456789012:role/mock" } }
   mock_resource "aws_iam_policy" { defaults = { arn = "arn:aws:iam::123456789012:policy/mock" } }
-  mock_resource "aws_kms_key" { defaults = { arn = "arn:aws:kms:us-west-2:123456789012:key/mock" } }
-  mock_resource "aws_sqs_queue" { defaults = { arn = "arn:aws:sqs:us-west-2:123456789012:mock", url = "https://sqs.us-west-2.amazonaws.com/123456789012/mock" } }
-  mock_resource "aws_cloudwatch_log_group" { defaults = { arn = "arn:aws:logs:us-west-2:123456789012:log-group:mock" } }
-  mock_resource "aws_security_group" { defaults = { id = "sg-mock", arn = "arn:aws:ec2:us-west-2:123456789012:security-group/sg-mock" } }
+  mock_resource "aws_kms_key" { defaults = { arn = "arn:aws:kms:us-east-1:123456789012:key/mock" } }
+  mock_resource "aws_sqs_queue" { defaults = { arn = "arn:aws:sqs:us-east-1:123456789012:mock", url = "https://sqs.us-east-1.amazonaws.com/123456789012/mock" } }
+  mock_resource "aws_cloudwatch_log_group" { defaults = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:mock" } }
+  mock_resource "aws_security_group" { defaults = { id = "sg-mock", arn = "arn:aws:ec2:us-east-1:123456789012:security-group/sg-mock" } }
   mock_resource "aws_launch_template" { defaults = { id = "lt-mock0000000000000", latest_version = 1 } }
   mock_resource "aws_eks_cluster" {
     defaults = {
-      arn                   = "arn:aws:eks:us-west-2:123456789012:cluster/mock"
-      identity              = [{ oidc = [{ issuer = "https://oidc.eks.us-west-2.amazonaws.com/id/MOCK" }] }]
+      arn                   = "arn:aws:eks:us-east-1:123456789012:cluster/mock"
+      identity              = [{ oidc = [{ issuer = "https://oidc.eks.us-east-1.amazonaws.com/id/MOCK" }] }]
       certificate_authority = [{ data = "bW9jay1jYQ==" }]
     }
   }
@@ -74,7 +74,7 @@ mock_provider "tls" {
 }
 
 variables {
-  region       = "us-west-2"
+  region       = "us-east-1"
   environment  = "development"
   team         = "platform"
   cluster_name = "platform"

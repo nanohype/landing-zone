@@ -236,6 +236,40 @@ def lever_is_negated(expr, levers):
     return False
 
 
+def strip_trailing_comment(expr):
+    """Drop a trailing `#` or `//` comment, respecting quotes.
+
+    A comment is not part of the expression, and reading it as if it were fails
+    OPEN here rather than closed: `force_destroy = false # local.allow_teardown`
+    mentions the lever, so a substring search finds a lever reference in a line
+    that pins the gate shut. The gate then reports the resource as correctly
+    wired, which is the one answer it must never give wrongly.
+
+    Quote tracking matters because one gate value is a string
+    (final_snapshot_identifier), and a `#` inside it is data.
+    """
+    out, quote, i = [], None, 0
+    while i < len(expr):
+        c = expr[i]
+        if quote:
+            if c == "\\" and i + 1 < len(expr):
+                out.append(expr[i : i + 2])
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            out.append(c)
+        elif c in "\"'":
+            quote = c
+            out.append(c)
+        elif c == "#" or (c == "/" and expr[i : i + 2] == "//"):
+            break
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out).strip()
+
+
 def permissive_branch_ok(attr, expr, levers):
     """Does this expression resolve permissively when the lever is set?
 
@@ -243,7 +277,7 @@ def permissive_branch_ok(attr, expr, levers):
     down, which is more permissive than the lever, not less.
     """
     want = GATES[attr]
-    expr = expr.strip()
+    expr = strip_trailing_comment(expr)
     if expr == want:
         return True
     if not references_lever(expr, levers):

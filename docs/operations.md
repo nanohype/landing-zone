@@ -81,8 +81,15 @@ environment, so it carries a single `development` live root and adding siblings 
 account-level OIDC provider three times.
 
 The cross-account **network-owner** components (`shared-network`, `egress-network`) and the
-**hub** control plane (`fleet-*`, `portal-*`) deploy from their own `live/aws/network/` and
+**portal** control plane (`portal-*`) deploy from their own `live/aws/network/` and
 `live/aws/fleet/` trees, not the per-environment workload accounts.
+
+`fleet-hub` is the exception and it is deliberate: a dedicated hub account needs its own
+cluster, network and bootstrap, which a single-account platform does not have yet — so
+`live/aws/` carries a fleet-hub leaf in each workload account as well as in the fleet tree,
+each against the cluster that environment already runs. Only one of them can apply at a
+time: `state_bucket_name` is a globally-unique S3 name with no account element, so the
+second collides at apply. Each leaf says so.
 
 `managed-monitoring` deploys from both: each workload environment runs its own for that
 environment's AMP/AMG workspaces, and the hub runs one of its own. It is in the per-environment
@@ -108,7 +115,7 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 | **mock-outputs** | Runs `scripts/check-mock-outputs.py` -- cross-checks every dependency `mock_outputs` key against the target component's real `outputs.tf`, so a renamed output fails here instead of resolving to a stale mock. |
 | **smoke-outputs** | Runs `scripts/check-smoke-outputs.py` -- cross-checks every output key a `components/**/smoke-test.sh` reads via `jq` against that component's real `outputs.tf`. `jq` yields the string "null" for a key that does not exist, so a stale read makes the smoke test assert against nothing; this fails the build instead. |
 | **account-local-deps** | Runs `scripts/check-account-local-deps.py` -- a leaf under `live/aws/workload-*/` may not depend on a unit outside its own account directory. A terragrunt `dependency` resolves at config-parse time, so a cross-account one fails `init`, not just `apply`, and no `TF_VAR` bypasses it. CI cannot otherwise see this: `evaluate` resolves against mocks by design and `plan` green-skips without credentials. |
-| **architecture-components** | Runs `scripts/check-architecture-components.sh` -- the architecture doc's component inventory must be the components that exist, both directions. A documented component that is gone sends a reader to a missing directory; a component no table names is quieter and worse, because the doc reads as complete. |
+| **architecture-components** | Runs `scripts/check-architecture-components.sh` -- the architecture doc's component inventory must be the components that exist, both directions; CLAUDE.md's layer list is checked in the omission direction only. A documented component that is gone sends a reader to a missing directory; a component no table names is quieter and worse, because the doc reads as complete. |
 | **teardown-gates** | Runs `scripts/check-teardown-gates.py` -- in a component declaring `force_destroy_buckets`, every teardown-gate attribute must resolve permissively when the lever is set, and every protectable resource must carry one. A module without the lever declares why in the script's EXEMPT table. No tflint or checkov rule covers `force_destroy` or `deletion_protection`, and a `tofu test` assert cannot reach a grandchild module's attributes. |
 | **tenant-schema-readers** | Runs `scripts/check-tenant-schema-readers.py` -- every field a `tenants` object type declares must be read by a resource in that component. A field with no reader is a control an operator can set, sees accepted, and believes is in force. |
 | **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan` to show what would change (credential-gated -- skips green when `AWS_ROLE_ARN` is unset). |

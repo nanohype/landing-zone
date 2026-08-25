@@ -119,7 +119,7 @@ carefully:
 
 - **`network_mode`** — the `cluster` leaf derives `stamp_subnet_tags` from it (create ⇒ tag,
   adopt ⇒ defer to the owner).
-- **`private_subnet_az_ids` / `public_subnet_az_ids`** — AZ **IDs** (`usw2-az1`), not names.
+- **`private_subnet_az_ids` / `public_subnet_az_ids`** — AZ **IDs** (`use1-az1`), not names.
   AZ names map to different physical zones per account, so a cross-account consumer must key
   on the IDs.
 

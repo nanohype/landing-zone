@@ -62,7 +62,7 @@ mock_provider "aws" {
 
 variables {
   environment = "org"
-  region      = "us-west-2"
+  region      = "us-east-1"
   team        = "platform"
   groups = {
     auditors = { description = "Read-only auditors" }

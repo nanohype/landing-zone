@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""No tracked shell script uses a bash 4+ construct.
+
+WHY THIS EXISTS
+
+Every script here declares `#!/usr/bin/env bash`, which resolves to whatever
+bash the machine has. CI runs Linux with bash 5. macOS ships bash 3.2 and has
+since 2007 — Apple will not ship a newer one under GPLv3 — so a developer, a
+release step, or an incident responder running these scripts on a Mac is on 3.2.
+
+A bash 4 builtin on bash 3.2 does not warn. `mapfile` prints "command not
+found"; in a script without `set -e` the array is length 0, the loop that
+consumed it runs zero times, and the script exits 0 — so one that reads a list
+and acts on each entry acts on nothing and reports success. In a teardown that
+leaves resources billing behind a green run.
+
+With `set -e` the failure is loud but not early: bash executes incrementally, so
+every line above the construct has already run. A teardown aborts partway
+through, which is a worse state than never starting.
+
+The effects below were measured by running each construct under bash 3.2.57,
+not reasoned about. Two of the eight did not behave the way the obvious reading
+suggested — `&>>` is a parse error rather than a background-plus-append, and an
+associative array without `set -e` silently collapses every key onto one slot
+rather than merely erroring.
+
+WHAT A LINTER DOES NOT CATCH
+
+shellcheck decides by DIALECT, and it has no model of bash VERSIONS. Measured
+on one script using mapfile, `declare -A` and `${x^^}` together, changing only
+the shebang:
+
+    #!/bin/sh      SC3044, SC3059, SC3040 — each construct named precisely
+    #!/bin/bash    nothing about any of them
+
+Both runs exit 1, because an unrelated unused-variable diagnostic fires on the
+same lines either way. That is the trap: the file is not silent, so it reads as
+reviewed, and the finding that gets attention is not the one that matters.
+
+The asymmetry is by design rather than by threshold. Bash 4 builtins ARE legal
+bash, so a bash-shebang script gets a clean bill however old the interpreter it
+must run on, and no severity or confidence setting changes that — the question
+is outside what shellcheck evaluates. Only a version-aware check answers it,
+which is what this gate is.
+
+It also explains the shebang precondition below. shellcheck already covers the
+POSIX-dialect class well; this gate covers the bash-version class shellcheck
+cannot see. A script that declares neither is checked by neither, so it is
+refused rather than passed.
+
+WHAT IT CHECKS
+
+Each construct below, in every tracked `.sh`. Waive on the using line with
+`# bash4-ok: <reason>` when a script is genuinely CI-only.
+
+VIEW
+
+Comments are blanked. A construct named in prose — including this gate's own
+explanation of what it forbids — is not a use of it. Both views are needed and
+the raw text is read only for the waiver, which is itself a comment.
+
+Exit 0 = every script runs on bash 3.2. Exit 1 = a construct that needs bash 4+.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# construct -> what it actually does on bash 3.2, measured by running each one
+# under /bin/bash 3.2.57 rather than reasoned about. Two categories, and the
+# difference decides how bad a given occurrence is:
+#
+#   PARSE   bash rejects the construct when it reaches that line. Lines ABOVE it
+#           have already run, so a teardown aborts halfway through rather than
+#           declining to start — the partial state is the damage.
+#   RUNTIME the line fails. Under `set -e` the script aborts there; without it,
+#           execution continues on a wrong value. 27 of the 28 scripts here set
+#           -e, so for them these abort; `no-placeholders.sh` does not, and there
+#           the failure is silent.
+BASH4 = [
+    # ── builtins bash 3.2 does not have ────────────────────────────────────
+    (re.compile(r"\b(?:mapfile|readarray)\b"), "mapfile/readarray",
+     "RUNTIME: `command not found`. Under set -e the script aborts (rc 127); without it the array is length 0 and the loop over it runs zero times"),
+    (re.compile(r"\bcoproc\b"), "coproc",
+     "PARSE: `syntax error near unexpected token` (rc 2), after the lines above it have already run"),
+    (re.compile(r"\bwait\s+(?:-[a-zA-Z]+\s+)*-n\b"), "wait -n",
+     "RUNTIME: `wait: -n: invalid option` (rc 2)"),
+    (re.compile(r"\bread\s+(?:-[a-zA-Z]+\s+)*-N\b"), "read -N",
+     "RUNTIME: `read: -N: invalid option` (rc 2)"),
+    (re.compile(r"\bshopt\s+(?:-[a-zA-Z]+\s+)*globstar\b"), "shopt globstar",
+     "RUNTIME: `globstar: invalid shell option name` (rc 1); ** then behaves as a single * and the glob silently matches one level"),
+    (re.compile(r"""\bprintf\s+(?:-[a-zA-Z]+\s+)*-v\s+['"]?[A-Za-z_][A-Za-z0-9_]*\["""),
+     "printf -v into an array element",
+     "RUNTIME: `not a valid identifier` (rc 2)"),
+
+    # ── declare/local/typeset options added in bash 4 ──────────────────────
+    # Matched as an OPTION SET rather than one letter: -A, -n, -l and -u are
+    # four spellings of the same absence, and a list written per spelling is
+    # how -n and -l survived a gate that already rejected -A.
+    (re.compile(r"\b(?:declare|local|typeset)\s+(?:-[a-zA-Z]*[Anlu][a-zA-Z]*\s+)"),
+     "declare/local/typeset -A|-n|-l|-u",
+     "RUNTIME: `invalid option` (rc 2 under set -e). Without set -e, -A is worse than an error: every string index collapses onto element 0, so writing two keys leaves one value that both keys read back"),
+
+    # ── parameter expansions added in bash 4 ───────────────────────────────
+    # Case modification is ^ or , in ANY quantity — ${x^}, ${x^^}, ${x^pat}.
+    (re.compile(r"\$\{[!#]?[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?[\^,]"),
+     "${x^}/${x,} case modification",
+     "RUNTIME: `bad substitution` (rc 1 under set -e)"),
+    # Parameter transformation ${x@U}, ${x@Q}, ${x@A}… Anchored on @ directly
+    # after the name so ${arr[@]} and ${!prefix@} — both valid on 3.2 — do not
+    # match.
+    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?@[a-zA-Z]"),
+     "${x@…} parameter transformation",
+     "RUNTIME: `bad substitution` (rc 1 under set -e)"),
+    # A literal negative subscript. ${a[$i-1]} is arithmetic and valid on 3.2,
+    # so the minus must sit immediately after the bracket.
+    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\[-\d"), "${a[-1]} negative index",
+     "RUNTIME: `bad array subscript` printed to stderr while the script EXITS 0 — the expansion is empty and execution continues on it, so this one is silent even under set -e"),
+
+    # ── syntax bash 3.2 cannot parse ──────────────────────────────────────
+    (re.compile(r";;&"), ";;& case fallthrough",
+     "PARSE: `syntax error near unexpected token `&`` (rc 2), after the lines above it have already run"),
+    (re.compile(r"&>>"), "&>> append-both redirect",
+     "PARSE: `syntax error near unexpected token `>`` (rc 2) — bash 3.2 does not parse it as a redirect at all, so nothing about the line survives"),
+    (re.compile(r"(?<![|&])\|&"), "|& pipe-both",
+     "PARSE: `syntax error near unexpected token `&`` (rc 2)"),
+    (re.compile(r"(?<![$\w])\{[A-Za-z_][A-Za-z0-9_]*\}[<>]"), "{fd}> descriptor variable",
+     "RUNTIME: the brace word is taken as a command name — `{fd}: not found` (rc 127) — and the descriptor is never opened"),
+]
+
+WAIVER = re.compile(r"#[ \t]*bash4-ok:[ \t]*\S")
+
+
+def blank_comments(text: str) -> str:
+    """Blank comment interiors in SHELL, preserving length and line breaks.
+
+    Shell has no `//` comment and `//` occurs in live code (a `sed 's//x/'`, a
+    doubled path separator), so this must not treat it as one — unlike the HCL
+    view in _hcl.py, which must.
+    """
+    out, quote, i = [], None, 0
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\" and i + 1 < len(text):
+                out.append(text[i : i + 2]); i += 2; continue
+            if c == quote:
+                quote = None
+            out.append(c)
+        elif c in "\"'":
+            quote = c
+            out.append(c)
+        elif c == "#":
+            while i < len(text) and text[i] != "\n":
+                out.append(" ")
+                i += 1
+            continue
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def main() -> int:
+    scripts = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "*.sh"],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    if not scripts:
+        print(
+            "FAIL: no shell scripts found. The scan could not see the tree; "
+            "refusing to report a pass.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Precondition, asserted rather than assumed. This gate knows one class:
+    # bash 4 constructs in a script that runs under bash. A `#!/bin/sh` script
+    # raises a DIFFERENT class — bashisms that Debian's dash rejects — and macOS
+    # cannot surface it, because /bin/sh there is bash 3.2 in POSIX mode and
+    # accepts them. Rather than check an sh script with bash rules and report a
+    # pass, say what is not covered.
+    non_bash = []
+    for rel in scripts:
+        first = (ROOT / rel).read_text().split("\n", 1)[0]
+        if first.startswith("#!") and "bash" not in first:
+            non_bash.append(f"  {rel}:1: {first}")
+    if non_bash:
+        print(
+            "Script(s) that do not declare bash:\n\n" + "\n".join(non_bash) +
+            "\n\nThis gate checks bash 4 constructs under bash. A POSIX-shell "
+            "script needs the other check — bashisms that dash rejects — and "
+            "this cannot answer it. Either give the script a bash shebang, or "
+            "add a dash check that RUNS the script (dash -n is a syntax check "
+            "and accepts constructs dash cannot execute).",
+            file=sys.stderr,
+        )
+        return 1
+
+    problems: list[str] = []
+    for rel in scripts:
+        raw = (ROOT / rel).read_text()
+        code = blank_comments(raw)
+        raw_lines = raw.splitlines()
+        for n, line in enumerate(code.splitlines(), 1):
+            for pattern, name, effect in BASH4:
+                if not pattern.search(line):
+                    continue
+                if n <= len(raw_lines) and WAIVER.search(raw_lines[n - 1]):
+                    continue
+                problems.append(f"  {rel}:{n}: {name} — on bash 3.2, {effect}")
+
+    if problems:
+        print("bash 4+ construct(s) in a script that declares `env bash`:\n", file=sys.stderr)
+        print("\n".join(problems), file=sys.stderr)
+        print(
+            "\nmacOS ships bash 3.2, so these fail for anyone running the script "
+            "off a Mac — several of them silently, with exit 0. shellcheck does "
+            "not object, because a static parser cannot know which interpreter "
+            "the reader has. Rewrite in POSIX-compatible form (a `while IFS= "
+            "read -r` loop replaces mapfile), or waive on the line with "
+            "`# bash4-ok: <reason>`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # States what was checked, not a universal it cannot establish. This gate
+    # matches a list of constructs; it does not prove a script runs. An earlier
+    # message here claimed "every shell script runs on bash 3.2", and that
+    # sentence stayed green while fourteen bash 4 constructs went unmatched —
+    # a pass line asserting more than the check performed is how a gap reads as
+    # a guarantee.
+    print(
+        f"✓ no bash 4 construct found "
+        f"({len(scripts)} script(s) scanned for {len(BASH4)} construct family/families; "
+        f"a family not listed here is not checked)"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

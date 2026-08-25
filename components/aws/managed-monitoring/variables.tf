@@ -60,9 +60,63 @@ variable "amg_viewer_user_ids" {
 }
 
 variable "amp_alert_rules_enabled" {
-  description = "Enable alert manager + rule group definitions on the AMP workspace"
+  description = <<-EOT
+    Install the AMP workspace's Alertmanager definition, routing every alert to the
+    SNS topic named by amp_alert_sns_topic_arn.
+
+    Off by default and refused without a destination: an Alertmanager whose route
+    lands on a receiver with no configuration is a VALID config that silently
+    discards every alert it accepts. It reports installed, evaluates correctly, and
+    delivers nothing — the same looks-installed-delivers-nothing shape the alert
+    topic policies are written to avoid.
+
+    This installs the routing table only. Rules that fire alerts into it are a
+    separate concern; this component provisions no rule group.
+  EOT
   type        = bool
   default     = false
+}
+
+variable "amp_alert_sns_topic_arn" {
+  description = <<-EOT
+    SNS topic the AMP Alertmanager publishes to. Required when
+    amp_alert_rules_enabled is set.
+
+    Wire it to a severity topic the observability component publishes — it writes
+    each tier's ARN to /eks-agent-platform/<cluster>/observability/alerts_<severity>_topic_arn,
+    and exports the same set as sns_topic_arns.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.amp_alert_rules_enabled || var.amp_alert_sns_topic_arn != ""
+    error_message = "amp_alert_rules_enabled needs amp_alert_sns_topic_arn: an Alertmanager route to a receiver with no destination is a valid config that discards every alert, so the flag is refused without somewhere to send them."
+  }
+
+  validation {
+    condition     = var.amp_alert_sns_topic_arn == "" || can(regex("^arn:aws[a-z-]*:sns:", var.amp_alert_sns_topic_arn))
+    error_message = "amp_alert_sns_topic_arn must be an SNS topic ARN."
+  }
+}
+
+variable "amp_alert_kms_key_arn" {
+  description = <<-EOT
+    CMK encrypting amp_alert_sns_topic_arn, if it carries one. The Alertmanager's
+    publish role is granted kms:GenerateDataKey*/Decrypt on it, scoped by
+    kms:ViaService to SNS.
+
+    Empty means the topic uses SSE-SNS or no encryption. Getting this wrong fails
+    the same silent way an absent receiver does: SNS accepts the publish and the
+    encrypt is denied, so leave it set whenever the topic has a CMK.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.amp_alert_kms_key_arn == "" || can(regex("^arn:aws[a-z-]*:kms:", var.amp_alert_kms_key_arn))
+    error_message = "amp_alert_kms_key_arn must be a KMS key ARN."
+  }
 }
 
 variable "tags" {

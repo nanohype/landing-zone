@@ -11,6 +11,14 @@ locals {
   bucket_prefix = "${local.prefix}-${var.account_id}"
   tenant_tags   = merge(var.tags, { Tenant = var.tenant_id })
 
+  # The BackupPolicy tag is a claim about protection, so it goes only on the
+  # resources the central plan can actually protect, and only when an operator has
+  # named a plan. Tenant-scoped IAM roles, KMS keys, security groups and log groups
+  # keep the plain tag set: AWS Backup has no resource type for them, and a tag
+  # that selects nothing reads as covered while covering nothing.
+  data_tags = var.backup_policy == "" ? local.tenant_tags : merge(local.tenant_tags, { BackupPolicy = var.backup_policy })
+
+
   # Teardown posture: development always; elsewhere opt-in via force_destroy_buckets
   # (same two-act contract as agent-iam). Curated is versioned, so without this
   # BucketNotEmpty is stickier than an unversioned bucket.
@@ -64,7 +72,7 @@ module "raw_bucket" {
   ]
 
   attach_deny_insecure_transport_policy = true
-  tags                                  = local.tenant_tags
+  tags                                  = local.data_tags
 }
 
 module "staging_bucket" {
@@ -98,7 +106,7 @@ module "staging_bucket" {
   ]
 
   attach_deny_insecure_transport_policy = true
-  tags                                  = local.tenant_tags
+  tags                                  = local.data_tags
 }
 
 module "curated_bucket" {
@@ -134,5 +142,5 @@ module "curated_bucket" {
   ]
 
   attach_deny_insecure_transport_policy = true
-  tags                                  = local.tenant_tags
+  tags                                  = local.data_tags
 }

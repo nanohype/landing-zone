@@ -43,10 +43,10 @@ override_data {
 variables {
   environment       = "development"
   cluster_name      = "development-platform"
-  region            = "us-west-2"
-  oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED"
-  oidc_issuer       = "oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED"
-  data_kms_key_arn  = "arn:aws:kms:us-west-2:123456789012:key/EXAMPLE-DATA-CMK"
+  region            = "us-east-1"
+  oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED"
+  oidc_issuer       = "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED"
+  data_kms_key_arn  = "arn:aws:kms:us-east-1:123456789012:key/EXAMPLE-DATA-CMK"
 }
 
 # The load-bearing invariant: the operator can create/modify a tenant role ONLY
@@ -366,10 +366,15 @@ run "tenant_baseline_bedrock_is_model_scoped" {
       s if try(s.Sid, "") == "BedrockInvoke"
       && can(tolist(s.Resource))
       && contains(tolist(s.Resource), "arn:aws:bedrock:*::foundation-model/anthropic.*")
-      && contains(tolist(s.Resource), "arn:aws:bedrock:*:123456789012:inference-profile/*anthropic.*")
+      # The profile ARN carries an explicit geo prefix, not a bare wildcard:
+      # `inference-profile/*anthropic.*` matches any profile whose NAME contains
+      # the family, which IAM treats as a match and a reader treats as "the geo
+      # prefix, whatever it is".
+      && !anytrue([for r in tolist(s.Resource) : strcontains(r, "inference-profile/*")])
+      && contains(tolist(s.Resource), "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.*")
       && !contains(tolist(s.Resource), "*")
     ]) == 1
-    error_message = "BedrockInvoke must scope Resource to the allowlisted foundation-model + inference-profile ARNs (incl. anthropic.*), never \"*\""
+    error_message = "BedrockInvoke must scope Resource to the allowlisted foundation-model ARN plus a GEO-PREFIXED inference-profile ARN, never \"*\" and never a bare inference-profile/* wildcard — the latter matches any profile whose name contains the family, which IAM treats as a match and a reader treats as the geo prefix"
   }
 
   # The invoke/converse actions stay on the scoped statement...
@@ -404,10 +409,16 @@ run "tenant_baseline_bedrock_is_model_scoped" {
   }
 }
 
-# The scoping is variable-driven, not hardcoded: an empty allowlist is the
-# documented escape hatch back to Resource=["*"]. Proving both directions rules out
-# a coincidentally-correct default.
-run "tenant_baseline_bedrock_empty_allowlist_is_wildcard" {
+# The scoping is variable-driven, not hardcoded, and an empty allowlist grants
+# NOTHING. Proving that direction is what rules out a coincidentally-correct
+# default, and it is the direction that matters: empty meaning "everything" would
+# turn a list that came back short — one rendered from a set of Platform CRs that
+# happens to be empty — into unrestricted bedrock:Invoke* on every model.
+#
+# The statement is absent rather than present-and-empty. An Allow with an empty
+# Resource list is not valid IAM, and an Allow with Resource=["*"] is the opposite
+# of what the caller asked for.
+run "tenant_baseline_bedrock_empty_allowlist_grants_nothing" {
   command = plan
 
   variables {
@@ -418,9 +429,37 @@ run "tenant_baseline_bedrock_empty_allowlist_is_wildcard" {
     condition = length([
       for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
       s if try(s.Sid, "") == "BedrockInvoke"
-      && length(tolist(s.Resource)) == 1 && contains(tolist(s.Resource), "*")
+    ]) == 0
+    error_message = "an empty allowlist must emit NO BedrockInvoke statement — an empty list is a request for no Bedrock grant, and widening it to Resource=[\"*\"] hands every model to the caller who thought they were removing access"
+  }
+
+  # The rest of the baseline must survive the omission: dropping the invoke
+  # statement must not drop the guardrail or telemetry grants alongside it.
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      s if contains(["BedrockGuardrail", "Telemetry"], try(s.Sid, ""))
+    ]) == 2
+    error_message = "omitting BedrockInvoke must leave the BedrockGuardrail and Telemetry statements intact"
+  }
+}
+
+# Any-model stays expressible, but only by writing it: ["*"] at the call site sits
+# in config an auditor reads, which an empty list never showed them.
+run "tenant_baseline_bedrock_explicit_wildcard_is_honoured" {
+  command = plan
+
+  variables {
+    bedrock_allowed_model_ids = ["*"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      s if try(s.Sid, "") == "BedrockInvoke"
+      && contains(tolist(s.Resource), "arn:aws:bedrock:*::foundation-model/*")
     ]) == 1
-    error_message = "an empty allowlist must fall back to exactly one BedrockInvoke statement with Resource=[\"*\"] (the explicit escape hatch)"
+    error_message = "an explicit [\"*\"] allowlist must expand to the any-model ARNs — the escape hatch stays reachable, just legible"
   }
 }
 
@@ -439,7 +478,7 @@ run "tenant_baseline_grants_s3_scoped_data_kms" {
       && contains(s.Action, "kms:GenerateDataKey")
       && contains(s.Action, "kms:Decrypt")
       && s.Resource == var.data_kms_key_arn
-      && try(s.Condition.StringEquals["kms:ViaService"], "") == "s3.us-west-2.amazonaws.com"
+      && try(s.Condition.StringEquals["kms:ViaService"], "") == "s3.us-east-1.amazonaws.com"
     ]) == 1
     error_message = "tenant baseline must grant kms:Decrypt/GenerateDataKey on the data CMK, confined to S3 via kms:ViaService, so tenants can read/write the SSE-KMS model-artifacts bucket"
   }
@@ -497,7 +536,7 @@ run "operator_can_create_but_never_delete_a_schedule_group" {
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
-      s.Resource == "arn:aws:scheduler:us-west-2:123456789012:schedule-group/development-*"
+      s.Resource == "arn:aws:scheduler:us-east-1:123456789012:schedule-group/development-*"
       if try(s.Sid, "") == "TenantScheduleGroup"
     ])
     error_message = "the schedule-group grant must be scoped to this environment's groups, not to every group in the account"

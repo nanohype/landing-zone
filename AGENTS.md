@@ -13,6 +13,24 @@ Plus:
 - **`modules/`** — reusable building blocks components compose: `workload-identity` (the EKS Pod Identity role factory) and `eks-vpc-endpoints` (the private endpoint set create-mode `network` and `shared-network` build).
 - **`live/`** — per-environment terragrunt configurations. Path is `live/aws/<account>/<region>/<env>/<component>/terragrunt.hcl`.
 
+## Run it
+
+The build interface is [`Taskfile.yaml`](Taskfile.yaml) ([Task](https://taskfile.dev)), not raw `tofu`/`terragrunt`. Prerequisites: OpenTofu >= 1.11.0, Terragrunt, TFLint with the AWS plugin, Python 3, and the AWS CLI for anything that touches an account.
+
+```bash
+task check                        # everything CI runs: fmt, validate, lint, tofu test, and every gate
+task fmt:check                    # formatting only
+task validate                     # tofu init -backend=false + validate, every root
+task lint                         # tflint at --minimum-failure-severity=notice
+task test                         # the tofu test suites
+task gates                        # the semantic gates under scripts/, each its own CI job
+task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=network
+```
+
+`task check` needs no AWS credentials — every suite runs against mocked providers and every gate reads the tree. `task plan` and `task apply` need credentials for the target account.
+
+Six user-invocable skills live in [`.claude/skills/`](.claude/skills/): `add-component`, `add-tenant`, `plan`, `drift`, `validate`, `destroy`. Each names the steps and the gates its change has to satisfy.
+
 ## Contract surface
 
 Every component:
@@ -30,8 +48,11 @@ A tenant's stateful substrate is a declaration, not a per-app component. Each st
 1. Create `components/aws/<name>/` with `versions.tf`, `variables.tf`, `main.tf`, `outputs.tf`, plus per-resource files (`rds.tf`, `s3.tf`, etc.).
 2. Add `live/_envcommon/aws/<name>.hcl` declaring dependencies on upstream components (typically `network`, `cluster`, `cluster-bootstrap`).
 3. Add `live/aws/<account>/<region>/<env>/<name>/terragrunt.hcl` per environment you want to provision (`workload-development`, `workload-staging`, `workload-production`).
-4. Run `tofu fmt -recursive components/aws/<name>` and `tofu validate` from inside the component.
-5. CI auto-discovers the new component via `git ls-files` — no workflow edit needed (`Validate (aws/<name>)` job materializes on the next PR).
+4. Add the component to the `## Layer Breakdown` table in [`docs/architecture.md`](docs/architecture.md) and to the layer list in [`CLAUDE.md`](CLAUDE.md). `scripts/check-architecture-components.sh` gates both: docs/architecture.md in both directions (a documented component that is gone, and a component no table names), and CLAUDE.md in the omission direction only — it is prose rather than a table, so demanding a parseable shape would fix its formatting in place.
+5. Declare the teardown posture: a component holding an `aws_s3_bucket`, `aws_rds_cluster`, `aws_dynamodb_table` or `aws_secretsmanager_secret` either wires a `force_destroy_buckets` lever through every gate attribute those types need, or is named in the `EXEMPT` table in `scripts/check-teardown-gates.py` with the reason.
+6. Write `components/aws/<name>/tests/<name>.tftest.hcl`. Every other root carries one; they run at `command = plan` against a `mock_provider`, so they need no credentials.
+7. Run `task check`.
+8. CI auto-discovers the new component via `git ls-files` — no workflow edit needed (`Validate (aws/<name>)` job materializes on the next PR).
 
 ## Add a tenant's substrate
 

@@ -4,7 +4,7 @@
 # without needing a live account.
 
 provider "aws" {
-  region                      = "us-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true

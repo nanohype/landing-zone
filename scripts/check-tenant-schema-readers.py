@@ -25,10 +25,14 @@ in ALLOW below with the reason.
 import re
 import subprocess
 import sys
+
+from _hcl import blank_comments as strip_comments
 from pathlib import Path
 
 # Attributes that legitimately have no resource reader, and why.
 ALLOW = {}
+
+
 
 
 def tracked(repo, *globs):
@@ -39,15 +43,34 @@ def tracked(repo, *globs):
 
 
 def object_type_fields(text, var_names):
-    """Attribute names declared inside `variable "<name>" { type = ... object({...}) }`."""
+    """Attribute names declared inside `variable "<name>" { type = ... object({...}) }`.
+
+    Two things this deliberately does not do, both of which fail toward reporting
+    a schema that is not the one in force.
+
+    It does not take the FIRST match. A commented-out declaration sitting above
+    the live one wins a first-hit search, and the gate then checks the dead copy's
+    fields while the real ones go unexamined — a pass earned by reading the wrong
+    block. Every match is collected and their fields unioned, so a stale copy can
+    only ADD a field to check, never hide one.
+
+    And it reads a comment-blanked view, so a commented-out declaration is not
+    there to be found at all. The union above is the belt to that's braces:
+    blanking handles the `#` case, the union handles a duplicate that is live in
+    both places.
+    """
+    code = strip_comments(text)
     fields = {}
     for var in var_names:
-        m = re.search(r'^variable\s+"' + var + r'"\s*\{(.*?)^\}', text, re.S | re.M)
-        if not m:
-            continue
-        for fm in re.finditer(r"^\s{4,}([a-z0-9_]+)\s*=\s*(optional\(|bool|number|string|list|map|object)",
-                              m.group(1), re.M):
-            fields.setdefault(fm.group(1), var)
+        matches = list(
+            re.finditer(r'^variable\s+"' + var + r'"\s*\{(.*?)^\}', code, re.S | re.M)
+        )
+        for m in matches:
+            for fm in re.finditer(
+                r"^[ \t]{4,}([a-z0-9_]+)[ \t]*=[ \t]*(optional\(|bool|number|string|list|map|object)",
+                m.group(1), re.M,
+            ):
+                fields.setdefault(fm.group(1), var)
     return fields
 
 
@@ -78,10 +101,20 @@ def main():
                 continue
             readers = []
             for f, body in bodies:
-                # Strip variable blocks so a declaration is never its own reader.
+                # Strip variable blocks so a declaration is never its own reader,
+                # and comments so PROSE about a field is never its own reader
+                # either. The second matters more: the field this gate exists to
+                # catch is one whose implementation is missing, and the most
+                # likely thing standing where the implementation should be is a
+                # comment explaining that it is missing. Counting that comment as
+                # a reader makes the gate agree with the defect.
                 stripped = re.sub(r'^variable\s+"[^"]+"\s*\{.*?^\}', "", body, flags=re.S | re.M)
-                if re.search(r"[.\[]" + re.escape(field) + r"\b", stripped) or \
-                   re.search(r'"' + re.escape(field) + r'"', stripped):
+                stripped = strip_comments(stripped)
+                # A reader is an ACCESS — `.field` or `["field"]` — not a bare
+                # mention. A quoted bare string matches a map key or a tag value
+                # in an unrelated block, which reads as a use and is not one.
+                if re.search(r"\." + re.escape(field) + r"\b", stripped) or \
+                   re.search(r'\[\s*"' + re.escape(field) + r'"\s*\]', stripped):
                     readers.append(f)
             if not readers:
                 rel = (comp / "variables.tf").as_posix()

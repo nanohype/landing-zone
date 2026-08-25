@@ -13,6 +13,11 @@
 # (user-supplied Cloudflare IDs, off by default).
 set -uo pipefail
 
+# Anchor to the repository root. Without this the scan is relative to whatever
+# directory the caller happened to be in, so running it from a subdirectory
+# quietly examines a fraction of the tree and reports the same success.
+cd "$(dirname "$0")/.."
+
 SENTINELS='PLACEHOLDER|REPLACE_ME|REPLACEME|CHANGEME|CHANGE_ME|FILL_ME|FILLME|TODO_FILL|TO_BE_FILLED|<FILL|<YOUR_|<ACCOUNT_ID>|<FLEET_ACCOUNT'
 
 hits=$(grep -rnE "$SENTINELS" . \
@@ -24,6 +29,23 @@ hits=$(grep -rnE "$SENTINELS" . \
   --exclude-dir='test' --exclude-dir='mcp-tunnel' --exclude-dir='vendor' \
   2>/dev/null)
 
+# Anti-vacuity floor. A grep that matches nothing and a grep that CANNOT match
+# print the same thing — success — and the second is how this gate dies without a
+# sound: an include glob that stops matching, a tree that moved, a wrong cwd.
+# Count what was actually examined and refuse to report a pass over too little.
+#
+# The floor sits below the real count rather than at it, so adding or removing
+# config files never requires editing this number; it asserts that discovery
+# worked, not that the tree has a particular size.
+scanned=$(git ls-files \
+  '*.yaml' '*.yml' '*.tf' '*.hcl' '*.tfvars' '*.json' 2>/dev/null | wc -l | tr -d ' ')
+if [ "${scanned:-0}" -lt 100 ]; then
+  echo "FAIL: only ${scanned:-0} scannable config file(s) found (expected >= 100)."
+  echo "The scan could not see the tree, so it has nothing to report on and"
+  echo "refuses to report a pass."
+  exit 1
+fi
+
 if [ -n "$hits" ]; then
   echo "Unfilled placeholder sentinel(s) found in deploy config:"
   echo "$hits"
@@ -33,4 +55,4 @@ if [ -n "$hits" ]; then
   echo "exclude list in scripts/no-placeholders.sh."
   exit 1
 fi
-echo "✓ no placeholder sentinels in deploy config"
+echo "✓ no placeholder sentinels in deploy config (${scanned} config file(s) scanned)"

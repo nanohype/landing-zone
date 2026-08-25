@@ -1,7 +1,7 @@
 ################################################################################
 # model-import — the IMPORT-TIME substrate for Bedrock Custom Model Import:
 # open-weight models served through the ordinary Bedrock runtime with no GPU
-# nodes (see the open-weights plan). Two resources:
+# nodes. Two resources:
 #
 #   - the S3 staging bucket where open-weight files land in Hugging Face format
 #     before an import job copies them into Bedrock's managed storage, and
@@ -46,7 +46,8 @@ locals {
   # Environment+account+region-scoped names. The bucket carries the account id and
   # region because S3's namespace is global; both names carry the region because
   # IAM is account-global and two regions in one account must not mint the same
-  # role name (the region-model collision lesson). All of that is unchanged.
+  # role name: IAM is account-global, so two regions in one account must not
+  # mint the same role name.
   #
   # The environment segment is what keeps two environments in ONE account from
   # colliding, which is not hypothetical — this tree already places several

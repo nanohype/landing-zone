@@ -99,3 +99,27 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "backup_policy" {
+  description = <<-EOT
+    Value of the BackupPolicy tag stamped on this component's record buckets,
+    matching an aws_backup_selection key in the backup component so the central
+    plan's tag selector picks them up.
+
+    Empty (the default) stamps nothing. Opt-in rather than fail-safe because
+    enrolling a resource in a plan is a billed act, and a component that enrolled
+    every bucket it created would put backup cost in an account whose operator
+    never asked for it.
+
+    Worth a deliberate decision here rather than elsewhere: these buckets hold the
+    org's audit record, and S3 versioning protects an object from being
+    overwritten, not the bucket from being emptied by someone who can empty it.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.backup_policy == "" || can(regex("^[a-z][a-z0-9-]*$", var.backup_policy))
+    error_message = "backup_policy must be empty, or a lowercase plan key (letters, digits, hyphens) matching a key in the backup component's backup_plans."
+  }
+}
