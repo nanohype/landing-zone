@@ -95,9 +95,12 @@ Pods assume IAM roles via EKS Pod Identity — the EKS control plane injects cre
 
 ### Multi-Tenant Pattern
 
-A few components still accept a `var.tenants` map (`druid`, `pipeline`, `governance`) and mint
-per-tenant resources via `for_each`. The default path for a new Platform tenant is
-**`tenant-substrate`**: declare datastores on the Platform CR; the component provisions them.
+Four components accept a `var.tenants` map and mint per-tenant resources via `for_each`:
+`druid`, `pipeline`, `governance`, and `tenant-substrate`. The first three are
+purpose-built — a tenant's Druid cluster, its pipeline, its governance guardrails —
+and their tenant maps are hand-authored. `tenant-substrate` is the generic one and the
+default path for a new Platform tenant: declare the stores on the Platform CR and its
+`var.tenants` is rendered from those declarations rather than written by hand.
 Tenants are isolated at the resource level (separate databases, buckets, queues, caches with AUTH,
 IAM roles).
 

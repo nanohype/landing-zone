@@ -9,7 +9,7 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 ## Development Workflow
 
 1. **Branch** -- create a feature branch from `main`
-2. **Validate locally** -- `task fmt:check && task validate && task lint`
+2. **Validate locally** -- `task check` (formatting, validation, lint, the `tofu test` suites, and every gate CI runs)
 3. **Plan against development** -- `task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=<name>`
 4. **Open a PR** -- CI runs fmt, validate (per-component matrix), tflint, checkov, and the plan matrix
 5. **Review** -- get approval, verify plan output in CI
@@ -55,7 +55,27 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
    `live/aws/` marker) and `merge_strategy = "deep"` merges the leaf `inputs` over
    the envcommon wiring.
 
-7. CI auto-discovers the new component from the tree (`git ls-files`) -- the validate and plan matrix entries materialize on the next PR with no workflow edit.
+7. Add the component to `docs/architecture.md`'s `## Layer Breakdown` table for its
+   layer, and name it in the layer list in `CLAUDE.md`.
+   `scripts/check-architecture-components.sh` gates both inventories against the
+   tree in both directions, so an undocumented component fails CI on its first PR.
+
+8. Declare the component's teardown posture. If it holds an `aws_s3_bucket`,
+   `aws_rds_cluster`, `aws_dynamodb_table` or `aws_secretsmanager_secret`, it
+   either wires a `force_destroy_buckets` lever through every teardown-gate
+   attribute those types need, or it is named in the `EXEMPT` table in
+   `scripts/check-teardown-gates.py` with the reason. A partly-gated component
+   empties its data and then wedges on what it still protects.
+
+9. Write `components/aws/{name}/tests/{name}.tftest.hcl`. Every other root carries
+   a suite that runs at `command = plan` against a `mock_provider`, so it needs no
+   credentials. Assert what the component composes — names, policy statements,
+   variable validations — locating statements by `Sid` rather than by position.
+
+10. Run `task check` — formatting, validation, lint, the `tofu test` suites, and
+    every gate under `scripts/`. This is the sequence CI runs.
+
+11. CI auto-discovers the new component from the tree (`git ls-files`) -- the validate, test and plan matrix entries materialize on the next PR with no workflow edit.
 
 ## Adding a Multi-Tenant Component
 
@@ -86,7 +106,7 @@ Follow the standard component steps above, plus:
 
 4. Use the shared workload identity module (`modules/aws/workload-identity/`) for pod IAM roles.
 
-Existing multi-tenant components to reference: `druid`, `pipeline`, `governance`.
+The multi-tenant components are `druid`, `pipeline`, `governance` and `tenant-substrate` — four, each declaring `var.tenants` with a no-doubled-env validation on the tenant key.
 
 ## Adding a Tenant
 
@@ -115,14 +135,14 @@ Each component's `variables.tf` documents the full tenant schema with defaults.
 3. If targeting a new account, create the corresponding `account.hcl`
 4. Adjust component inputs (node counts, feature toggles, etc.)
 5. Add the environment to `deploy.yml` and optionally `destroy.yml` dispatch inputs
-6. Create the state backend: `./scripts/init-backend-aws.sh`
+6. Create the state backend: `task init-backend REGION=<region>` (it resolves the account id from the caller identity), or `./scripts/init-backend-aws.sh <account_id> <region>` directly
 
 ## Adding a New Region
 
 1. Create the region directory: `live/aws/{account}/{new-region}/`
 2. Add a `region.hcl` with the region identifier
 3. Copy environment directories from an existing region and adjust inputs
-4. Create the state backend in the new region: `./scripts/init-backend-aws.sh`
+4. Create the state backend in the new region: `task init-backend REGION=<region>` (it resolves the account id from the caller identity), or `./scripts/init-backend-aws.sh <account_id> <region>` directly
 
 ## Code Style
 

@@ -86,6 +86,11 @@ def live_regions(tracked: list[str]) -> set[str]:
 # number is kept. us-east-1 -> use1, ap-southeast-2 -> apse2, us-gov-west-1 ->
 # usgw1. The compound directions are two letters, not one, which is the part a
 # naive first-letter rule gets wrong.
+#
+# region-ok: ap-southeast-2 and us-gov-west-1 are worked examples of the
+# abbreviation rule, chosen because they exercise the compound direction and the
+# three-segment area that a one-letter rule gets wrong. This file has to name
+# regions it does not deploy into to describe the transform at all.
 DIRECTION_ABBREV = {
     "north": "n",
     "south": "s",
