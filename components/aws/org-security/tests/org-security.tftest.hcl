@@ -83,6 +83,11 @@ run "sns_publish_scoped_to_named_services" {
     error_message = "Security Hub publish grant must be Allow sns:Publish, Principal Service=securityhub.amazonaws.com"
   }
 
+  # EventBridge carries NO condition. AWS does not populate condition context on
+  # the EventBridge-to-SNS publish path, so a key here evaluates empty and the
+  # statement never allows — the finding is accepted by the rule and dropped. The
+  # topic ARN bounds the grant in the guard's place. Asserted as an absence,
+  # because the regression this guards against is a condition reappearing.
   assert {
     condition = length([
       for s in jsondecode(aws_sns_topic_policy.security_alerts.policy).Statement :
@@ -90,34 +95,44 @@ run "sns_publish_scoped_to_named_services" {
       && s.Effect == "Allow"
       && try(s.Principal.Service, "") == "events.amazonaws.com"
       && s.Action == "sns:Publish"
+      && s.Resource == aws_sns_topic.security_alerts.arn
+      && !can(s.Condition)
     ]) == 1
-    error_message = "EventBridge publish grant must be Allow sns:Publish, Principal Service=events.amazonaws.com"
+    error_message = "EventBridge publish grant must be Allow sns:Publish on the topic ARN with NO Condition — a condition key EventBridge does not populate makes the statement never allow, and the finding is dropped with no error at the rule"
   }
 
   # Whole-policy sweep: EVERY statement must publish only (Action=sns:Publish, never
   # sns:* / *) from a KNOWN service principal (try(...) falls back to "*" if Principal
-  # was widened to the "*" string, which then fails the allow-list check), scoped to
-  # the topic ARN, AND locked to this account by aws:SourceAccount. The SourceAccount
-  # condition is the confused-deputy guard: without it a security service principal
-  # acting for any account could inject spoofed findings into the alert channel. This
-  # sweep catches a wildcard-principal, a widened action, OR a dropped condition.
+  # was widened to the "*" string, which then fails the allow-list check) and be
+  # scoped to the topic ARN. The aws:SourceAccount guard is required of every
+  # principal that populates it — GuardDuty and Security Hub — and forbidden of the
+  # one that does not, so the sweep catches a wildcard principal, a widened action, a
+  # dropped guard on a service that needs one, AND a guard added back onto
+  # EventBridge, which is the change that silently disables the channel.
   assert {
     condition = alltrue([
       for s in jsondecode(aws_sns_topic_policy.security_alerts.policy).Statement :
       s.Action == "sns:Publish"
       && contains(["events.amazonaws.com", "guardduty.amazonaws.com", "securityhub.amazonaws.com"], try(s.Principal.Service, "*"))
       && s.Resource == aws_sns_topic.security_alerts.arn
-      && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+      && (
+        try(s.Principal.Service, "") == "events.amazonaws.com"
+        ? !can(s.Condition)
+        : try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
+      )
     ])
-    error_message = "every alerts-topic statement must be sns:Publish from a named service principal scoped to the topic AND locked to this account by aws:SourceAccount — no wildcard principal, no widened action, no missing condition"
+    error_message = "every alerts-topic statement must be sns:Publish from a named service principal scoped to the topic; GuardDuty and Security Hub must carry the aws:SourceAccount guard and EventBridge must carry none — no wildcard principal, no widened action, no missing guard, no guard on the principal that cannot evaluate one"
   }
 }
 
 # INVARIANT 1b — the alerts topic is encrypted at rest with a CMK whose policy
 # admits exactly the three finding publishers (EventBridge, GuardDuty, Security
-# Hub) via kms:GenerateDataKey*/Decrypt, scoped by SourceAccount. An unencrypted
-# topic leaks findings at rest; a key policy missing a publisher silently drops
-# that source's findings when SSE-SNS tries to encrypt.
+# Hub) via kms:GenerateDataKey*/Decrypt. An unencrypted topic leaks findings at
+# rest; a key policy missing a publisher silently drops that source's findings
+# when SSE-SNS tries to encrypt. The publishers split into two statements for
+# the same per-principal reason the topic policy does: GuardDuty and Security Hub
+# populate aws:SourceAccount and are scoped by it, EventBridge does not and an
+# unpopulated key fails closed.
 run "alerts_topic_encrypted_with_publisher_grants" {
   command = plan
 
@@ -129,15 +144,28 @@ run "alerts_topic_encrypted_with_publisher_grants" {
   assert {
     condition = length([
       for s in jsondecode(aws_kms_key.security_alerts.policy).Statement :
-      s if try(s.Effect, "") == "Allow"
-      && contains(try(s.Principal.Service, []), "events.amazonaws.com")
+      s if try(s.Sid, "") == "AllowSecurityServicePublish"
+      && try(s.Effect, "") == "Allow"
       && contains(try(s.Principal.Service, []), "guardduty.amazonaws.com")
       && contains(try(s.Principal.Service, []), "securityhub.amazonaws.com")
       && contains(try(s.Action, []), "kms:GenerateDataKey*")
       && contains(try(s.Action, []), "kms:Decrypt")
       && try(s.Condition.StringEquals["aws:SourceAccount"], "") == "123456789012"
     ]) == 1
-    error_message = "alerts CMK policy must grant events + guardduty + securityhub kms:GenerateDataKey*/Decrypt scoped by SourceAccount"
+    error_message = "alerts CMK policy must grant guardduty + securityhub kms:GenerateDataKey*/Decrypt scoped by SourceAccount"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_kms_key.security_alerts.policy).Statement :
+      s if try(s.Sid, "") == "AllowEventBridgePublish"
+      && try(s.Effect, "") == "Allow"
+      && try(s.Principal.Service, "") == "events.amazonaws.com"
+      && contains(try(s.Action, []), "kms:GenerateDataKey*")
+      && contains(try(s.Action, []), "kms:Decrypt")
+      && !can(s.Condition)
+    ]) == 1
+    error_message = "alerts CMK must grant events.amazonaws.com kms:GenerateDataKey*/Decrypt in its own statement with NO Condition — EventBridge does not populate condition context, so a guard here fails closed and every EventBridge-routed finding is dropped at encrypt"
   }
 }
 

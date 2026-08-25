@@ -103,8 +103,15 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
 ## 6. Org guardrails  (`org-scp`, `org-identity`, `break-glass`)
 
 - **Tampering / Elevation at the org level** — disabling audit logging, leaving the
-  org, using unapproved regions. Mitigated: `org-scp` attaches SCPs that Deny these
-  regardless of account-level IAM.
+  org, using unapproved regions. `org-scp` authors the Deny policies that cover
+  these and creates them in Organizations, where they bind regardless of
+  account-level IAM once attached. Attachment is the operator's act, not this
+  repo's: every policy ships with `target_ids = []`, because attaching an SCP is
+  org-wide with no undo path for whoever it locks out, and the OU ids it would
+  name are estate values a substrate repo does not hold. **Until an operator
+  supplies `target_ids`, these threats are unmitigated** — the policies exist and
+  govern nothing. Supply the OU ids in
+  `live/aws/management/<region>/org/org-scp/terragrunt.hcl` to close them.
 - **Repudiation of emergency access** — Mitigated: `break-glass` roles fire an SNS
   alert on assumption and cap `max_session_duration` (default 1h). Identity Center
   (`org-identity`) provides 5 least-privilege permission sets rather than shared
