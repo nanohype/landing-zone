@@ -78,6 +78,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Per-gate wall-clock budget, and the code a timeout is reported under. 124 is
+# what `timeout(1)` uses; borrowing it keeps a timeout legible as a timeout
+# rather than as some private sentinel.
+GATE_TIMEOUT_SECONDS = 300
+TIMEOUT_EXIT = 124
+
 # This file, and the entry points that are not violation-detecting gates.
 NOT_A_GATE = {
     "check-gates-detect.py",  # the harness; see the limit stated in the docstring
@@ -629,9 +635,24 @@ def run_gate(tree: Path, gate: str) -> tuple[int, str]:
         )
     os.chmod(script, 0o755)
     cmd = ["python3", str(script)] if gate.endswith(".py") else ["bash", str(script)]
-    proc = subprocess.run(
-        cmd, cwd=tree, capture_output=True, text=True, timeout=300
-    )
+    try:
+        proc = subprocess.run(
+            cmd, cwd=tree, capture_output=True, text=True, timeout=GATE_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        # A timeout is a NON-VERDICT and it needs a name. Letting TimeoutExpired
+        # escape turns it into a traceback from the floor itself — which loses
+        # which control was in flight, and is the crash-scoring-as-a-verdict
+        # class arriving inside the thing that screens for it, wearing a
+        # different exit code.
+        #
+        # 124 is what `timeout(1)` reports, so it reads the same way to anyone
+        # who has met the convention. The verdict logic already treats any code
+        # other than 1 as a non-rejection; this gives that code a sentence.
+        return TIMEOUT_EXIT, (
+            f"timed out after {GATE_TIMEOUT_SECONDS}s. The gate never finished, "
+            f"so it rejected nothing — this is a non-verdict, not a catch."
+        )
     return proc.returncode, proc.stdout + proc.stderr
 
 
@@ -791,6 +812,7 @@ def main() -> int:
         return 1
 
     blind: list[tuple[str, str]] = []
+    proven = 0
     broken: list[tuple[str, str]] = []
     misreported: list[tuple[str, str]] = []
 
@@ -841,7 +863,9 @@ def main() -> int:
                 # is indistinguishable from a strict rejection if only the text
                 # is consulted, because a gate whose binary is missing may print
                 # nothing at all.
-                if clean_code == 127:
+                if clean_code == TIMEOUT_EXIT:
+                    why = "timed out on the unmutated tree — a non-verdict, not a refusal"
+                elif clean_code == 127:
                     why = "exited 127 on the unmutated tree — a missing tool, not a verdict"
                 elif "Traceback (most recent call last)" in clean_output:
                     why = "crashes on the unmutated tree"
@@ -1021,6 +1045,11 @@ def main() -> int:
                             f"Output: {_first_citation(output)}",
                         )
                     )
+            # Reached only when this control rejected, named the mutation and cited
+            # a line inside it. Every earlier exit from this body records a failure
+            # and continues, so this counter is cases PROVEN rather than gates seen.
+            proven += 1
+
 
     if broken:
         print("Control(s) could not be run:\n", file=sys.stderr)
@@ -1062,7 +1091,25 @@ def main() -> int:
         )
         return 1
 
-    print(f"✓ every gate detects its own violation ({len(shipped)} positive controls)")
+    # The count that licenses every verdict above is CASES PROVEN, not gates
+    # shipped. Those are different quantities: `len(shipped)` stays 25 whether
+    # 25 controls ran or none did, and a registry whose entries are present but
+    # inert satisfies "every gate has a control" while proving nothing. Print
+    # the one that can only go up by doing the work, and floor it against the
+    # one that cannot.
+    if proven != len(shipped):
+        print(
+            f"FAIL: {proven} control(s) completed a proof, but {len(shipped)} "
+            f"gate(s) ship. {len(shipped) - proven} control(s) left the loop "
+            f"without proving or failing anything, so this run licenses nothing.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        f"✓ every gate detects its own violation "
+        f"({proven} control(s) proven against {len(shipped)} shipped gate(s))"
+    )
     return 0
 
 
