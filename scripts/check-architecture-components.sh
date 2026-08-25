@@ -61,5 +61,27 @@ if [ -n "$missing_from_doc" ]; then
   status=1
 fi
 
-[ "$status" -eq 0 ] && echo "PASS: $DOC names exactly the $(echo "$actual" | wc -l | tr -d ' ') components in the tree"
+# CLAUDE.md carries a second inventory — the layer-grouped component list loaded
+# into every session in this repo — and it drifted six components behind the tree
+# while docs/architecture.md stayed exact, because only one of the two was gated.
+#
+# Only the omission direction is checked here, and only by name. CLAUDE.md is
+# prose, not a table: demanding a parseable shape would fix its formatting in
+# place, and the opposite direction (naming a component that is gone) already
+# fails visibly for a reader, whereas a missing one reads as a complete list.
+CLAUDE_DOC="CLAUDE.md"
+if [ -f "$CLAUDE_DOC" ]; then
+  unnamed=""
+  while IFS= read -r c; do
+    grep -qF -- "\`$c\`" "$CLAUDE_DOC" || unnamed="$unnamed$c"$'\n'
+  done <<<"$actual"
+  if [ -n "$unnamed" ]; then
+    echo "FAIL: components/aws/ holds components $CLAUDE_DOC never names:"
+    printf '%s' "$unnamed" | sed 's/^/  - /'
+    echo "  ($CLAUDE_DOC presents a grouped inventory, so an omission reads as 'this component does not exist')"
+    status=1
+  fi
+fi
+
+[ "$status" -eq 0 ] && echo "PASS: $DOC names exactly the $(echo "$actual" | wc -l | tr -d ' ') components in the tree, and $CLAUDE_DOC names every one"
 exit "$status"

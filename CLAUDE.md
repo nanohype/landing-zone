@@ -9,8 +9,8 @@ task fmt                                              # format all .tf files
 task fmt:check                                        # check formatting (CI uses this)
 task validate                                         # init + validate every component
 task lint                                             # tflint with AWS plugin
-task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=network
-task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
+task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=network
+task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development
 ```
 
 ## Architecture
@@ -20,16 +20,17 @@ task apply ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development
   - **Cluster** — `cluster`, `cluster-bootstrap`, `cluster-addons`
   - **Workload (multi-tenant, `var.tenants`)** — `druid`, `pipeline`, `governance`, `tenant-substrate` (the generic per-tenant datastore substrate: a tenant declares its stateful stores — relational/keyValue/objectStore/queue/cache/stream — and the module provisions them from that declaration, rendered from the Platform CRs by the factory)
   - **Operational** — `observability`, `secrets`, `backup`, `break-glass`, `service-quotas`, `cost`, `dns`, `github-oidc`, `managed-monitoring`
-  - **Agent-platform** — `agent-iam` (operator role + tenant permissions boundary + model-artifacts/eval-reports buckets). A tenant's stateful substrate is not a per-app component: it is declared in `Platform.spec.datastores` and provisioned by the generic `tenant-substrate` component; SES / EventBridge Scheduler capabilities are declared in `Platform.spec.identity.capabilities` and the operator generates their grants
+  - **Operational, owner side** — the shared-services/network-account halves of the create/adopt pairs above: `shared-observability` (fleet-wide severity topics), `shared-backup` (the central vault), `shared-dns` (the RAM-shared private zones), `private-dns` (a per-account private zone that resolves against them)
+  - **Agent-platform** — `agent-iam` (operator role + tenant permissions boundary + model-artifacts/eval-reports buckets), `model-import` (the S3 staging bucket and Bedrock service role a Custom Model Import job reads open-weight files through). A tenant's stateful substrate is not a per-app component: it is declared in `Platform.spec.datastores` and provisioned by the generic `tenant-substrate` component; SES / EventBridge Scheduler capabilities are declared in `Platform.spec.identity.capabilities` and the operator generates their grants
   - **Fleet & portal (cross-account, hub-side)** — `fleet-hub`, `fleet-vend`, `fleet-unwedge`, `portal-hub`, `portal-spoke`
-  - **Organization (management account)** — `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`, `org-scp`
-- **Shared modules** under `modules/aws/` — `workload-identity` (EKS Pod Identity role factory), `eks-vpc-endpoints` (the private endpoint set both create-mode `network` and `shared-network` build)
-- **Environments:** development, staging, production; `hub` (fleet/portal control plane); `org` (management account)
-- **Accounts:** workload-development, workload-staging, workload-production, management, `fleet` (hub control plane), `network` (network-owner account for the shared-network/egress-network adopt topology), `reference-adopt` (the worked adopt-mode consumer wiring — documentation that CI renders, never applied)
-- **Installability rule:** a leaf under `live/aws/workload-*/` may not depend on a unit outside its own account directory. A terragrunt `dependency` resolves at config-parse time, so a cross-account dependency with no state fails `init`, not just `apply`, and no `TF_VAR` bypasses it. Enforced by `scripts/check-account-local-deps.sh`; cross-account examples live in `live/aws/reference-adopt/`
+  - **Organization (management account)** — `org-identity`, `org-security`, `org-compliance`, `org-cost`, `org-networking`, `org-scp`, `org-backup` (the org-wide backup policy the `BackupPolicy` tag selects against)
+- **Shared modules** under `modules/aws/` — `workload-identity` (EKS Pod Identity role factory), `eks-vpc-endpoints` (the private endpoint set both create-mode `network` and `shared-network` build), `vpc-flow-logs` (the flow-log destination and delivery role both VPC-owning components attach)
+- **Environments:** development, staging, production; `hub` (fleet/portal control plane); `org` (management account); `shared` (the shared-services account's own environment)
+- **Accounts:** workload-development, workload-staging, workload-production, management, `fleet` (hub control plane), `network` (network-owner account for the shared-network/egress-network adopt topology), `backup` (the shared backup vault account), `shared-services` (fleet-wide alert topics), `reference-adopt` (the worked adopt-mode consumer wiring — documentation that CI renders, never applied)
+- **Installability rule:** a leaf under `live/aws/workload-*/` may not depend on a unit outside its own account directory. A terragrunt `dependency` resolves at config-parse time, so a cross-account dependency with no state fails `init`, not just `apply`, and no `TF_VAR` bypasses it. Enforced by `scripts/check-account-local-deps.py`; cross-account examples live in `live/aws/reference-adopt/`
 - **Teardown rule:** in a component declaring `force_destroy_buckets`, every teardown-gate attribute (`force_destroy`, `skip_final_snapshot`, `final_snapshot_identifier`, `deletion_protection`, `deletion_protection_enabled`, `recovery_window_in_days`) must resolve permissively when the lever is set, and every protectable resource must carry the gate its type needs. AWS spreads these across resources the dependency graph does not join, so a partially-gated component empties its data and then wedges on what it still protects. A component without the lever declares why in the script's `EXEMPT` table. Enforced by `scripts/check-teardown-gates.py`
 - **Tenant-schema rule:** every field a `tenants` object type declares must be read by a resource in that component. A field with no reader is a control an operator can set, sees accepted, and believes is in force. Enforced by `scripts/check-tenant-schema-readers.py`
-- **Multi-region support:** us-west-2
+- **Region:** us-east-1. The live tree carries one region directory per account; `scripts/check-region-consistency.py` fails any prose naming a region no tree deploys into
 - **Dependency chain:** `network → cluster → {cluster-addons, cluster-bootstrap, druid, pipeline, governance, tenant-substrate, observability, secrets, agent-iam}`
 - Standalone (no dependencies): `cost`, `dns`, `backup`, `break-glass`, `service-quotas`, `github-oidc`
 - `shared-network` and `egress-network` run in the network-owner account; `managed-monitoring`, `fleet-hub`, and the portal/fleet roles run on the hub; `org-*` components deploy to the management account only
@@ -89,10 +90,10 @@ live/
 
 ## Testing Changes
 
-1. `task fmt:check` — formatting
-2. `task validate` — syntax + provider validation
-3. `task lint` — tflint rules
-4. `task plan ACCOUNT=workload-development REGION=us-west-2 ENVIRONMENT=development COMPONENT=<name>` — dry-run against development
+1. `task check` — the whole pre-push sequence: formatting, validation, lint, the `tofu test` suites, and every gate under `scripts/`
+2. `task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=<name>` — dry-run against development
+
+`task check` runs what CI runs. The individual steps (`fmt:check`, `validate`, `lint`, `test`, `gates`) stay available for a faster loop on one of them.
 
 ## CI/CD
 

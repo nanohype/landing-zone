@@ -68,6 +68,40 @@ tasks:
     cmds:
       - python3 scripts/check-smoke-outputs.py
 
+  gates:
+    desc: Run every semantic gate CI runs (the scripts/ checks, each its own CI job)
+    cmds:
+      # Discovered, not listed. A hand-maintained list here would drift from
+      # scripts/ the moment a gate is added, and the failure is silent in the
+      # worst direction — a gate that exists, blocks in CI, and never runs
+      # locally, so a contributor learns about it from a red PR. Every check
+      # script takes no arguments and reports its own scope.
+      - |
+        set -euo pipefail
+        found=0
+        fail=0
+        for s in scripts/check-*.py scripts/check-*.sh scripts/no-placeholders.sh; do
+          [ -e "$s" ] || continue
+          found=$((found + 1))
+          echo "── $s"
+          if ! "$s"; then fail=1; fi
+        done
+        if [ "$found" -eq 0 ]; then
+          echo "no gate scripts found under scripts/ — refusing to report a pass" >&2
+          exit 1
+        fi
+        [ "$fail" -eq 0 ] || exit 1
+        echo "All $found gate(s) passed."
+
+  check:
+    desc: The full pre-push sequence — formatting, validation, lint, unit tests, and every gate
+    cmds:
+      - task: fmt:check
+      - task: validate
+      - task: lint
+      - task: test
+      - task: gates
+
   test:
     desc: Run the tofu test unit suites (security-contract tests) across modules, components, and fleet vend roots
     cmds:
