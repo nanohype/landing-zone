@@ -43,10 +43,16 @@ variable "bedrock_allowed_model_ids" {
     bedrock:Invoke*/Converse* is scoped to exactly these models instead of
     Resource="*". Entries are model families, not version-pinned IDs (e.g.
     "anthropic.*"), so a new revision inside an allowed family stays covered without
-    a policy change. Empty list = grant every model (Resource="*") — the explicit,
-    auditable escape hatch. This scopes the ATTACHED GRANT only; the tenant
-    permissions boundary stays a broad ceiling by design (the privilege that matters
-    is the grant, not the cap).
+    a policy change. This scopes the ATTACHED GRANT only; the tenant permissions
+    boundary stays a broad ceiling by design (the privilege that matters is the
+    grant, not the cap).
+
+    An empty list is refused unless bedrock_allow_all_models is also set. Emptiness
+    is the one value a caller reaches by accident — an allowlist rendered from a set
+    of Platform CRs is empty whenever that set is — and it is the value that widens
+    the grant to every model in Bedrock. Requiring the second input means the widest
+    grant can only be asked for in words, never arrived at by a list that came back
+    shorter than expected.
 
     Scope notes: this is the fleet-wide baseline, so the default deliberately covers
     only Anthropic + Nova generation — a tenant needing another provider (Cohere
@@ -54,10 +60,31 @@ variable "bedrock_allowed_model_ids" {
     referenced in spec.identity.extraPolicyArns, not by widening this shared default. The expansion covers direct foundation
     models and system-defined cross-region inference profiles; application inference
     profiles, provisioned throughput, and custom/imported models are NOT matched —
-    add their ARNs explicitly (or use the empty-list escape hatch) if a fork uses them.
+    add their ARNs explicitly (or use the escape hatch) if a fork uses them.
   EOT
   type        = list(string)
   default     = ["anthropic.*", "amazon.nova-*"]
+
+  validation {
+    condition     = length(var.bedrock_allowed_model_ids) > 0 || var.bedrock_allow_all_models
+    error_message = "bedrock_allowed_model_ids is empty, which would grant the tenant baseline bedrock:Invoke* on Resource=\"*\" — every model in Bedrock. If that is intended, set bedrock_allow_all_models = true to say so; otherwise supply the model families the baseline may invoke."
+  }
+}
+
+variable "bedrock_allow_all_models" {
+  description = <<-EOT
+    Grant the tenant baseline bedrock:Invoke*/Converse* on Resource="*" instead of
+    an allowlist. Required to accompany an empty bedrock_allowed_model_ids, which is
+    otherwise refused.
+
+    The pair exists because the widest grant and the accidental one had the same
+    shape: a caller rendering the allowlist from a set of Platform CRs produces an
+    empty list whenever that set is empty, and an empty list read as "everything" is
+    a fail-open on the single grant that decides which models a tenant can spend
+    against. Two inputs cannot both be reached by the same accident.
+  EOT
+  type        = bool
+  default     = false
 }
 
 variable "team" {

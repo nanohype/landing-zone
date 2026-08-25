@@ -43,7 +43,10 @@ locals {
   # (their IDs carry a us./eu./apac. region-set prefix, hence the leading
   # wildcard). Invoking through an inference profile authorizes against BOTH the
   # profile and the underlying model, so a usable allowlist must grant both forms.
-  # Empty allowlist => ["*"], the explicit any-model escape hatch.
+  # Empty allowlist => ["*"], the any-model escape hatch. Reaching it needs
+  # bedrock_allow_all_models = true as well; the variable validation refuses an
+  # empty list on its own, so a list that merely came back empty cannot widen the
+  # grant to every model in Bedrock.
   bedrock_baseline_invoke_resources = length(var.bedrock_allowed_model_ids) == 0 ? ["*"] : flatten([
     for id in var.bedrock_allowed_model_ids : [
       "arn:${local.partition}:bedrock:*::foundation-model/${id}",

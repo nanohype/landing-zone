@@ -43,10 +43,10 @@ override_data {
 variables {
   environment       = "development"
   cluster_name      = "development-platform"
-  region            = "us-west-2"
-  oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED"
-  oidc_issuer       = "oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED"
-  data_kms_key_arn  = "arn:aws:kms:us-west-2:123456789012:key/EXAMPLE-DATA-CMK"
+  region            = "us-east-1"
+  oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED"
+  oidc_issuer       = "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED"
+  data_kms_key_arn  = "arn:aws:kms:us-east-1:123456789012:key/EXAMPLE-DATA-CMK"
 }
 
 # The load-bearing invariant: the operator can create/modify a tenant role ONLY
@@ -404,14 +404,33 @@ run "tenant_baseline_bedrock_is_model_scoped" {
   }
 }
 
-# The scoping is variable-driven, not hardcoded: an empty allowlist is the
-# documented escape hatch back to Resource=["*"]. Proving both directions rules out
-# a coincidentally-correct default.
+# The scoping is variable-driven, not hardcoded: the escape hatch back to
+# Resource=["*"] is an empty allowlist AND an explicit bedrock_allow_all_models.
+# Proving both directions rules out a coincidentally-correct default.
+#
+# The two inputs are separate because emptiness is the value a caller reaches by
+# accident: an allowlist rendered from a set of Platform CRs is empty whenever that
+# set is, and an empty list read as "everything" fails open on the grant that
+# decides what a tenant can spend against. The refusal below is the half that
+# matters — the wildcard is reachable, but only when someone asked for it.
+run "tenant_baseline_bedrock_empty_allowlist_alone_is_refused" {
+  command = plan
+
+  variables {
+    bedrock_allowed_model_ids = []
+  }
+
+  expect_failures = [
+    var.bedrock_allowed_model_ids,
+  ]
+}
+
 run "tenant_baseline_bedrock_empty_allowlist_is_wildcard" {
   command = plan
 
   variables {
     bedrock_allowed_model_ids = []
+    bedrock_allow_all_models  = true
   }
 
   assert {
@@ -439,7 +458,7 @@ run "tenant_baseline_grants_s3_scoped_data_kms" {
       && contains(s.Action, "kms:GenerateDataKey")
       && contains(s.Action, "kms:Decrypt")
       && s.Resource == var.data_kms_key_arn
-      && try(s.Condition.StringEquals["kms:ViaService"], "") == "s3.us-west-2.amazonaws.com"
+      && try(s.Condition.StringEquals["kms:ViaService"], "") == "s3.us-east-1.amazonaws.com"
     ]) == 1
     error_message = "tenant baseline must grant kms:Decrypt/GenerateDataKey on the data CMK, confined to S3 via kms:ViaService, so tenants can read/write the SSE-KMS model-artifacts bucket"
   }
@@ -497,7 +516,7 @@ run "operator_can_create_but_never_delete_a_schedule_group" {
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
-      s.Resource == "arn:aws:scheduler:us-west-2:123456789012:schedule-group/development-*"
+      s.Resource == "arn:aws:scheduler:us-east-1:123456789012:schedule-group/development-*"
       if try(s.Sid, "") == "TenantScheduleGroup"
     ])
     error_message = "the schedule-group grant must be scoped to this environment's groups, not to every group in the account"
