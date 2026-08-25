@@ -852,6 +852,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
+      # The floor runs every shipped gate as a subprocess, so this job needs
+      # what any of them needs. Two gates parse workflow YAML and fail closed
+      # without PyYAML — correctly, but that refusal reaches the floor as a
+      # gate that does not pass on the unmutated tree.
+      - run: pip install --quiet pyyaml==6.0.3
       - run: python3 scripts/check-gates-detect.py
 
   # A Deny whose Condition can never be satisfied is not a guardrail. IAM ANDs every

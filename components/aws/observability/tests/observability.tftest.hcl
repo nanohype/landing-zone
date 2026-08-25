@@ -492,17 +492,23 @@ run "slo_burn_rate_pairs_match_the_standard" {
   # rollups hold, extended to the pairs.
   assert {
     condition = alltrue([
-      for a in values(aws_cloudwatch_metric_alarm.slo_burn_window) : length(a.alarm_actions) == 0
+      for a in values(aws_cloudwatch_metric_alarm.slo_burn_window) : length(coalesce(a.alarm_actions, [])) == 0
     ])
     error_message = "burn-rate window alarms must carry NO SNS action — they exist to compute state, and the per-severity composites own the notification so a burning cluster pages once"
   }
 
   assert {
     condition = alltrue([
-      for c in values(aws_cloudwatch_composite_alarm.slo_burn) : length(c.alarm_actions) == 0
+      for c in values(aws_cloudwatch_composite_alarm.slo_burn) : length(coalesce(c.alarm_actions, [])) == 0
     ])
     error_message = "a burn-rate PAIR composite must also stay actionless — it rolls up into the per-severity cluster composite, which is the single notification surface"
   }
+
+  # coalesce above is load-bearing across versions: OpenTofu 1.11.5 plans an
+  # unset alarm_actions as null and 1.12.x plans it as an empty list, so
+  # length() alone fails on the version CI pins while passing on a newer local
+  # one. The assertion is about carrying no action, not about which spelling of
+  # absent the planner produced.
 
   # The rollup is what makes the pairs reachable. Without it they are eight alarms
   # and four composites nobody is subscribed to.

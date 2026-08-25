@@ -1,11 +1,15 @@
 # OpenTofu
 .terraform/
 # .terraform.lock.hcl: track the canonical per-root locks (reproducible, hash-pinned
-# provider resolution) under components/ and fleet/; ignore the derived copies that
+# provider resolution) for every root CI initialises — components/, fleet/ AND
+# modules/. CI runs `tofu init -lockfile=readonly`, which cannot create a lock,
+# so a root whose lock is untracked fails to init on a clean checkout while
+# passing locally off an untracked file. Ignore only the derived copies that
 # terragrunt leaves in live/ working dirs and module test dirs.
 .terraform.lock.hcl
 !/components/aws/*/.terraform.lock.hcl
 !/fleet/aws/*/.terraform.lock.hcl
+!/modules/aws/*/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan
