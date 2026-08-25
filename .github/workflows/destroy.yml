@@ -47,6 +47,7 @@ jobs:
   destroy:
     name: Destroy ${{ inputs.environment }}/${{ inputs.component }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     environment: ${{ inputs.environment }}
     if: inputs.confirm == inputs.environment
     steps:

@@ -272,6 +272,16 @@ def mutations() -> list[Mutation]:
             ),
         ),
         Mutation(
+            "check-workflow-budgets.py",
+            "a workflow job has no timeout-minutes and inherits the 360-minute default",
+            lambda t: _edit(
+                t,
+                ".github/workflows/ci.yml",
+                "  placeholders:\n    name: Zero-placeholder gate\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n",
+                "  placeholders:\n    name: Zero-placeholder gate\n    runs-on: ubuntu-latest\n",
+            ),
+        ),
+        Mutation(
             "no-placeholders.sh",
             "a placeholder sentinel survives into deploy config",
             lambda t: _append(

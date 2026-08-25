@@ -17,6 +17,7 @@ jobs:
   placeholders:
     name: Zero-placeholder gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -26,6 +27,7 @@ jobs:
   fmt:
     name: Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -56,6 +58,7 @@ jobs:
   discover:
     name: Discover Matrices
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       validate: ${{ steps.matrices.outputs.validate }}
       plan: ${{ steps.matrices.outputs.plan }}
@@ -98,6 +101,7 @@ jobs:
   validate:
     name: Validate (${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: discover
     strategy:
       fail-fast: false
@@ -125,6 +129,7 @@ jobs:
   test:
     name: Unit Tests (tofu test)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -150,6 +155,7 @@ jobs:
   tflint:
     name: TFLint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # tflint --init fetches the aws ruleset from the GitHub releases API. Without a
     # token that call is UNauthenticated (60/hr per runner IP), so on a shared-IP
     # runner it intermittently 403s ("API rate limit exceeded") and reds the build
@@ -178,6 +184,7 @@ jobs:
   checkov:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -223,6 +230,7 @@ jobs:
   evaluate:
     name: Terragrunt Evaluate (live)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       TERRAGRUNT_ACCOUNT_ID: "111111111111"
     steps:
@@ -355,6 +363,7 @@ jobs:
   mock-outputs:
     name: Mock Outputs Cross-check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -375,6 +384,7 @@ jobs:
   account-local-deps:
     name: Workload Deps Are Account-Local
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -397,6 +407,7 @@ jobs:
   foreign-placeholders:
     name: Appliable Leaves Name No Foreign Placeholder
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -414,6 +425,7 @@ jobs:
   escaped-interpolations:
     name: Every Escaped Interpolation Is Explained
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -434,6 +446,7 @@ jobs:
   tenant-substrate-render:
     name: Rendered Substrate Matches The Platform CRs
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -494,6 +507,7 @@ jobs:
   architecture-components:
     name: Architecture Doc Matches The Tree
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -507,6 +521,7 @@ jobs:
   smoke-outputs:
     name: Smoke Test Outputs Cross-check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -525,6 +540,7 @@ jobs:
   datastore-ingress-source:
     name: Datastores Admit The Node SG
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -544,6 +560,7 @@ jobs:
   engine-version-pins:
     name: No Minor-Version Engine Pins
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -564,6 +581,7 @@ jobs:
   region-consistency:
     name: Prose Names Only Deployed Regions
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -572,6 +590,25 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 scripts/check-region-consistency.py
+
+  # A job with no timeout-minutes inherits GitHub's 360-minute default, which is a
+  # six-hour bill for a job that stopped making progress. On drift.yml's weekday
+  # schedule a hung run is still holding a runner when the next one starts, so the
+  # failure presents as a queue rather than as the hang it is. The value is the
+  # author's judgement; that a bound exists is not.
+  workflow-budgets:
+    name: Every Workflow Job Is Bounded
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - run: python3 scripts/check-workflow-budgets.py
 
   # A pin nobody watches keeps working and keeps passing CI until the upstream it
   # names is retired or a CVE lands on it, at which point it is found by the
@@ -583,6 +620,7 @@ jobs:
   version-coverage:
     name: Every Version Pin Is Watched
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -606,6 +644,7 @@ jobs:
   workflows:
     name: Workflow Security (zizmor)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -626,6 +665,7 @@ jobs:
   gate-controls:
     name: Gates Detect Their Own Violations
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -645,6 +685,7 @@ jobs:
   scp-deny-can-fire:
     name: SCP Denies Can Actually Fire
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -665,6 +706,7 @@ jobs:
   documented-oidc-trust:
     name: Docs Match The OIDC Trust Policy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -684,6 +726,7 @@ jobs:
   teardown-gates:
     name: Teardown Gates Move Together
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -700,6 +743,7 @@ jobs:
   tenant-schema-readers:
     name: Tenant Fields Reach A Resource
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -719,6 +763,7 @@ jobs:
   e2e-covers-leaves:
     name: E2E Covers Every Live Leaf
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -732,6 +777,7 @@ jobs:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
     needs: [discover, validate]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # The credential this job assumes is the READ-ONLY plan role, and the
     # environment is what makes that safe. The job runs on pull_request; declaring
     # `environment: plan` makes its OIDC token present
@@ -828,6 +874,7 @@ jobs:
   merge-gate:
     name: merge gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs:
       [
         placeholders,
@@ -850,6 +897,7 @@ jobs:
         gate-controls,
         workflows,
         version-coverage,
+        workflow-budgets,
         scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,
