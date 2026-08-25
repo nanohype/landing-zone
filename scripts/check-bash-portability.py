@@ -70,22 +70,54 @@ ROOT = Path(__file__).resolve().parent.parent
 #           -e, so for them these abort; `no-placeholders.sh` does not, and there
 #           the failure is silent.
 BASH4 = [
-    (re.compile(r"\bmapfile\b"), "mapfile",
-     "RUNTIME: `mapfile: command not found`. Under set -e the script aborts (rc 127); without it the array is length 0 and the loop over it runs zero times"),
-    (re.compile(r"\breadarray\b"), "readarray",
-     "RUNTIME: `readarray: command not found`; identical to mapfile"),
+    # ── builtins bash 3.2 does not have ────────────────────────────────────
+    (re.compile(r"\b(?:mapfile|readarray)\b"), "mapfile/readarray",
+     "RUNTIME: `command not found`. Under set -e the script aborts (rc 127); without it the array is length 0 and the loop over it runs zero times"),
     (re.compile(r"\bcoproc\b"), "coproc",
      "PARSE: `syntax error near unexpected token` (rc 2), after the lines above it have already run"),
-    (re.compile(r"\b(?:declare|local|typeset)\s+-A\b"), "associative array",
-     "RUNTIME: `declare: -A: invalid option` (rc 2 under set -e). Without set -e it is worse than an error: every string index collapses to element 0, so writing two keys leaves one value that both keys read back"),
-    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\^\^"), "${x^^} upper-case",
+    (re.compile(r"\bwait\s+(?:-[a-zA-Z]+\s+)*-n\b"), "wait -n",
+     "RUNTIME: `wait: -n: invalid option` (rc 2)"),
+    (re.compile(r"\bread\s+(?:-[a-zA-Z]+\s+)*-N\b"), "read -N",
+     "RUNTIME: `read: -N: invalid option` (rc 2)"),
+    (re.compile(r"\bshopt\s+(?:-[a-zA-Z]+\s+)*globstar\b"), "shopt globstar",
+     "RUNTIME: `globstar: invalid shell option name` (rc 1); ** then behaves as a single * and the glob silently matches one level"),
+    (re.compile(r"""\bprintf\s+(?:-[a-zA-Z]+\s+)*-v\s+['"]?[A-Za-z_][A-Za-z0-9_]*\["""),
+     "printf -v into an array element",
+     "RUNTIME: `not a valid identifier` (rc 2)"),
+
+    # ── declare/local/typeset options added in bash 4 ──────────────────────
+    # Matched as an OPTION SET rather than one letter: -A, -n, -l and -u are
+    # four spellings of the same absence, and a list written per spelling is
+    # how -n and -l survived a gate that already rejected -A.
+    (re.compile(r"\b(?:declare|local|typeset)\s+(?:-[a-zA-Z]*[Anlu][a-zA-Z]*\s+)"),
+     "declare/local/typeset -A|-n|-l|-u",
+     "RUNTIME: `invalid option` (rc 2 under set -e). Without set -e, -A is worse than an error: every string index collapses onto element 0, so writing two keys leaves one value that both keys read back"),
+
+    # ── parameter expansions added in bash 4 ───────────────────────────────
+    # Case modification is ^ or , in ANY quantity — ${x^}, ${x^^}, ${x^pat}.
+    (re.compile(r"\$\{[!#]?[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?[\^,]"),
+     "${x^}/${x,} case modification",
      "RUNTIME: `bad substitution` (rc 1 under set -e)"),
-    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*,,"), "${x,,} lower-case",
+    # Parameter transformation ${x@U}, ${x@Q}, ${x@A}… Anchored on @ directly
+    # after the name so ${arr[@]} and ${!prefix@} — both valid on 3.2 — do not
+    # match.
+    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?@[a-zA-Z]"),
+     "${x@…} parameter transformation",
      "RUNTIME: `bad substitution` (rc 1 under set -e)"),
+    # A literal negative subscript. ${a[$i-1]} is arithmetic and valid on 3.2,
+    # so the minus must sit immediately after the bracket.
+    (re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\[-\d"), "${a[-1]} negative index",
+     "RUNTIME: `bad array subscript` printed to stderr while the script EXITS 0 — the expansion is empty and execution continues on it, so this one is silent even under set -e"),
+
+    # ── syntax bash 3.2 cannot parse ──────────────────────────────────────
     (re.compile(r";;&"), ";;& case fallthrough",
      "PARSE: `syntax error near unexpected token `&`` (rc 2), after the lines above it have already run"),
     (re.compile(r"&>>"), "&>> append-both redirect",
      "PARSE: `syntax error near unexpected token `>`` (rc 2) — bash 3.2 does not parse it as a redirect at all, so nothing about the line survives"),
+    (re.compile(r"(?<![|&])\|&"), "|& pipe-both",
+     "PARSE: `syntax error near unexpected token `&`` (rc 2)"),
+    (re.compile(r"(?<![$\w])\{[A-Za-z_][A-Za-z0-9_]*\}[<>]"), "{fd}> descriptor variable",
+     "RUNTIME: the brace word is taken as a command name — `{fd}: not found` (rc 127) — and the descriptor is never opened"),
 ]
 
 WAIVER = re.compile(r"#[ \t]*bash4-ok:[ \t]*\S")
@@ -184,9 +216,16 @@ def main() -> int:
         )
         return 1
 
+    # States what was checked, not a universal it cannot establish. This gate
+    # matches a list of constructs; it does not prove a script runs. An earlier
+    # message here claimed "every shell script runs on bash 3.2", and that
+    # sentence stayed green while fourteen bash 4 constructs went unmatched —
+    # a pass line asserting more than the check performed is how a gap reads as
+    # a guarantee.
     print(
-        f"✓ every shell script runs on bash 3.2 "
-        f"({len(scripts)} script(s) checked for {len(BASH4)} bash 4+ construct(s))"
+        f"✓ no bash 4 construct found "
+        f"({len(scripts)} script(s) scanned for {len(BASH4)} construct family/families; "
+        f"a family not listed here is not checked)"
     )
     return 0
 
