@@ -720,6 +720,48 @@ def self_test(base: Path) -> str | None:
     return None
 
 
+def vacuity_check(base: Path, shipped: set[str]) -> list[str]:
+    """Every gate must REFUSE a tree that holds no repository.
+
+    A positive control proves a gate rejects a planted violation. It says
+    nothing about what the gate does when there is nothing to examine, and that
+    is the direction that reports a pass: the scan finds nothing, finds no
+    violations in nothing, and exits 0.
+
+    "At least one file matched" does not close it, because the count answers
+    whether the PATTERN matched rather than whether the REPOSITORY is present —
+    a tree holding only scripts/ satisfies a shell-script floor using the gates'
+    own files. Nor does printing the denominator: `0 unwrapped call(s) checked
+    across 2 script(s)` is an accurate report of a vacuous scan, and it was
+    printed immediately before an exit 0.
+
+    The fixture is the base tree with everything but scripts/ removed, which is
+    the shape a gate sees when it runs somewhere the checkout is not.
+    """
+    tree = base.parent / "vacuity"
+    if tree.exists():
+        shutil.rmtree(tree)
+    tree.mkdir()
+    shutil.copytree(base / "scripts", tree / "scripts")
+    subprocess.run(["git", "-C", str(tree), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(tree), "config", "gc.auto", "0"], check=True)
+    subprocess.run(["git", "-C", str(tree), "config", "gc.autoDetach", "false"], check=True)
+    subprocess.run(["git", "-C", str(tree), "add", "scripts"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tree), "-c", "user.name=gate-controls",
+         "-c", "user.email=gate-controls@localhost", "commit", "-q", "-m", "scripts only"],
+        check=True,
+    )
+
+    vacuous = []
+    for gate in sorted(shipped):
+        code, output = run_gate(tree, gate)
+        if code == 0:
+            last = output.strip().splitlines()[-1][:90] if output.strip() else "<no output>"
+            vacuous.append(f"  {gate}: exited 0 over a tree with no repository — {last}")
+    return vacuous
+
+
 def main() -> int:
     shipped = shipped_gates()
     controls = {m.gate: m for m in mutations()}
@@ -759,6 +801,23 @@ def main() -> int:
 
         # Before trusting any verdict this floor produces, prove the floor itself
         # rejects the hardest liar. A floor that cannot is reporting testimony.
+        vacuous = vacuity_check(base, shipped)
+        if vacuous:
+            print(
+                "Gate(s) that report a PASS over a tree holding no repository:\n",
+                file=sys.stderr,
+            )
+            print("\n".join(vacuous), file=sys.stderr)
+            print(
+                "\nA positive control proves a gate rejects a planted violation; it "
+                "says nothing about what the gate does with nothing to examine. "
+                "Guard on whether the REPOSITORY is present, not on whether the "
+                "pattern matched — a floor of at-least-one file is satisfied by the "
+                "gate scripts themselves.",
+                file=sys.stderr,
+            )
+            return 1
+
         broken_floor = self_test(base)
         if broken_floor:
             print(
