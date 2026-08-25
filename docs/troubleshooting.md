@@ -80,7 +80,7 @@ If running locally, ensure `AWS_PROFILE` is set or your default profile is confi
 1. Look up the CKV ID in the [Checkov docs](https://www.checkov.io/5.Policy%20Index/all.html)
 2. Determine if the finding is valid for your use case
 3. **If valid:** fix the code (add encryption, logging, etc.)
-4. **If false positive:** the CI skips `CKV_AWS_144` and `CKV_AWS_145` already. For additional skips, add to the `skip_check` list in `.github/workflows/ci.yml` with a comment explaining why.
+4. **If false positive:** add the check id to the `skip-check` list in `.checkov.yaml` with one line of rationale. Repo-wide postures go there; a skip whose reason points at a single resource goes inline on that resource as `#checkov:skip=<id>:<reason>`, so removing the resource removes the skip with it. The CI workflow passes `.checkov.yaml` as its `config_file` and holds no skip list of its own.
 
 ## Terragrunt "Cycle Detected"
 
@@ -88,7 +88,7 @@ If running locally, ensure `AWS_PROFILE` is set or your default profile is confi
 
 **Fix:**
 
-1. Check `live/_envcommon/<component>.hcl` for the components involved
+1. Check `live/_envcommon/aws/<component>.hcl` for the components involved
 2. Map out the dependency chain
 3. Remove the circular reference — one component must not depend on the other
 

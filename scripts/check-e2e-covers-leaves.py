@@ -13,10 +13,11 @@ list nor the destroy loop. So the zero-billable check could not have caught a
 leaked Aurora cluster even if one had been standing, and nothing said so. The
 run reported PASSED over a component it never touched.
 
-Nothing could catch that. The five existing guard scripts all inspect
-component-internal properties (teardown gates, schema readers, account-local
-dependencies, mock and smoke outputs); none reads e2e.sh, and none compares its
-component list against the set of leaves that actually exist.
+Nothing else catches that. No other gate reads e2e.sh, and none compares its
+component list against the set of leaves that exist — they inspect component
+internals instead. That is the gap this fills, and it is the invariant rather than
+a tally of the other scripts, which was the sentence here and had already gone
+stale.
 
 WHAT THIS ASSERTS
 

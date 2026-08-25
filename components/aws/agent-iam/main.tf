@@ -387,7 +387,7 @@ resource "aws_iam_role_policy" "operator" {
       # There is deliberately no kms:CreateGrant here. The operator issues no KMS
       # grants — a tenant's access to its own key is an IAM policy the operator
       # writes (tenant-key-access, naming exactly one key ARN), not a grant it
-      # creates. The statement that used to sit here covered CreateGrant,
+      # creates. A CreateGrant statement does not belong here:
       # ListGrants, RevokeGrant and DescribeKey on `key/*`: every key in the
       # region, with no condition narrowing which. Granting decrypt on the
       # platform data key to an attacker-controlled role was the third entry in

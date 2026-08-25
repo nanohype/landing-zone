@@ -115,7 +115,7 @@ PIN_PATTERNS = [
     (
         "tool version input",
         re.compile(r"^\.github/workflows/"),
-        re.compile(r"^[ \t]*(?:tofu_version|tg_version|tflint_version|helm-version|terraform_version)\s*:\s*[\"']?v?\d+\.\d+", re.M),
+        re.compile(r"^[ \t]*(?:tofu_version|tg_version|tflint_version|helm-version|terraform_version|TERRAGRUNT_VERSION)[ \t]*:[ \t]*[\"']?v?\d+\.\d+", re.M),
     ),
     (
         "runtime version input",

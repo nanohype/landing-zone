@@ -70,7 +70,7 @@ resource "aws_kms_key" "alerts" {
           }
         }
       },
-      # CloudWatch alarms are no longer the only publisher: the agent platform's
+      # CloudWatch alarms are not the only publisher: the agent platform's
       # kill-switch bus routes governance events (a budget breach, an SLO
       # burn-rate breach) straight to these topics. EventBridge needs the same
       # data key, and without this grant the publish is accepted and then
@@ -254,8 +254,7 @@ resource "aws_sns_topic_policy" "info" {
 # shared-observability owns in adopt mode, so one publish serves either shape and
 # a consumer wires against one interface regardless.
 #
-# All three tiers are published, not just the two the kill-switch rules consume
-# today. The severity set is the unit the observability-slo standard defines
+# All three tiers are published, not only the two the kill-switch rules consume. The severity set is the unit the observability-slo standard defines
 # (critical pages, warning tickets, info records recovery), and a discovery
 # contract that carries two thirds of it invites a consumer to guess the third.
 ################################################################################

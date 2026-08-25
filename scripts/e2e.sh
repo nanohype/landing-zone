@@ -256,6 +256,11 @@ dump_cluster_diag() {
 }
 
 # --- teardown (ALWAYS runs) -------------------------------------------------
+# Every network call in this script carries a deadline. `|| true` converts a
+# FAILURE into a continue and does nothing about a HANG: a remote that accepts the
+# TCP connection and then stalls blocks here indefinitely while an EKS cluster, NAT
+# gateways and Graviton nodes keep billing. That matters most on the teardown path,
+# which is the mechanism the header promises never leaves billing on.
 teardown() {
   local ec=$?
   # Before anything is deleted, and only when the run is failing — a passing run
@@ -269,7 +274,7 @@ teardown() {
       cd "$WORK/tenants" &&
         git rm -f "tenants/$CLUSTER/$TENANT.yaml" >/dev/null 2>&1 &&
         git -c user.name=e2e -c user.email=e2e@local commit -q -m "e2e: remove $TENANT" &&
-        git push -q origin HEAD:main
+        timeout 120 git push -q origin HEAD:main
     ) 2>/dev/null || true
   fi
   kubectl -n argocd delete application "portal-tenants-$CLUSTER" --cascade=foreground --timeout=120s 2>/dev/null || true
@@ -283,12 +288,14 @@ teardown() {
   #
   # The operator reaps a tenant's AWS identity from a finalizer, so that only
   # happens for a CR deleted while the operator is still running — which is here,
-  # before the cluster goes. This used to name "$TENANT" alone, and the gitops
-  # catalog deploys Platforms of its own: an `ops` Platform arrives with the addon
-  # catalog, no e2e ever created it, and nothing deleted it. Its tenant and
-  # session roles therefore outlived the cluster, and because the tenant-baseline
-  # managed policy cannot be deleted while a role still has it attached, they
-  # failed the agent-iam destroy.
+  # before the cluster goes.
+  #
+  # ALL Platforms, not just this run's: the gitops catalog deploys Platforms of
+  # its own (an `ops` Platform arrives with the addon catalog), and a Platform no
+  # e2e created is still one whose tenant and session roles outlive the cluster.
+  # Those roles then hold the tenant-baseline managed policy, which cannot be
+  # deleted while a role has it attached — so a Platform left behind here fails
+  # the agent-iam destroy later, several steps from the cause.
   #
   # Deleting the CRs is the mechanism; the IAM sweep in reap_cluster_orphans is
   # the fallback for when the operator is already gone. The sweep alone cannot
@@ -317,9 +324,9 @@ teardown() {
       clear_lock "$c"
       [ "$c" = network ] && reap_vpc_blockers
       if ! tg "$c" destroy -auto-approve >/dev/null 2>&1; then
-        # A destroy that fails twice is a run result, not a note. It used to be
-        # echoed and swallowed, so a BucketNotEmpty on agent-iam printed one soft
-        # line and the run still reported PASSED.
+        # A destroy that fails twice is a run RESULT, not a note. Echoing it and
+        # continuing is how a BucketNotEmpty prints one soft line while the run
+        # reports PASSED — so it is recorded and surfaced at the end instead.
         echo "  (destroy $c still failing — verify in console)"
         destroy_failed="${destroy_failed}${destroy_failed:+ }$c"
       fi
@@ -357,8 +364,8 @@ teardown() {
   echo "  EKS: ${eks:-clean}"; echo "  NAT: ${nat:-clean}"; echo "  EIP: ${eip:-clean}"; echo "  VPC: ${vpc:-clean}"; echo "  EBS: ${ebs:-clean}"; echo "  S3:  ${s3:-clean}"
   echo "  DDB: ${ddb:-clean}"; echo "  RDS: ${rds:-clean}"; echo "  CACHE: ${cache:-clean}"; echo "  MSK: ${msk:-clean}"; echo "  SQS: ${sqs:-clean}"
   for r in "$eks" "$nat" "$eip" "$vpc" "$ebs" "$s3" "$ddb" "$rds" "$cache" "$msk" "$sqs"; do if [ -n "$r" ] && [ "$r" != "None" ]; then leak=1; fi; done
-  # Put the committed tenant map back. The preflight refused to start if it
-  # carried uncommitted work, so this cannot discard anything.
+  # Put the committed tenant map back. The preflight refuses to start if it
+  # carries uncommitted work, so this cannot discard anything.
   if [ -n "${TENANTS_MAP_REL:-}" ]; then
     git -C "$LZ_DIR" checkout -- "$TENANTS_MAP_REL" 2>/dev/null || true
     if ! git -C "$LZ_DIR" diff --quiet -- "$TENANTS_MAP_REL" 2>/dev/null; then
@@ -390,8 +397,8 @@ teardown() {
     echo "    Re-run 'task e2e' (teardown is idempotent) or clear them in the console." >&2
     RESULT="FAILED"
   fi
-  # account.hcl is never written now (the real id is injected via TERRAGRUNT_ACCOUNT_ID),
-  # so there is nothing to restore.
+  # No account.hcl to restore: the real account id is injected through
+  # TERRAGRUNT_ACCOUNT_ID rather than written into the tracked file.
   if [ "$RESULT" = PASSED ]; then echo -e "\n\033[1;32mE2E PASSED\033[0m"; else echo -e "\n\033[1;31mE2E FAILED\033[0m"; exit 1; fi
 }
 trap teardown EXIT
@@ -470,10 +477,11 @@ fi
 # default: cluster_endpoint_public_access is false, and docs/inputs.md records why
 # the committed tree sets no posture — rackctl supplies it at apply time.
 #
-# This script is not rackctl. It supplied nothing, so every run built a
-# private-endpoint cluster and then failed to resolve its API from outside the
-# VPC. Observed directly: describe-cluster and list-addons answered while kubectl
-# returned `no such host` for the endpoint in the same second.
+# This script is not rackctl, so it has to supply that posture itself. Without
+# it the cluster comes up private-endpoint and its API is unresolvable from
+# outside the VPC — and the failure is confusing rather than obvious, because
+# describe-cluster and list-addons keep answering (they are control-plane API
+# calls) while kubectl gets `no such host` for the endpoint.
 #
 # So supply the same posture rackctl does, scoped to this runner alone. Public
 # access with an allow-list of exactly one address is narrower than the private
@@ -494,9 +502,8 @@ echo "  cluster API will be reachable from ${RUNNER_IP}/32 only"
 # cluster-bootstrap requires gitops_repo_url and deliberately gives it no
 # default: without one a cluster would sync its app-of-apps from whatever
 # repository happened to be configured, so the component fails the plan instead
-# of guessing. Correct, and it means every caller must supply it. rackctl does.
-# This script did not, so the run died at `APPLY cluster-bootstrap` with
-# `No value for required variable` the first time it ever got that far.
+# of guessing. That is correct, and it means every caller must supply it —
+# rackctl does, and so must this script.
 #
 # A sweep of all six roots this run applies — every variable that is required,
 # has no default, and receives no value from _envcommon, the leaf or root.hcl —
@@ -618,17 +625,15 @@ log "APPLY agent-iam"; tg agent-iam apply -auto-approve
 # store — enough to exercise create, tag, grant and destroy end to end, at
 # DynamoDB on-demand prices rather than an Aurora cluster's.
 log "RENDER tenant map for $TENANT"
-# No $WORK/src staging step. Two lines here used to copy the rendered Platform CR
-# into $WORK/src/<tenant>/platform.yaml, which nothing in this script ever read —
-# scripts/render-tenants.py consumes that shape, and CI calls it, but this run
-# writes tenants.generated.json directly in the heredoc below instead. They
-# arrived with the heredoc that replaced them and stayed.
+# No $WORK/src staging step, deliberately. scripts/render-tenants.py consumes a
+# staged Platform CR at $WORK/src/<tenant>/platform.yaml and CI calls it that way,
+# but this run writes tenants.generated.json directly in the heredoc below, so
+# nothing here reads a staged copy.
 #
-# Vestigial and also fatal: the file they copied FROM is produced by the tenant
-# step further down, which clones the repo and helm-templates charts/tenant into
-# it. So the copy ran before its own source existed and killed the run —
-# `cp: .../tenants/development-platform/e2e-smoke.yaml: No such file or
-# directory` — the first time an e2e ever reached this far.
+# Adding one back would not merely be redundant, it would be fatal in a way that
+# reads as a path bug: the CR it would copy FROM is produced by the tenant step
+# further down, which clones the repo and helm-templates charts/tenant into it. A
+# copy here runs before its own source exists.
 cat >"$TENANTS_MAP" <<JSON
 {
   "$TENANT": {
@@ -672,7 +677,7 @@ echo "  operator Available (GitOps-installed from the released image)"
 
 # --- 3. tenant via GitOps (commit to tenants repo -> ArgoCD applies) --------
 log "TENANT $TENANT (render charts/tenant -> push -> ArgoCD)"
-git clone -q "$TENANTS_REPO" "$WORK/tenants"
+timeout 120 git clone -q "$TENANTS_REPO" "$WORK/tenants"
 mkdir -p "$WORK/tenants/tenants/$CLUSTER"
 helm template "$TENANT" "$EAP_DIR/charts/tenant" \
   --set platform.name="$TENANT" --set platform.tenant="$TENANT" --set platform.persona=eng \
@@ -681,7 +686,7 @@ helm template "$TENANT" "$EAP_DIR/charts/tenant" \
   cd "$WORK/tenants" &&
     git add -A &&
     git -c user.name=e2e -c user.email=e2e@local commit -q -m "e2e: create $TENANT on $CLUSTER" &&
-    git push -q origin HEAD:main
+    timeout 120 git push -q origin HEAD:main
 )
 log "WAIT for the Platform CR (ArgoCD git poll + sync + operator reconcile)"
 # Nudge ArgoCD to act on the just-pushed commit now instead of on its ~3m
@@ -746,7 +751,7 @@ ACTUAL_BOUNDARY=$(aws iam get-role --role-name "$RN" --query 'Role.PermissionsBo
 echo "  tenant role $RN: bounded by $EXPECTED_BOUNDARY, model scope in force"
 
 log "VALIDATE cloudgov platform audit"
-(cd "$CLOUDGOV_DIR" && go build -o "$WORK/cloudgov" .)
+(cd "$CLOUDGOV_DIR" && timeout 300 go build -o "$WORK/cloudgov" .)
 "$WORK/cloudgov" platform audit --fail-on HIGH || die "cloudgov reported CRITICAL/HIGH findings"
 echo "  cloudgov: no CRITICAL/HIGH findings"
 

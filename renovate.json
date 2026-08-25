@@ -18,13 +18,14 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
-      "description": "Terragrunt CLI version passed to gruntwork-io/terragrunt-action. Straddles the run-all to run --all CLI change, so a drift here changes what every live leaf renders.",
+      "description": "Terragrunt CLI version, in both spellings the workflows use: the tg_version input to gruntwork-io/terragrunt-action, and the TERRAGRUNT_VERSION env the e2e job installs from directly. Straddles the run-all to run --all CLI change, so a drift here changes what every live leaf renders.",
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/.+\\.ya?ml$/"
       ],
       "matchStrings": [
-        "tg_version:\\s*[\"']?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)[\"']?"
+        "tg_version:\\s*[\"']?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)[\"']?",
+        "TERRAGRUNT_VERSION:\\s*[\"']?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)[\"']?"
       ],
       "depNameTemplate": "gruntwork-io/terragrunt",
       "datasourceTemplate": "github-releases",

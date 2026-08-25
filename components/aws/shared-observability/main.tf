@@ -66,7 +66,7 @@ resource "aws_kms_key" "alerts" {
         Resource  = "*"
         Condition = { StringEquals = { "aws:SourceOrgID" = var.organization_id } }
       },
-      # CloudWatch alarms are no longer the only publisher. A workload cluster's
+      # CloudWatch alarms are not the only publisher. A workload cluster's
       # agent-platform kill-switch bus routes governance events — a budget
       # breach, an SLO burn-rate breach — straight to these topics, and an adopt-
       # mode cluster resolves those targets to THESE central topics rather than
