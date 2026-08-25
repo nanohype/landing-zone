@@ -34,25 +34,25 @@ mock_provider "aws" {
     defaults = { account_id = "123456789012", arn = "arn:aws:iam::123456789012:user/test", user_id = "AIDTEST" }
   }
   mock_data "aws_region" {
-    defaults = { name = "us-west-2", id = "us-west-2" }
+    defaults = { name = "us-east-1", id = "us-east-1" }
   }
   mock_data "aws_iam_session_context" {
     defaults = { issuer_arn = "arn:aws:iam::123456789012:role/creator" }
   }
   mock_data "aws_availability_zones" {
-    defaults = { names = ["us-west-2a", "us-west-2b", "us-west-2c"], zone_ids = ["usw2-az1", "usw2-az2", "usw2-az3"] }
+    defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c"], zone_ids = ["use1-az1", "use1-az2", "use1-az3"] }
   }
   mock_resource "aws_iam_role" { defaults = { arn = "arn:aws:iam::123456789012:role/mock" } }
   mock_resource "aws_iam_policy" { defaults = { arn = "arn:aws:iam::123456789012:policy/mock" } }
-  mock_resource "aws_kms_key" { defaults = { arn = "arn:aws:kms:us-west-2:123456789012:key/mock" } }
-  mock_resource "aws_sqs_queue" { defaults = { arn = "arn:aws:sqs:us-west-2:123456789012:mock", url = "https://sqs.us-west-2.amazonaws.com/123456789012/mock" } }
-  mock_resource "aws_cloudwatch_log_group" { defaults = { arn = "arn:aws:logs:us-west-2:123456789012:log-group:mock" } }
-  mock_resource "aws_security_group" { defaults = { id = "sg-mock", arn = "arn:aws:ec2:us-west-2:123456789012:security-group/sg-mock" } }
+  mock_resource "aws_kms_key" { defaults = { arn = "arn:aws:kms:us-east-1:123456789012:key/mock" } }
+  mock_resource "aws_sqs_queue" { defaults = { arn = "arn:aws:sqs:us-east-1:123456789012:mock", url = "https://sqs.us-east-1.amazonaws.com/123456789012/mock" } }
+  mock_resource "aws_cloudwatch_log_group" { defaults = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:mock" } }
+  mock_resource "aws_security_group" { defaults = { id = "sg-mock", arn = "arn:aws:ec2:us-east-1:123456789012:security-group/sg-mock" } }
   mock_resource "aws_launch_template" { defaults = { id = "lt-mock0000000000000", latest_version = 1 } }
   mock_resource "aws_eks_cluster" {
     defaults = {
-      arn                   = "arn:aws:eks:us-west-2:123456789012:cluster/mock"
-      identity              = [{ oidc = [{ issuer = "https://oidc.eks.us-west-2.amazonaws.com/id/MOCK" }] }]
+      arn                   = "arn:aws:eks:us-east-1:123456789012:cluster/mock"
+      identity              = [{ oidc = [{ issuer = "https://oidc.eks.us-east-1.amazonaws.com/id/MOCK" }] }]
       certificate_authority = [{ data = "bW9jay1jYQ==" }]
     }
   }
@@ -67,7 +67,7 @@ mock_provider "tls" {
 }
 
 variables {
-  region             = "us-west-2"
+  region             = "us-east-1"
   environment        = "development"
   team               = "platform"
   vpc_id             = "vpc-0mock"
@@ -90,7 +90,7 @@ run "cluster_name_is_env_first" {
   # The mocked EKS cluster's OIDC issuer is stripped of its scheme for the IAM
   # condition-key form every IRSA trust uses.
   assert {
-    condition     = local.oidc_issuer == "oidc.eks.us-west-2.amazonaws.com/id/MOCK"
+    condition     = local.oidc_issuer == "oidc.eks.us-east-1.amazonaws.com/id/MOCK"
     error_message = "local.oidc_issuer must be the issuer URL with https:// stripped"
   }
 }
@@ -185,6 +185,44 @@ run "cluster_name_length_budget_enforced" {
   variables {
     # 13 chars — over the 12-char budget the account+region-qualified bucket names need.
     cluster_name = "toolongcluste"
+  }
+
+  expect_failures = [
+    var.cluster_name,
+  ]
+}
+
+# ── Invariant 4: the base name may not repeat the environment token ──
+#
+# The resource-naming standard makes no-doubled-env a reject rule, and this is the
+# composition site it exists for: local.cluster_name joins "<environment>-" onto
+# this value with nothing downstream that can reject the result, so a doubled name
+# applies cleanly and carries into every cluster-scoped IAM/KMS/S3 name derived
+# from it. Both shapes are tested because they fail differently — an exact match
+# doubles the token, a prefixed value buries it mid-name.
+run "cluster_name_rejects_the_environment_token" {
+  command = plan
+
+  variables {
+    cluster_name = "development"
+  }
+
+  expect_failures = [
+    var.cluster_name,
+  ]
+}
+
+#
+# The prefixed case runs against a short environment on purpose: with
+# environment = "development" every prefixed value is already over the 12-char
+# budget, so the run would go red on the length rule and prove nothing about
+# no-doubled-env. "hub" is a real environment in this tree and leaves room.
+run "cluster_name_rejects_an_environment_prefixed_base" {
+  command = plan
+
+  variables {
+    environment  = "hub"
+    cluster_name = "hub-platform"
   }
 
   expect_failures = [

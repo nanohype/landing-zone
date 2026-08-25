@@ -26,7 +26,24 @@ variable "cluster_name" {
 
   validation {
     condition     = length(var.cluster_name) <= 12
-    error_message = "cluster_name (the base token) must be <= 12 chars. The derived <environment>-<cluster_name> feeds cluster-scoped S3/IAM names; the tightest budget is agent-iam's account+region-qualified model-artifacts bucket (<cluster>-<account>-<region>-model-artifacts), which leaves 12 chars for the base in us-west-2 (fewer in a longer region — caught by the bucket precondition)."
+    error_message = "cluster_name (the base token) must be <= 12 chars. The derived <environment>-<cluster_name> feeds cluster-scoped S3/IAM names; the tightest budget is agent-iam's account+region-qualified model-artifacts bucket (<cluster>-<account>-<region>-model-artifacts), which leaves 12 chars for the base in us-east-1 (fewer in a longer region — caught by the bucket precondition)."
+  }
+
+  # no-doubled-env: reject a base name that repeats the environment token. This
+  # component composes local.cluster_name = "<environment>-<cluster_name>", so a
+  # value equal to or prefixed with "<environment>-" (cluster_name =
+  # "development-platform") produces a doubled "development-development-platform"
+  # and carries the doubling into every cluster-scoped IAM/KMS/S3 name derived
+  # from it. The guard belongs at the variable boundary because the composition is
+  # a plain string join with nothing downstream that can reject the result.
+  #
+  # fleet/aws/cluster-stack carries the same guard on the same variable, and the
+  # four multi-tenant components carry it on their tenant keys. This is the one
+  # composition site that did not, which is why a name-shaped defect could enter
+  # through the component every workload cluster is built from.
+  validation {
+    condition     = var.cluster_name != var.environment && !startswith(var.cluster_name, "${var.environment}-")
+    error_message = "cluster_name must not equal or be prefixed with the environment token '${var.environment}-': it composes into a doubled '<env>-<env>-...' cluster name."
   }
 }
 
