@@ -63,32 +63,79 @@ def blank_comments(text: str) -> str:
     to the same line in the file — a gate reporting a line number after
     stripping would otherwise cite a line that drifted by the number of
     comments above it.
+
+    The scan carries a CONTEXT STACK rather than a single in-string flag,
+    because HCL nests the two states inside each other. A template
+    interpolation opens a fresh expression context INSIDE a string, and that
+    expression can contain its own strings:
+
+        arn = "${var.prefix}${var.env == "prod" ? "/*" : "/staging"}"
+
+    Counting every quote as a delimiter inverts the string/code polarity at the
+    first nested quote. With an odd number of them the scan believes it is in
+    code where it is in a string, and the `/*` above then opens a block comment
+    that runs to end of file — the rest of the document is blanked and every
+    gate reading it sees a nearly empty tree while reporting a pass.
     """
     out: list[str] = []
-    quote: str | None = None
+    # Each frame is (kind, brace_depth). kind is "code" or "str".
+    stack: list[list] = [["code", 0]]
     i = 0
     n = len(text)
+
     while i < n:
         c = text[i]
-        if quote:
+        kind = stack[-1][0]
+
+        if kind == "str":
             if c == "\\" and i + 1 < n:
                 out.append(text[i : i + 2])
                 i += 2
                 continue
-            if c == quote:
-                quote = None
+            # `$${` and `%%{` are escaped literals, not interpolation openers.
+            if text.startswith("$${", i) or text.startswith("%%{", i):
+                out.append(text[i : i + 3])
+                i += 3
+                continue
+            if text.startswith("${", i) or text.startswith("%{", i):
+                stack.append(["code", 0])
+                out.append(text[i : i + 2])
+                i += 2
+                continue
+            if c == '"':
+                stack.pop()
+                out.append(c)
+                i += 1
+                continue
             out.append(c)
             i += 1
             continue
+
+        # kind == "code": top level, or inside an interpolation.
         if c == '"':
-            quote = c
+            stack.append(["str", 0])
+            out.append(c)
+            i += 1
+            continue
+        if c == "{":
+            stack[-1][1] += 1
+            out.append(c)
+            i += 1
+            continue
+        if c == "}":
+            if stack[-1][1] > 0:
+                stack[-1][1] -= 1
+            elif len(stack) > 1:
+                # Closes the interpolation; the enclosing string resumes.
+                stack.pop()
             out.append(c)
             i += 1
             continue
         if text.startswith("<<", i):
-            # A heredoc body is data. Copy it through verbatim to its terminator
-            # so an embedded `#` — a shell comment in a user-data script, a
-            # comment inside a policy document — is not read as HCL comment.
+            # A heredoc body is data. Copy it through verbatim to its
+            # terminator so an embedded `#` — a shell comment in a user-data
+            # script, a comment inside a policy document — is not read as an
+            # HCL comment.
             m = _HEREDOC.match(text, i)
             if m:
                 end = _terminator(text, m.end(), m.group("tag"))
@@ -109,4 +156,5 @@ def blank_comments(text: str) -> str:
             continue
         out.append(c)
         i += 1
+
     return "".join(out)
