@@ -173,9 +173,30 @@ def main() -> int:
         )
         return 1
 
+    # An exemption that matches nothing is a description, and it rots toward
+    # permissive: the file it named is gone, the entry stays, and the next file
+    # to take that path inherits an exemption nobody granted it.
+    missing_assertions = [
+        rel for rel in ASSERTED_NO_VERSION if not (ROOT / rel).exists()
+    ]
+    if missing_assertions:
+        print(
+            "File(s) asserted to carry no version no longer exist:\n"
+            + "".join(f"  - {r}\n" for r in sorted(missing_assertions))
+            + "\nAn exemption naming nothing exempts nothing today and something "
+            "unintended tomorrow. Remove the entry.",
+            file=sys.stderr,
+        )
+        return 1
+
     unwatched: list[str] = []
     broken_assertions: list[str] = []
     watched = 0
+    # Which managers actually matched. A customManager that matches nothing is
+    # dead config: it reads as coverage, Renovate silently updates nothing
+    # through it, and this gate would count the pin as watched by a rule that
+    # never fires.
+    manager_hits = {desc: 0 for _f, _s, desc in managers}
 
     for rel in files:
         path = ROOT / rel
@@ -218,6 +239,7 @@ def main() -> int:
                     continue
                 if any(s.search(line) for s in strings):
                     covered = True
+                    manager_hits[_desc] += 1
                     break
             if covered:
                 watched += 1
@@ -268,6 +290,18 @@ def main() -> int:
         )
         return 1
 
+    dead = [d for d, n in manager_hits.items() if n == 0]
+    if dead:
+        print(
+            "Renovate customManager(s) that match nothing in this tree:\n"
+            + "".join(f"  - {d}\n" for d in dead)
+            + "\nA rule matching nothing is dead config. It reads as coverage on "
+            "the page, updates nothing in practice, and makes this gate count a pin "
+            "as watched by a rule that never fires. Fix its pattern or delete it.",
+            file=sys.stderr,
+        )
+        return 1
+
     if unwatched:
         print("Version pin(s) no Renovate manager watches:\n", file=sys.stderr)
         print("\n".join(unwatched), file=sys.stderr)
@@ -281,7 +315,8 @@ def main() -> int:
         return 1
 
     print(
-        f"✓ every version pin is watched ({watched} pin(s) matched by a customManager, "
+        f"✓ every version pin is watched ({watched} pin(s) across "
+        f"{len(manager_hits)} live customManager(s); "
         f"{len(ASSERTED_NO_VERSION)} file(s) asserted to carry none)"
     )
     return 0

@@ -22,7 +22,10 @@ say) waives it with a comment naming the region and the reason. The waiver cover
 that region for the whole file, because the sentence explaining a region rarely
 sits on the same line as the region:
 
-    # region-ok: eu-west-1 is the replica target the DR runbook restores into
+    # region-ok: <region> is the replica target the DR runbook restores into
+
+A waiver whose region appears nowhere else in the file is itself reported: it
+exempts nothing today and pre-approves that region for whatever is added next.
 
 Exit 0 = clean. Exit 1 = a foreign region, or the scan could not see the tree.
 """
@@ -134,6 +137,19 @@ def scan(rel: str, allowed: set[str], allowed_az: set[str]) -> list[tuple[int, s
             waived.update(m.group(0) for m in REGION.finditer(line))
             waived.update(m.group(0) for m in AZ_ID.finditer(line))
 
+    # A waiver naming a region that no longer appears in this file is dead, and it
+    # is dead in the permissive direction: it silently pre-approves that region for
+    # whatever gets added here next. Report it rather than let it sit.
+    dead_waivers = set()
+    if waived:
+        present = set()
+        for line in lines:
+            if WAIVER.search(line):
+                continue
+            present.update(m.group(0) for m in REGION.finditer(line))
+            present.update(m.group(0) for m in AZ_ID.finditer(line))
+        dead_waivers = {w for w in waived if w not in present and w not in allowed}
+
     bad = []
     for n, line in enumerate(lines, 1):
         for m in REGION.finditer(line):
@@ -142,7 +158,7 @@ def scan(rel: str, allowed: set[str], allowed_az: set[str]) -> list[tuple[int, s
         for m in AZ_ID.finditer(line):
             if m.group(1) not in allowed_az and m.group(0) not in waived:
                 bad.append((n, m.group(0)))
-    return bad
+    return bad, dead_waivers
 
 
 def main() -> int:
@@ -179,9 +195,22 @@ def main() -> int:
 
     allowed_az = az_prefixes(allowed)
     bad: list[tuple[str, int, str]] = []
+    dead: list[str] = []
     for rel in targets:
-        for n, token in scan(rel, allowed, allowed_az):
+        hits, dead_waivers = scan(rel, allowed, allowed_az)
+        for n, token in hits:
             bad.append((rel, n, token))
+        dead.extend(f"  {rel}: waives {w}, which the file no longer names" for w in sorted(dead_waivers))
+
+    if dead:
+        print(
+            "Dead region waiver(s):\n" + "\n".join(dead) + "\n\n"
+            "A waiver naming a region the file no longer contains exempts nothing "
+            "today and pre-approves that region for whatever is added here next. "
+            "Remove it.",
+            file=sys.stderr,
+        )
+        return 1
 
     if bad:
         listed = ", ".join(sorted(allowed))

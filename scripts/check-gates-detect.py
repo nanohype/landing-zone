@@ -74,26 +74,58 @@ class Mutation:
         self.fn(tree)
 
 
+# Every mutation helper proves it mutated, by comparing the text it wrote against
+# the text it read. This is not belt-and-braces: a mutation that silently fails to
+# mutate hands the gate an UNCHANGED fixture, the gate correctly passes it, and the
+# run records that pass as evidence the control works. It fails in the
+# safe-looking direction, which is why reading a control does not catch it.
+#
+# The realistic causes are all boring — an anchor that moved, a pattern spanning
+# whitespace the file does not contain, a helper whose old and new arguments are
+# equal after an edit. None of them announce themselves.
+
+
+def _assert_changed(rel: str, before: str, after: str, what: str) -> None:
+    if before == after:
+        raise AssertionError(
+            f"{what} left {rel} byte-identical. The fixture was not mutated, so any "
+            f"verdict the gate returns about it is evidence of nothing."
+        )
+
+
 def _edit(tree: Path, rel: str, old: str, new: str) -> None:
     p = tree / rel
-    text = p.read_text()
-    if old not in text:
+    if not p.exists():
+        raise AssertionError(f"anchor file missing: {rel}")
+    before = p.read_text()
+    if old not in before:
         raise AssertionError(
             f"anchor not found in {rel}: {old!r}. The control cannot introduce its "
             f"violation, so it is no longer testing the matcher it names."
         )
-    p.write_text(text.replace(old, new, 1))
+    after = before.replace(old, new, 1)
+    _assert_changed(rel, before, after, "_edit")
+    p.write_text(after)
 
 
 def _append(tree: Path, rel: str, text: str) -> None:
     p = tree / rel
     if not p.exists():
         raise AssertionError(f"anchor file missing: {rel}")
-    p.write_text(p.read_text() + text)
+    before = p.read_text()
+    after = before + text
+    _assert_changed(rel, before, after, "_append")
+    p.write_text(after)
 
 
 def _write(tree: Path, rel: str, text: str) -> None:
     p = tree / rel
+    before = p.read_text() if p.exists() else None
+    if before == text:
+        raise AssertionError(
+            f"_write left {rel} byte-identical. The fixture was not mutated, so any "
+            f"verdict the gate returns about it is evidence of nothing."
+        )
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text)
 
@@ -323,6 +355,15 @@ def copy_tree(dest: Path) -> None:
         shutil.copy2(src, out)
     subprocess.run(["git", "-C", str(dest), "init", "-q"], check=True)
     subprocess.run(["git", "-C", str(dest), "add", "-A"], check=True)
+    # Commit, so a later `git diff HEAD` is a real question. Without a commit
+    # every file reads as newly added forever and any "did the tree change?"
+    # check answers yes unconditionally — a check that looks right and validates
+    # nothing.
+    subprocess.run(
+        ["git", "-C", str(dest), "-c", "user.name=gate-controls",
+         "-c", "user.email=gate-controls@localhost", "commit", "-q", "-m", "base"],
+        check=True,
+    )
 
 
 def run_gate(tree: Path, gate: str) -> int:
@@ -397,6 +438,28 @@ def main() -> int:
                 continue
 
             subprocess.run(["git", "-C", str(tree), "add", "-A"], check=True)
+
+            # Second, independent proof that the fixture changed, taken from git
+            # rather than from the helper. A helper that believes it wrote and did
+            # not — a permissions failure, a path that resolved elsewhere — is
+            # indistinguishable from a clean mutation until something outside it
+            # looks.
+            changed = subprocess.run(
+                ["git", "-C", str(tree), "diff", "--cached", "--stat", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            if not changed:
+                broken.append(
+                    (
+                        gate,
+                        "the scratch tree is unchanged after the mutation ran. Whatever "
+                        "the helper reported, nothing reached disk, so the gate's verdict "
+                        "is about the original tree.",
+                    )
+                )
+                continue
 
             if run_gate(tree, gate) == 0:
                 blind.append((gate, m.what))

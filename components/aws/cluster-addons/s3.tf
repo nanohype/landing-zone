@@ -315,9 +315,6 @@ resource "aws_ssm_parameter" "argo_workflows_bucket" {
 # computes it from the values actually in play and names the overflowing bucket
 # and its length when it fires. cluster_name is the input that consumes the
 # headroom, which is why it carries a 12-character validation of its own.
-#
-# region-ok: ap-southeast-4 names the longest published AWS region purely as the
-# worst case this budget must survive; it is not a deploy target.
 ################################################################################
 
 resource "terraform_data" "bucket_name_guard" {
