@@ -39,7 +39,7 @@ tasks:
           # the failure reason — capture it and surface it on abort instead of
           # swallowing it, so a broken init aborts with an explanation, not a bare
           # exit. `tofu validate` errors already print to the terminal directly.
-          if ! (cd "$dir" && tofu init -backend=false -input=false > /dev/null 2>/tmp/tofu-init.err); then
+          if ! (cd "$dir" && tofu init -backend=false -input=false -lockfile=readonly > /dev/null 2>/tmp/tofu-init.err); then
             echo "init FAILED: $name"; sed 's/^/    /' /tmp/tofu-init.err; exit 1
           fi
           (cd "$dir" && tofu validate) || exit 1
@@ -111,7 +111,7 @@ tasks:
         while IFS= read -r dir; do
           found=1
           echo "── tofu test — $dir"
-          ( cd "$dir" && tofu init -backend=false -input=false > /dev/null && tofu test )
+          ( cd "$dir" && tofu init -backend=false -input=false -lockfile=readonly > /dev/null && tofu test )
         done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' 'fleet/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
         if [ "$found" -eq 0 ]; then
           echo "no tofu test suites found under modules/**/tests/, components/**/tests/, or fleet/**/tests/" >&2

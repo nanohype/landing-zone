@@ -3,7 +3,7 @@ name: add-component
 description: Scaffold a new infrastructure component with all required files
 argument-hint: <component-name>
 user-invocable: true
-allowed-tools: Bash(task validate)
+allowed-tools: Bash(task check), Bash(task validate), Bash(task gates)
 ---
 
 Scaffold a new component named `$ARGUMENTS`.

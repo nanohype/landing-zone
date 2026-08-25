@@ -204,7 +204,7 @@ component: it is written on `Platform.spec.datastores` and provisioned by
 | **cost** | AWS Budgets alerts, Cost Anomaly Detection | finops |
 | **dns** | Route53 zones, subdomain delegation, ACM certificates | platform |
 | **github-oidc** | GitHub Actions OIDC provider + deploy role trusted from named contexts (`environment:*`, `ref:refs/tags/*`) in named repos — never a bare `:*` — plus a read-only plan role trusted from `environment:plan`; no long-lived keys | platform |
-| **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed on the hub. | *(required input)* |
+| **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed per environment — each workload environment runs its own for that environment's cluster, and the hub runs one for its own. | *(required input)* |
 | **private-dns** | Private hosted zones for a workload account, `create` or `adopt` mode, associated to the shared Route53 profile | platform |
 | **shared-dns** | Owner side of private DNS: the hosted zones plus the Route53 profile the workload accounts adopt | platform |
 | **shared-backup** | Owner side of central backup — the destination vault a workload account's plan copies into, in a second account and the DR region. See [What backs up what](#what-backs-up-what) | sre |
@@ -358,7 +358,7 @@ The `break-glass` component provisions emergency access IAM roles with SNS alert
 
 ### SSO / Identity
 
-The `org-identity` component manages IAM Identity Center -- 5 permission sets (Admin, PowerUser, ReadOnly, PlatformEngineer, Developer), groups, and account assignments.
+The `org-identity` component manages IAM Identity Center -- permission sets, groups, and account assignments. The set is defined in the org-identity leaf rather than listed here, because a list of them is a count that goes stale at the next one added: `grep -n '^    [A-Za-z].* = {' live/aws/management/*/org/org-identity/terragrunt.hcl` answers it.
 
 ## State Management
 

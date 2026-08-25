@@ -121,7 +121,6 @@ inputs = {
               StringNotEquals = {
                 "aws:RequestedRegion" = [
                   "us-east-1",
-                  "us-east-1",
                 ]
               }
             }
@@ -237,7 +236,6 @@ inputs = {
             Condition = {
               StringNotEquals = {
                 "aws:RequestedRegion" = [
-                  "us-east-1",
                   "us-east-1",
                 ]
               }

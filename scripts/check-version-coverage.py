@@ -125,7 +125,16 @@ PIN_PATTERNS = [
     (
         "pip pin",
         re.compile(r"^\.github/workflows/"),
-        re.compile(r"pip install\s+[a-zA-Z0-9._-]+==\d+\.\d+"),
+        re.compile(r"pip install\s+(?:-[-\w]+\s+)*[a-zA-Z0-9._-]+==\d+\.\d+"),
+    ),
+    (
+        # An UNPINNED install is strictly worse than an unwatched pin and was
+        # invisible to the pattern above, which matches `==<version>` and so
+        # cannot match its absence. It is reported here as unwatched — correctly,
+        # since no manager can watch a version that is not written down.
+        "unpinned pip install",
+        re.compile(r"^\.github/workflows/"),
+        re.compile(r"pip install\s+(?:-[-\w]+\s+)*(?!.*==)[a-zA-Z0-9._-]+\s*$", re.M),
     ),
     (
         "eks addon version",

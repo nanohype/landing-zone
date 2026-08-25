@@ -117,7 +117,7 @@ jobs:
       - name: Init and Validate
         working-directory: ${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }}
         run: |
-          tofu init -backend=false -input=false
+          tofu init -backend=false -input=false -lockfile=readonly
           tofu validate
 
   # `tofu test` unit tests. They run at command = plan against dummy/mocked
@@ -144,7 +144,7 @@ jobs:
           while IFS= read -r dir; do
             found=1
             echo "::group::tofu test — $dir"
-            ( cd "$dir" && tofu init -backend=false -input=false && tofu test )
+            ( cd "$dir" && tofu init -backend=false -input=false -lockfile=readonly && tofu test )
             echo "::endgroup::"
           done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' 'fleet/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
           if [ "$found" -eq 0 ]; then
@@ -479,7 +479,7 @@ jobs:
           sparse-checkout: platform.yaml
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - run: pip install --quiet pyyaml
+      - run: pip install --quiet pyyaml==6.0.3
       - name: re-render every environment that selects tenants
         run: |
           set -euo pipefail
@@ -591,6 +591,24 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-region-consistency.py
 
+  # The test job DISCOVERS suites, which is right for running them and wrong for
+  # guaranteeing them: a root with no tests/ contributes nothing to the glob, so
+  # it is never mentioned and the job goes green having tested everything that
+  # asked to be tested. Four roots sat that way, three minting IAM. Discovery
+  # cannot see an absence, so the absence is asserted here.
+  roots-tested:
+    name: Every Root Has A Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-roots-tested.py
+
   # `|| true` handles a failure and does nothing about a hang. kubectl and curl
   # are unbounded by default, and in the e2e teardown the caller is holding an EKS
   # cluster and NAT gateways that keep billing while it waits. The claim that
@@ -661,7 +679,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
-      - run: pip install pyyaml
+      - run: pip install pyyaml==6.0.3
       - run: python3 scripts/check-workflow-budgets.py
 
   # A pin nobody watches keeps working and keeps passing CI until the upstream it
@@ -955,6 +973,7 @@ jobs:
         backup-coverage,
         named-paths,
         network-deadlines,
+        roots-tested,
         scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,

@@ -404,6 +404,17 @@ def mutations() -> list[Mutation]:
             marker='helm-version: "3.16"',
         ),
         Mutation(
+            "check-roots-tested.py",
+            "an OpenTofu root exists with no test suite",
+            lambda t: _write(
+                t,
+                "components/aws/blind-spot-untested/versions.tf",
+                "# " + token("check-roots-tested.py") + "\n"
+                "terraform {\n  required_version = \">= 1.11.0\"\n}\n",
+            ),
+            marker=token("check-roots-tested.py"),
+        ),
+        Mutation(
             "check-network-deadlines.py",
             "a shell script makes a kubectl call with no deadline and no wrapper",
             lambda t: _write(

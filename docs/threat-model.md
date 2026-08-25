@@ -114,7 +114,7 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `live/aws/management/<region>/org/org-scp/terragrunt.hcl` to close them.
 - **Repudiation of emergency access** — Mitigated: `break-glass` roles fire an SNS
   alert on assumption and cap `max_session_duration` (default 1h). Identity Center
-  (`org-identity`) provides 5 least-privilege permission sets rather than shared
+  (`org-identity`) provides least-privilege permission sets rather than shared
   admin.
 
 ## 7. Denial of service
