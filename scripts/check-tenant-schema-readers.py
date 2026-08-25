@@ -31,6 +31,36 @@ from pathlib import Path
 ALLOW = {}
 
 
+
+def strip_comments(text):
+    """Remove `#` and `//` comments, respecting quotes and heredoc bodies.
+
+    Prose is not a reader. A field explained in a comment — including a comment
+    saying it is NOT implemented — would otherwise satisfy this gate, which is
+    the exact defect it exists to catch, agreed with rather than reported.
+    """
+    out, quote, i = [], None, 0
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\" and i + 1 < len(text):
+                out.append(text[i : i + 2]); i += 2; continue
+            if c == quote:
+                quote = None
+            out.append(c)
+        elif c in "\"'":
+            quote = c
+            out.append(c)
+        elif c == "#" or text[i : i + 2] == "//":
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            out.append("\n")
+            continue
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
 def tracked(repo, *globs):
     out = subprocess.run(
         ["git", "ls-files", *globs], capture_output=True, text=True, check=True, cwd=repo
@@ -78,10 +108,20 @@ def main():
                 continue
             readers = []
             for f, body in bodies:
-                # Strip variable blocks so a declaration is never its own reader.
+                # Strip variable blocks so a declaration is never its own reader,
+                # and comments so PROSE about a field is never its own reader
+                # either. The second matters more: the field this gate exists to
+                # catch is one whose implementation is missing, and the most
+                # likely thing standing where the implementation should be is a
+                # comment explaining that it is missing. Counting that comment as
+                # a reader makes the gate agree with the defect.
                 stripped = re.sub(r'^variable\s+"[^"]+"\s*\{.*?^\}', "", body, flags=re.S | re.M)
-                if re.search(r"[.\[]" + re.escape(field) + r"\b", stripped) or \
-                   re.search(r'"' + re.escape(field) + r'"', stripped):
+                stripped = strip_comments(stripped)
+                # A reader is an ACCESS — `.field` or `["field"]` — not a bare
+                # mention. A quoted bare string matches a map key or a tag value
+                # in an unrelated block, which reads as a use and is not one.
+                if re.search(r"\." + re.escape(field) + r"\b", stripped) or \
+                   re.search(r'\[\s*"' + re.escape(field) + r'"\s*\]', stripped):
                     readers.append(f)
             if not readers:
                 rel = (comp / "variables.tf").as_posix()

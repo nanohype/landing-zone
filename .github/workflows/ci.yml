@@ -529,6 +529,23 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-region-consistency.py
 
+  # The gates above are the assertions no `tofu test` can reach, and they are regex
+  # over HCL — a matcher that stops matching keeps exiting 0, and the summary line
+  # reports files scanned rather than violations found, so a blind gate is
+  # indistinguishable from a clean tree. Each gate's own anti-vacuity floor catches
+  # a scan that sees nothing; this catches the narrower break where the scan sees
+  # the tree and the matcher no longer recognises it. One positive control per
+  # gate: copy the tree, introduce the violation, require a non-zero exit.
+  gate-controls:
+    name: Gates Detect Their Own Violations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-gates-detect.py
+
   # A Deny whose Condition can never be satisfied is not a guardrail. IAM ANDs every
   # key inside one Condition block, so a Deny with several required-absent Null keys
   # fires only when ALL of them are missing — a resource carrying one and missing
@@ -726,6 +743,7 @@ jobs:
         smoke-outputs,
         documented-oidc-trust,
         region-consistency,
+        gate-controls,
         scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,
