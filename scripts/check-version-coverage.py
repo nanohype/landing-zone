@@ -52,11 +52,59 @@ ROOT = Path(__file__).resolve().parent.parent
 
 WAIVER = re.compile(r"#\s*renovate-ok:\s*\S")
 
+
+def blank_comment_bodies(text: str) -> str:
+    """Replace the inside of every comment with spaces, keeping length and lines.
+
+    Two views of the same file, because two different questions are being asked
+    of it and one view cannot answer both:
+
+      raw       — for the waiver and for the manager match. A `renovate-ok:`
+                  waiver IS a comment, so a stripped view cannot see it. And
+                  Renovate matches raw file content, so a manager check that read
+                  anything else would be answering a different question than the
+                  tool it is modelling.
+
+      blanked   — for pin DETECTION. A version quoted inside a comment is prose
+                  about a pin, not a pin, and reporting it sends someone to add a
+                  customManager for a line that installs nothing.
+
+    Bodies are blanked rather than deleted so offsets and line numbers survive
+    and the file:line in a finding still points where it says it does.
+    """
+    out, quote, i = [], None, 0
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\" and i + 1 < len(text):
+                out.append(text[i : i + 2]); i += 2; continue
+            if c == quote:
+                quote = None
+            out.append(c)
+        elif c in "\"'":
+            quote = c
+            out.append(c)
+        elif c == "#" or text[i : i + 2] == "//":
+            while i < len(text) and text[i] != "\n":
+                out.append(" ")
+                i += 1
+            continue
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
 # Attribute names that carry a version an upstream can retire. Curated rather
 # than inferred: a bare "version-shaped string" matcher reports every CIDR,
 # timeout and ACU setting in the tree, and a gate that cries wolf is turned off.
 PIN_PATTERNS = [
     # (what it is, where it can appear, how it looks)
+    #
+    # Leading whitespace is [ \t]* rather than \s*, which is load-bearing against
+    # the blanked view: a comment line becomes all spaces there, and \s* spans
+    # newlines, so the anchor would swallow the annotation line above a pin and
+    # report the wrong line — which then fails the manager match that keys on the
+    # pin's own trailing annotation.
     #
     # Each pattern is scoped to the files that can legitimately carry it. An
     # unscoped `version = "x.y.z"` matcher reports every provider entry in every
@@ -67,12 +115,12 @@ PIN_PATTERNS = [
     (
         "tool version input",
         re.compile(r"^\.github/workflows/"),
-        re.compile(r"^\s*(?:tofu_version|tg_version|tflint_version|helm-version|terraform_version)\s*:\s*[\"']?v?\d+\.\d+", re.M),
+        re.compile(r"^[ \t]*(?:tofu_version|tg_version|tflint_version|helm-version|terraform_version)\s*:\s*[\"']?v?\d+\.\d+", re.M),
     ),
     (
         "runtime version input",
         re.compile(r"^\.github/workflows/"),
-        re.compile(r"^\s*(?:python-version|go-version|node-version)\s*:\s*[\"']\d+\.\d+", re.M),
+        re.compile(r"^[ \t]*(?:python-version|go-version|node-version)\s*:\s*[\"']\d+\.\d+", re.M),
     ),
     (
         "pip pin",
@@ -82,17 +130,17 @@ PIN_PATTERNS = [
     (
         "eks addon version",
         re.compile(r"^components/aws/cluster/variables\.tf$"),
-        re.compile(r"^\s*[a-z-]+\s*=\s*\"v\d+\.\d+\.\d+-eksbuild\.\d+\"", re.M),
+        re.compile(r"^[ \t]*[a-z-]+[ \t]*=[ \t]*\"v\d+\.\d+\.\d+-eksbuild\.\d+\"", re.M),
     ),
     (
         "kubernetes control-plane version",
         re.compile(r"^components/aws/cluster/variables\.tf$"),
-        re.compile(r"^\s*default\s*=\s*\"1\.\d+\"", re.M),
+        re.compile(r"^[ \t]*default[ \t]*=[ \t]*\"1\.\d+\"", re.M),
     ),
     (
         "tflint plugin version",
         re.compile(r"^\.tflint-aws\.hcl$"),
-        re.compile(r"^\s*version\s*=\s*\"\d+\.\d+\.\d+\"", re.M),
+        re.compile(r"^[ \t]*version[ \t]*=[ \t]*\"\d+\.\d+\.\d+\"", re.M),
     ),
 ]
 
@@ -208,12 +256,18 @@ def main() -> int:
         if GENERATED.search(rel):
             continue
 
+        # The blanked view is what pin detection reads; `text` stays raw for the
+        # waiver and the manager match below.
+        code = blank_comment_bodies(text)
+
         hits = []
         for kind, scope, pat in PIN_PATTERNS:
             if not scope.search(rel):
                 continue
-            for m in pat.finditer(text):
-                line_no = text[: m.start()].count("\n") + 1
+            for m in pat.finditer(code):
+                line_no = code[: m.start()].count("\n") + 1
+                # The RAW line — the waiver on it is a comment, and a blanked
+                # view would report every waived pin as unwaived.
                 line = text.splitlines()[line_no - 1]
                 if WAIVER.search(line):
                     continue

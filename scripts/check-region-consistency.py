@@ -27,6 +27,14 @@ sits on the same line as the region:
 A waiver whose region appears nowhere else in the file is itself reported: it
 exempts nothing today and pre-approves that region for whatever is added next.
 
+VIEW
+
+Raw text, comments included, deliberately. Most of what this gate exists to catch
+IS commentary — a region in a runbook sentence, a path in a skill, an example in a
+docstring — so a comment-stripped view would be blind to its own subject. The
+`region-ok:` waiver lives in a comment for the same reason and is read from the
+same view.
+
 Exit 0 = clean. Exit 1 = a foreign region, or the scan could not see the tree.
 """
 

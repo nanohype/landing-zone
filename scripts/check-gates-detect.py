@@ -35,6 +35,32 @@ the harness, so a break in it fails open. Its own anti-vacuity floor is the
 partial compensation: it refuses to report a pass unless it exercised a control
 for every gate the repo ships.
 
+WHAT THE FLOOR ASSERTS
+
+Behaviour, not text. Whether a gate has a control is answered by the CONTENTS of
+mutations() — a data structure — and then by running the gate twice: it must
+ACCEPT the unmutated fixture and REJECT the mutated one. Both halves, because a
+gate that rejects everything is exactly as useless as one that rejects nothing,
+and either half alone passes a one-sided check.
+
+A floor that decided this by grepping its own source for the word "control" could
+be satisfied by a comment saying the controls were removed. This one cannot:
+deleting a Mutation and leaving that comment in its place fails, and so does
+neutering a gate to return non-zero unconditionally. Both were confirmed by doing
+them.
+
+FIXTURES
+
+The controls patch a copy of the real tree rather than building fixtures from
+literals. That is forced rather than preferred: these gates discover their inputs
+through `git ls-files` over a repository, so a fixture has to BE a repository.
+The cost is that a patch can fail to apply, which is why the landed-marker checks
+below exist at all — a gate whose fixture can be constructed from literals needs
+none of them, and should be written that way instead.
+
+No control shells out to sed. Edits are Python string replacement, so there is no
+BSD/GNU divergence to be silently no-opped by.
+
 Exit 0 = every gate detected its violation. Exit 1 = a gate is blind, a gate has
 no control, or the scan could not see the tree.
 """
@@ -65,10 +91,16 @@ class Mutation:
     fail loudly rather than silently test nothing.
     """
 
-    def __init__(self, gate: str, what: str, fn):
+    def __init__(self, gate: str, what: str, fn, marker: str | None = None):
         self.gate = gate
         self.what = what
         self.fn = fn
+        # The text whose presence means the violation is really in the tree. A
+        # changed file is not enough: a mutation can land, change bytes, and
+        # change nothing that matters — planting a floor the tree already meets,
+        # or editing a line the gate does not read. The marker closes that by
+        # naming what was supposed to appear.
+        self.marker = marker
 
     def apply(self, tree: Path) -> None:
         self.fn(tree)
@@ -118,6 +150,22 @@ def _append(tree: Path, rel: str, text: str) -> None:
     p.write_text(after)
 
 
+# The token every mutation carries. Synthetic on purpose: a marker derived from
+# real syntax is a marker that other files legitimately contain — another gate's
+# docstring showing the shape it catches, a worked example in the tree — and then
+# "already present" fires on text no control planted. This token appears nowhere
+# but in a mutation.
+def token(gate: str) -> str:
+    return "blind-spot-control-" + gate.replace(".", "-")
+
+
+def _contains(path: Path, needle: str) -> bool:
+    try:
+        return needle in path.read_text()
+    except (UnicodeDecodeError, OSError):
+        return False
+
+
 def _write(tree: Path, rel: str, text: str) -> None:
     p = tree / rel
     before = p.read_text() if p.exists() else None
@@ -138,10 +186,12 @@ def mutations() -> list[Mutation]:
             lambda t: _append(
                 t,
                 "live/aws/workload-development/us-east-1/development/network/terragrunt.hcl",
-                '\ndependency "foreign" {\n'
+                '\n# ' + token("check-account-local-deps.py") + '\n'
+                'dependency "blind_spot_foreign_account" {\n'
                 '  config_path = "../../../../network/us-east-1/development/shared-network"\n'
                 "}\n",
             ),
+            marker=token("check-account-local-deps.py"),
         ),
         Mutation(
             "check-architecture-components.sh",
@@ -149,8 +199,9 @@ def mutations() -> list[Mutation]:
             lambda t: _write(
                 t,
                 "components/aws/undocumented-thing/main.tf",
-                "# a component the architecture doc has never heard of\n",
+                "# " + token("check-architecture-components.sh") + "\n",
             ),
+            marker=token("check-architecture-components.sh"),
         ),
         Mutation(
             "check-datastore-ingress-source.py",
@@ -159,8 +210,10 @@ def mutations() -> list[Mutation]:
                 t,
                 "components/aws/tenant-substrate/modules/tenant/relational.tf",
                 "source_security_group_id = var.node_sg_id",
-                "source_security_group_id = var.cluster_sg_id",
+                "source_security_group_id = var.cluster_sg_id # "
+                + token("check-datastore-ingress-source.py"),
             ),
+            marker=token("check-datastore-ingress-source.py"),
         ),
         Mutation(
             "check-documented-oidc-trust.py",
@@ -168,8 +221,10 @@ def mutations() -> list[Mutation]:
             lambda t: _append(
                 t,
                 "docs/troubleshooting.md",
-                "\nThe deploy role trusts `repo:nanohype/landing-zone:*`.\n",
+                "\nThe deploy role trusts `repo:nanohype/landing-zone:*`. "
+                + token("check-documented-oidc-trust.py") + "\n",
             ),
+            marker=token("check-documented-oidc-trust.py"),
         ),
         Mutation(
             "check-e2e-covers-leaves.py",
@@ -177,8 +232,10 @@ def mutations() -> list[Mutation]:
             lambda t: _write(
                 t,
                 "live/aws/workload-development/us-east-1/development/uncovered-thing/terragrunt.hcl",
+                "# " + token("check-e2e-covers-leaves.py") + "\n"
                 'include "root" {\n  path = find_in_parent_folders("root.hcl")\n}\n',
             ),
+            marker=token("check-e2e-covers-leaves.py"),
         ),
         Mutation(
             "check-engine-version-pins.py",
@@ -191,6 +248,7 @@ def mutations() -> list[Mutation]:
                 '  engine_version = "16.6"\n'
                 "}\n",
             ),
+            marker="blind_spot_engine",
         ),
         Mutation(
             "check-escaped-interpolations.py",
@@ -200,6 +258,7 @@ def mutations() -> list[Mutation]:
                 "live/_envcommon/aws/cluster.hcl",
                 '\nlocals {\n  blind_spot = "$${var.escaped}"\n}\n',
             ),
+            marker='blind_spot = "$${var.escaped}"',
         ),
         Mutation(
             "check-foreign-placeholders.py",
@@ -211,6 +270,7 @@ def mutations() -> list[Mutation]:
                 '  blind_spot = "arn:aws:iam::666666666666:role/other-account"\n'
                 "}\n",
             ),
+            marker='arn:aws:iam::666666666666:role/other-account',
         ),
         Mutation(
             "check-mock-outputs.py",
@@ -221,6 +281,7 @@ def mutations() -> list[Mutation]:
                 "mock_outputs = {",
                 "mock_outputs = {\n    blind_spot_key = \"no such output\"",
             ),
+            marker='blind_spot_key',
         ),
         Mutation(
             "check-region-consistency.py",
@@ -230,6 +291,7 @@ def mutations() -> list[Mutation]:
             # other rather than a conflict.
             "prose names a region no live tree deploys into",
             lambda t: _append(t, "README.md", "\nDeploy into eu-west-1.\n"),
+            marker='Deploy into eu-west-1.',
         ),
         Mutation(
             "check-scp-deny-can-fire.py",
@@ -247,6 +309,7 @@ def mutations() -> list[Mutation]:
                 "            }\n"
                 "          },",
             ),
+            marker='"aws:RequestTag/A" = "true"',
         ),
         Mutation(
             "check-smoke-outputs.py",
@@ -256,6 +319,7 @@ def mutations() -> list[Mutation]:
                 "components/aws/observability/smoke-test.sh",
                 "\nBLIND=$(jq -r '.blind_spot_output.value' outputs.json)\n",
             ),
+            marker='blind_spot_output',
         ),
         Mutation(
             "check-teardown-gates.py",
@@ -264,8 +328,10 @@ def mutations() -> list[Mutation]:
                 t,
                 "components/aws/tenant-substrate/modules/tenant/objectstore.tf",
                 "force_destroy = local.allow_teardown",
-                "force_destroy = false # local.allow_teardown",
+                "force_destroy = false # local.allow_teardown "
+                + token("check-teardown-gates.py"),
             ),
+            marker=token("check-teardown-gates.py"),
         ),
         Mutation(
             "check-tenant-schema-readers.py",
@@ -289,6 +355,7 @@ def mutations() -> list[Mutation]:
                     "# A tenant setting .blind_spot_field sees it accepted.\n",
                 ),
             ),
+            marker='blind_spot_field',
         ),
         Mutation(
             "check-version-coverage.py",
@@ -302,6 +369,7 @@ def mutations() -> list[Mutation]:
                 'python-version: "3.12"',
                 'python-version: "3.12"\n          helm-version: "3.16"',
             ),
+            marker='helm-version: "3.16"',
         ),
         Mutation(
             "check-workflow-budgets.py",
@@ -321,6 +389,7 @@ def mutations() -> list[Mutation]:
                 ".github/workflows/deploy.yml",
                 "\n# CHANGEME\n",
             ),
+            marker='# CHANGEME',
         ),
     ]
 
@@ -431,6 +500,31 @@ def main() -> int:
                 broken.append((gate, "does not pass on the unmutated tree"))
                 continue
 
+            # A marker that is ALREADY present cannot prove the control planted
+            # it. This is the pre-existing-marker case, and it is the one that
+            # reads as a clean pass: the gate rejects, the run records success,
+            # and the control never had to do anything.
+            before_texts = {}
+            if m.marker:
+                already = [
+                    str(f.relative_to(tree))
+                    for f in tree.rglob("*")
+                    if f.is_file()
+                    and ".git" not in f.parts
+                    and f.name != Path(__file__).name
+                    and _contains(f, m.marker)
+                ]
+                if already:
+                    broken.append(
+                        (
+                            gate,
+                            f"marker {m.marker!r} is already present in the unmutated "
+                            f"tree ({already[0]}), so its presence afterwards proves "
+                            f"nothing about the control.",
+                        )
+                    )
+                    continue
+
             try:
                 m.apply(tree)
             except AssertionError as exc:
@@ -444,6 +538,28 @@ def main() -> int:
             # not — a permissions failure, a path that resolved elsewhere — is
             # indistinguishable from a clean mutation until something outside it
             # looks.
+            # And the marker must now be there. Bytes changed is the weaker
+            # question; this is the one that asks whether what changed is the
+            # thing the control claimed to introduce.
+            if m.marker:
+                found = any(
+                    _contains(f, m.marker)
+                    for f in tree.rglob("*")
+                    if f.is_file()
+                    and ".git" not in f.parts
+                    and f.name != Path(__file__).name
+                )
+                if not found:
+                    broken.append(
+                        (
+                            gate,
+                            f"marker {m.marker!r} is absent after the mutation ran. "
+                            f"Something changed, but not the thing this control says "
+                            f"it plants.",
+                        )
+                    )
+                    continue
+
             changed = subprocess.run(
                 ["git", "-C", str(tree), "diff", "--cached", "--stat", "HEAD"],
                 capture_output=True,
