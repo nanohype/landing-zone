@@ -16,10 +16,13 @@ that means resources are left billing with a successful-looking run.
 WHAT A LINTER DOES NOT CATCH
 
 shellcheck parses; it does not run, and it cannot know which bash the reader
-has. It reports nothing for any construct here — being clean under shellcheck is
-not evidence of portability, because version compatibility is outside what it
-evaluates. The same question is worth asking of every linter in a toolchain:
-what does it actually evaluate, against what it is assumed to cover.
+has. Given a script using mapfile, `declare -A` and `${x^^}` together it reports
+none of them as a version requirement — it may object to something else on the
+same line, which is worse, because the line gets attention and the portability
+defect still ships. Being clean under shellcheck is not evidence of portability:
+version compatibility is outside what it evaluates. The same question is worth
+asking of every linter in a toolchain — what it actually evaluates, against what
+it is assumed to cover.
 
 WHAT IT CHECKS
 

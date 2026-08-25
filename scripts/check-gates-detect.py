@@ -464,6 +464,53 @@ def mutations() -> list[Mutation]:
             ),
         ),
         Mutation(
+            "check-merge-gate-complete.py",
+            "a CI job is added without being required by the merge gate",
+            # The real shape: a new gate job wired into ci.yml and forgotten in
+            # the needs list. It runs, it can go red, and the merge is allowed.
+            lambda t: _edit(
+                t,
+                ".github/workflows/ci.yml",
+                "  merge-gate:\n",
+                "  unrequired-probe:\n"
+                "    name: Unrequired Probe\n"
+                "    runs-on: ubuntu-latest\n"
+                "    timeout-minutes: 10\n"
+                "    steps:\n"
+                "      - run: 'true'\n"
+                "\n"
+                "  merge-gate:\n",
+            ),
+            marker="  unrequired-probe:",
+        ),
+        Mutation(
+            "check-bash-portability.py",
+            "a bash 4 builtin lands in a script macOS users run",
+            # The real shape: mapfile reading a list, then a loop over the array.
+            # On bash 3.2 the builtin is missing, the array is empty, the loop
+            # runs zero times and the script exits 0.
+            lambda t: _append(
+                t,
+                "scripts/e2e.sh",
+                '\nmapfile -t leftover_stacks < /dev/null\n',
+            ),
+            marker="mapfile -t leftover_stacks",
+        ),
+        Mutation(
+            "check-fleet-ceiling-parity.py",
+            "an operator action lands in one fleet ceiling and not the other",
+            # The real defect verbatim: a capability added to the hub ceiling
+            # while the vend ceiling is forgotten. The grant is accepted, and
+            # denies at call time on every vended cluster.
+            lambda t: _edit(
+                t,
+                "components/aws/fleet-hub/main.tf",
+                '"xray:PutTraceSegments",',
+                '"xray:PutTraceSegments",\n          "qldb:PartiQLSelect",',
+            ),
+            marker='"qldb:PartiQLSelect",',
+        ),
+        Mutation(
             "no-placeholders.sh",
             "a placeholder sentinel survives into deploy config",
             lambda t: _append(

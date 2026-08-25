@@ -34,7 +34,6 @@ on:
         default: "e2e-smoke"
 
 permissions:
-  id-token: write
   contents: read
 
 # Never let two runs race on the same region's substrate.
@@ -44,6 +43,12 @@ concurrency:
 
 jobs:
   e2e:
+    permissions:
+      # Scoped to this job rather than the workflow: a job added here later
+      # would otherwise inherit the right to mint an OIDC token and assume
+      # the AWS deploy role without anyone granting it.
+      id-token: write
+      contents: read
     runs-on: ubuntu-latest
     # Two jobs at once. It scopes the OIDC subject claim to
     # `repo:nanohype/landing-zone:environment:e2e`, which is what the deploy role

@@ -35,7 +35,6 @@ on:
           - apply
 
 permissions:
-  id-token: write
   contents: read
 
 # Serialize mutating runs against the same environment/component so two dispatched
@@ -50,6 +49,12 @@ concurrency:
 
 jobs:
   deploy:
+    permissions:
+      # Scoped to this job rather than the workflow: a job added here later
+      # would otherwise inherit the right to mint an OIDC token and assume
+      # the AWS deploy role without anyone granting it.
+      id-token: write
+      contents: read
     name: ${{ inputs.action }} ${{ inputs.environment }}/${{ inputs.component }}
     runs-on: ubuntu-latest
     timeout-minutes: 60

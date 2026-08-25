@@ -627,6 +627,59 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-network-deadlines.py
 
+  # Both fleet boundaries cap the same cluster and agent-platform operator roles,
+  # so an action granted in one ceiling and not the other is accepted at the
+  # grant and denied at call time on every vended cluster. That constraint was
+  # written in a comment in both files for two prior grants; a comment records a
+  # class, it does not close one.
+  fleet-ceiling-parity:
+    name: Fleet Ceilings Agree
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-fleet-ceiling-parity.py
+
+  # These scripts declare `env bash` and CI runs bash 5, but macOS ships 3.2, so
+  # CI passing is not evidence a developer or an incident responder can run them.
+  # shellcheck does not cover this: it flags none of these constructs as a
+  # version requirement, so being clean under it proves nothing about portability.
+  bash-portability:
+    name: Scripts Run On Bash 3.2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-bash-portability.py
+
+  # Branch protection watches `merge gate` alone, so a job outside its needs list
+  # runs, goes red, and does not block the merge — a gate that reports and cannot
+  # reject. Adding a gate is two edits and forgetting the second looks like
+  # nothing at all, which is why this is checked rather than remembered.
+  merge-gate-complete:
+    name: Merge Gate Requires Every Job
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet pyyaml==6.0.3
+      - run: python3 scripts/check-merge-gate-complete.py
+
   # Prose that names a thing is a claim about the world, and it rots in one
   # direction: renaming a file updates every import and no sentence. So the prose
   # is always the half that goes stale, silently, in the documents a newcomer
@@ -725,7 +778,17 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install zizmor==1.16.3
-      - run: zizmor --offline --persona=regular .github/workflows/
+      # --persona=auditor with a high-severity floor, not the default persona.
+      # `regular` does not run the excessive-permissions audit at all, so a
+      # workflow-level `id-token: write` — every job in the file able to mint an
+      # OIDC token and assume the deploy role — passed it silently. Raising the
+      # persona surfaces that class; the severity floor keeps the 35 low-severity
+      # style findings out of a gate that must stay a hard failure.
+      #
+      # Verified in both directions: the tree is clean at this setting, and a
+      # workflow carrying pull_request_target with a head-sha checkout and a
+      # template-injected run block exits 14.
+      - run: zizmor --offline --persona=auditor --min-severity=high .github/workflows/
 
   # The gates above are the assertions no `tofu test` can reach, and they are regex
   # over HCL — a matcher that stops matching keeps exiting 0, and the summary line
@@ -973,6 +1036,9 @@ jobs:
         backup-coverage,
         named-paths,
         network-deadlines,
+        fleet-ceiling-parity,
+        bash-portability,
+        merge-gate-complete,
         roots-tested,
         scp-deny-can-fire,
         datastore-ingress-source,

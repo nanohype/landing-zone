@@ -85,13 +85,14 @@ def main() -> int:
     dangling = sorted(needs - jobs)
 
     if unrequired or dangling:
-        print("Merge gate does not require every job:\n", file=sys.stderr)
+        rel = WORKFLOW.relative_to(ROOT)
+        print(f"Merge gate does not require every job ({rel}):\n", file=sys.stderr)
         for j in unrequired:
-            print(f"  job `{j}` is not in {GATE_JOB}'s needs — it runs, it can go "
-                  f"red, and it cannot block a merge", file=sys.stderr)
+            print(f"  {rel}: job `{j}` is not in {GATE_JOB}'s needs — it runs, "
+                  f"it can go red, and it cannot block a merge", file=sys.stderr)
         for n in dangling:
-            print(f"  {GATE_JOB} needs `{n}`, which is not a job — GitHub fails "
-                  f"the workflow on this", file=sys.stderr)
+            print(f"  {rel}: {GATE_JOB} needs `{n}`, which is not a job — "
+                  f"GitHub fails the workflow on this", file=sys.stderr)
         print(
             f"\nBranch protection watches `{GATE_JOB}` alone. A job outside its "
             f"needs list reports its violation onto a PR that is still mergeable, "
