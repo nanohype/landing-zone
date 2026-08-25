@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# kubectl's default request timeout is unbounded. A smoke test runs against a
+# cluster that may be half-built or unreachable — which is exactly when a bare
+# `kubectl get` hangs rather than failing — so the binary is wrapped once here
+# instead of asking every call site to remember a flag. A call added later
+# inherits the deadline without anyone noticing it needed to.
+kubectl() { command kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT:-30s}" "$@"; }
+
 # Parse outputs
 CILIUM_VERSION=$(jq -r '.cilium_version.value' outputs.json)
 ARGOCD_NS=$(jq -r '.argocd_namespace.value' outputs.json)

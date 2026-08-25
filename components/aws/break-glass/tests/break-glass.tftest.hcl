@@ -146,10 +146,11 @@ run "boundary_denies_self_escalation" {
       && contains(try(s.Action, []), "iam:CreatePolicyVersion")
       && contains(try(s.Action, []), "iam:UpdateAssumeRolePolicy")
       && contains(try(s.Action, []), "iam:PutRolePermissionsBoundary")
+      && contains(try(s.Action, []), "iam:DeleteRolePermissionsBoundary")
       && contains(try(s.Action, []), "sts:AssumeRole")
       && contains(try(s.Action, []), "organizations:*")
     ]) == 1
-    error_message = "break-glass boundary DenyIAMModifications must Deny all IAM identity-write, session-persistence, and escalation verbs (CreateAccessKey, Attach/PutUserPolicy, CreatePolicyVersion, UpdateAssumeRolePolicy, PutRolePermissionsBoundary, sts:AssumeRole) plus organizations:*"
+    error_message = "break-glass boundary DenyIAMModifications must Deny all IAM identity-write, session-persistence, and escalation verbs plus organizations:* — including BOTH boundary verbs: Put replaces a boundary and Delete strips it, so denying only Put leaves the ceiling removable in one call from the AdministratorAccess session it exists to cap"
   }
 }
 

@@ -404,6 +404,19 @@ def mutations() -> list[Mutation]:
             marker='helm-version: "3.16"',
         ),
         Mutation(
+            "check-network-deadlines.py",
+            "a shell script makes a kubectl call with no deadline and no wrapper",
+            lambda t: _write(
+                t,
+                "scripts/blind-spot-probe.sh",
+                "#!/usr/bin/env bash\n"
+                "# " + token("check-network-deadlines.py") + "\n"
+                "set -euo pipefail\n"
+                "kubectl get pods -A\n",
+            ),
+            marker=token("check-network-deadlines.py"),
+        ),
+        Mutation(
             "check-named-paths-resolve.py",
             "prose names a repo-relative path that does not exist",
             lambda t: _append(

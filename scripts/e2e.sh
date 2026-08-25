@@ -17,6 +17,16 @@
 #
 set -euo pipefail
 
+# kubectl's default request timeout is unbounded, and this script makes ~45 calls
+# — three of them inside teardown(), the path that exists to stop billing. Asking
+# 45 call sites each to remember a flag is how 38 of them came not to have one,
+# so the binary is wrapped once instead: a call that forgets is impossible, and a
+# call added later inherits the deadline without anyone noticing it needed to.
+#
+# The wrapper's flag goes FIRST, so a call site that needs a longer deadline
+# passes its own and wins — pflag takes the last occurrence.
+kubectl() { command kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT:-60s}" "$@"; }
+
 # --- config (env-overridable; defaults target the cheap development tree) -----------
 : "${E2E_ACCOUNT_ID:?set E2E_ACCOUNT_ID (the real 12-digit AWS account)}"
 REGION="${E2E_REGION:-us-east-1}"
@@ -256,11 +266,16 @@ dump_cluster_diag() {
 }
 
 # --- teardown (ALWAYS runs) -------------------------------------------------
-# Every network call in this script carries a deadline. `|| true` converts a
-# FAILURE into a continue and does nothing about a HANG: a remote that accepts the
-# TCP connection and then stalls blocks here indefinitely while an EKS cluster, NAT
-# gateways and Graviton nodes keep billing. That matters most on the teardown path,
-# which is the mechanism the header promises never leaves billing on.
+# Every network call here is bounded, and by a named mechanism per tool rather
+# than by assumption: kubectl through the wrapper at the top of this file, curl
+# with --max-time, git and go under `timeout`, and the AWS CLI by its own default
+# connect and read timeouts. scripts/check-network-deadlines.py holds that.
+#
+# `|| true` converts a FAILURE into a continue and does nothing about a HANG: a
+# remote that accepts the TCP connection and then stalls blocks indefinitely while
+# an EKS cluster, NAT gateways and Graviton nodes keep billing. That matters most
+# on the teardown path, which is the mechanism the header promises never leaves
+# billing on.
 teardown() {
   local ec=$?
   # Before anything is deleted, and only when the run is failing — a passing run

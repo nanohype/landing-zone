@@ -91,7 +91,13 @@ resource "aws_iam_policy" "boundary" {
           "iam:PutUserPolicy",
           "iam:CreatePolicyVersion",
           "iam:UpdateAssumeRolePolicy",
+          # BOTH boundary verbs. Put REPLACES a boundary, Delete STRIPS it, and
+          # denying only Put leaves the ceiling removable in one call from an
+          # AdministratorAccess session — which is the session this boundary
+          # exists to cap. The three sibling boundaries in this repo (fleet-vend,
+          # fleet-hub, fleet-unwedge) deny both.
           "iam:PutRolePermissionsBoundary",
+          "iam:DeleteRolePermissionsBoundary",
           "sts:AssumeRole",
           "organizations:*",
         ]
