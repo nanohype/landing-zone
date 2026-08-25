@@ -317,17 +317,34 @@ teardown() {
   # credential on a private repo behind on every run.
   for c in tenant-substrate cluster-bootstrap agent-iam secrets cluster network; do
     log "destroy $c"
-    if ! tg "$c" destroy -auto-approve >/dev/null 2>&1; then
-      # Usual causes: a stale state lock (interrupted run) or orphaned EKS SGs/ENIs
-      # blocking the VPC. Clear both and retry once.
-      echo "  destroy $c failed — clearing lock + VPC blockers, retrying"
-      clear_lock "$c"
-      [ "$c" = network ] && reap_vpc_blockers
-      if ! tg "$c" destroy -auto-approve >/dev/null 2>&1; then
+    if ! tg "$c" destroy -auto-approve >"$WORK/destroy-$c.log" 2>&1; then
+      # Retrying a mutation is normally how one logical operation becomes two real
+      # ones. `tofu destroy` is the exception and the reason is specific: it
+      # re-reads state and reconciles toward empty, so a second run does not
+      # repeat a deletion the first one completed. That property is what makes a
+      # retry safe here, not the fact that retries are convenient.
+      #
+      # Retried only on the two shapes a remediation actually addresses — a stale
+      # lock from an interrupted run, and orphaned EKS security groups or ENIs
+      # holding the VPC. Any other failure is a real one: retrying it blind
+      # re-runs a destroy that failed for a reason nobody looked at, and buries the
+      # reason under a second identical error.
+      if grep -qEi 'error acquiring the state lock|ConditionalCheckFailedException|DependencyViolation|has dependencies and cannot be deleted' "$WORK/destroy-$c.log"; then
+        echo "  destroy $c hit a known blocker — clearing lock + VPC blockers, retrying once"
+        clear_lock "$c"
+        [ "$c" = network ] && reap_vpc_blockers
+      else
+        echo "  destroy $c failed for an unrecognised reason — not retrying"
+        sed 's/^/      /' <"$WORK/destroy-$c.log" | tail -15 >&2
+        destroy_failed="${destroy_failed}${destroy_failed:+ }$c"
+        continue
+      fi
+      if ! tg "$c" destroy -auto-approve >>"$WORK/destroy-$c.log" 2>&1; then
         # A destroy that fails twice is a run RESULT, not a note. Echoing it and
         # continuing is how a BucketNotEmpty prints one soft line while the run
         # reports PASSED — so it is recorded and surfaced at the end instead.
-        echo "  (destroy $c still failing — verify in console)"
+        echo "  (destroy $c still failing after the retry)"
+        sed 's/^/      /' <"$WORK/destroy-$c.log" | tail -15 >&2
         destroy_failed="${destroy_failed}${destroy_failed:+ }$c"
       fi
     fi
