@@ -39,10 +39,22 @@ locals {
 
   # Expand the model allowlist into the resource ARNs a Bedrock invoke grant
   # needs: the foundation-model ARN (AWS-owned, so an empty account segment; any
-  # region) plus the account's cross-region inference profiles that route to it
-  # (their IDs carry a us./eu./apac. region-set prefix, hence the leading
-  # wildcard). Invoking through an inference profile authorizes against BOTH the
-  # profile and the underlying model, so a usable allowlist must grant both forms.
+  # region) plus the account's cross-region inference profiles that route to it.
+  # Invoking through an inference profile authorizes against BOTH the profile and
+  # the underlying model, so a usable allowlist must grant both forms.
+  #
+  # The profile ARN is prefixed with an explicit geo set rather than a bare `*`.
+  # `inference-profile/*anthropic.*` reads as "the geo prefix, whatever it is",
+  # but IAM does not read intent — it matches any profile name CONTAINING the
+  # family, so a profile called `staging-anthropic.rerouted` satisfies it. Profiles
+  # are account-scoped and a tenant role cannot create one, so this is a second
+  # line rather than the first; it is cheap, and the first line is one grant away
+  # from being someone else's mistake.
+  #
+  # The default is us. alone because llm-policy names us-east-1 as the only
+  # preferred region and requires the geo prefix to match the deploy region. A
+  # fork deploying elsewhere widens this deliberately, which is the point of it
+  # being a variable rather than a literal.
   # An empty allowlist grants nothing: the BedrockInvoke statement is dropped from
   # the baseline entirely (see the conditional in the policy below) rather than
   # emitted with Resource=["*"]. Empty meaning "everything" is the wrong direction
@@ -51,10 +63,13 @@ locals {
   # empty. Any-model is still reachable by writing ["*"] in the list, where an
   # auditor reading the config can see it.
   bedrock_baseline_invoke_resources = flatten([
-    for id in var.bedrock_allowed_model_ids : [
-      "arn:${local.partition}:bedrock:*::foundation-model/${id}",
-      "arn:${local.partition}:bedrock:*:${local.account_id}:inference-profile/*${id}",
-    ]
+    for id in var.bedrock_allowed_model_ids : concat(
+      ["arn:${local.partition}:bedrock:*::foundation-model/${id}"],
+      [
+        for geo in var.bedrock_inference_profile_geos :
+        "arn:${local.partition}:bedrock:*:${local.account_id}:inference-profile/${geo}${id}"
+      ],
+    )
   ])
 
   tags = merge(var.tags, {

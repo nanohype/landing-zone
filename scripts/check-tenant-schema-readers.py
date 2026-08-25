@@ -76,15 +76,34 @@ def tracked(repo, *globs):
 
 
 def object_type_fields(text, var_names):
-    """Attribute names declared inside `variable "<name>" { type = ... object({...}) }`."""
+    """Attribute names declared inside `variable "<name>" { type = ... object({...}) }`.
+
+    Two things this deliberately does not do, both of which fail toward reporting
+    a schema that is not the one in force.
+
+    It does not take the FIRST match. A commented-out declaration sitting above
+    the live one wins a first-hit search, and the gate then checks the dead copy's
+    fields while the real ones go unexamined — a pass earned by reading the wrong
+    block. Every match is collected and their fields unioned, so a stale copy can
+    only ADD a field to check, never hide one.
+
+    And it reads a comment-blanked view, so a commented-out declaration is not
+    there to be found at all. The union above is the belt to that's braces:
+    blanking handles the `#` case, the union handles a duplicate that is live in
+    both places.
+    """
+    code = strip_comments(text)
     fields = {}
     for var in var_names:
-        m = re.search(r'^variable\s+"' + var + r'"\s*\{(.*?)^\}', text, re.S | re.M)
-        if not m:
-            continue
-        for fm in re.finditer(r"^\s{4,}([a-z0-9_]+)\s*=\s*(optional\(|bool|number|string|list|map|object)",
-                              m.group(1), re.M):
-            fields.setdefault(fm.group(1), var)
+        matches = list(
+            re.finditer(r'^variable\s+"' + var + r'"\s*\{(.*?)^\}', code, re.S | re.M)
+        )
+        for m in matches:
+            for fm in re.finditer(
+                r"^[ \t]{4,}([a-z0-9_]+)[ \t]*=[ \t]*(optional\(|bool|number|string|list|map|object)",
+                m.group(1), re.M,
+            ):
+                fields.setdefault(fm.group(1), var)
     return fields
 
 

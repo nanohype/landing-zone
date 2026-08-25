@@ -366,10 +366,15 @@ run "tenant_baseline_bedrock_is_model_scoped" {
       s if try(s.Sid, "") == "BedrockInvoke"
       && can(tolist(s.Resource))
       && contains(tolist(s.Resource), "arn:aws:bedrock:*::foundation-model/anthropic.*")
-      && contains(tolist(s.Resource), "arn:aws:bedrock:*:123456789012:inference-profile/*anthropic.*")
+      # The profile ARN carries an explicit geo prefix, not a bare wildcard:
+      # `inference-profile/*anthropic.*` matches any profile whose NAME contains
+      # the family, which IAM treats as a match and a reader treats as "the geo
+      # prefix, whatever it is".
+      && !anytrue([for r in tolist(s.Resource) : strcontains(r, "inference-profile/*")])
+      && contains(tolist(s.Resource), "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.*")
       && !contains(tolist(s.Resource), "*")
     ]) == 1
-    error_message = "BedrockInvoke must scope Resource to the allowlisted foundation-model + inference-profile ARNs (incl. anthropic.*), never \"*\""
+    error_message = "BedrockInvoke must scope Resource to the allowlisted foundation-model ARN plus a GEO-PREFIXED inference-profile ARN, never \"*\" and never a bare inference-profile/* wildcard — the latter matches any profile whose name contains the family, which IAM treats as a match and a reader treats as the geo prefix"
   }
 
   # The invoke/converse actions stay on the scoped statement...

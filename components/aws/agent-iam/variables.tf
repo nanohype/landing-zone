@@ -69,6 +69,36 @@ variable "bedrock_allowed_model_ids" {
   default     = ["anthropic.*", "amazon.nova-*"]
 }
 
+variable "bedrock_inference_profile_geos" {
+  description = <<-EOT
+    Geo-set prefixes the tenant baseline may invoke a cross-region inference
+    profile through. Each allowlisted model family expands to one profile ARN per
+    prefix, alongside its bare foundation-model ARN.
+
+    Named rather than wildcarded because IAM matches text, not intent. A bare
+    `inference-profile/*<family>` reads as "whatever the geo prefix is" and
+    matches any profile whose NAME contains the family — including one created
+    later with a name chosen to satisfy it.
+
+    Defaults to us. alone: llm-policy names us-east-1 as the only preferred region
+    and requires the geo prefix to match the deploy region, so a second entry here
+    would name a prefix no workload in this estate can reach. Widen it in a fork
+    that deploys elsewhere.
+  EOT
+  type        = list(string)
+  default     = ["us."]
+
+  validation {
+    condition     = length(var.bedrock_inference_profile_geos) > 0
+    error_message = "bedrock_inference_profile_geos must name at least one geo prefix; an empty list grants no inference-profile ARN at all, and every current Claude model is invoked through one."
+  }
+
+  validation {
+    condition     = alltrue([for g in var.bedrock_inference_profile_geos : can(regex("^[a-z]+\\.$", g))])
+    error_message = "each geo prefix is lowercase letters followed by a dot, e.g. \"us.\" or \"eu.\"."
+  }
+}
+
 variable "team" {
   description = "Owning team tag"
   type        = string

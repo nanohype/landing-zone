@@ -64,9 +64,14 @@ AZ_ID = re.compile(r"\b([a-z]{2,4}\d)-az\d\b")
 
 WAIVER = re.compile(r"#\s*region-ok:\s*\S")
 
-# Generated or vendored text is not this repo's prose. Provider lock files carry
-# no regions; live/ is the source of truth this gate reads rather than checks.
-SKIP_PREFIXES = ("live/",)
+# Generated text is not this repo's prose; provider lock files carry no regions.
+#
+# live/ is NOT skipped. The directory NAMES there are the source of truth this
+# gate reads, but the file CONTENTS are ordinary config that can name a region
+# like anything else — a mock ARN in a dependency block, a hardcoded ARN in an
+# input. Skipping the whole tree because part of it is the oracle is how a region
+# gets reintroduced in the one place nobody is watching, and it is the shape this
+# gate exists to prevent, applied to itself.
 SKIP_NAMES = (".terraform.lock.hcl",)
 
 SCANNED_SUFFIXES = (".tf", ".hcl", ".md", ".sh", ".py", ".yml", ".yaml", ".json")
@@ -190,7 +195,6 @@ def main() -> int:
         rel
         for rel in tracked
         if rel.endswith(SCANNED_SUFFIXES)
-        and not rel.startswith(SKIP_PREFIXES)
         and Path(rel).name not in SKIP_NAMES
     ]
     if len(targets) < 100:
