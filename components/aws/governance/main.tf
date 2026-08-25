@@ -19,5 +19,6 @@ module "tenant" {
   tenant_config         = each.value
   cluster_name          = var.cluster_name
   force_destroy_buckets = var.force_destroy_buckets
+  backup_policy         = var.backup_policy
   tags                  = local.tags
 }

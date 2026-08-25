@@ -66,3 +66,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "backup_policy" {
+  description = "BackupPolicy tag value for this tenant's data stores, or empty to stamp nothing. Passed through from the component root; see its variable for why the default is opt-in."
+  type        = string
+  default     = ""
+}

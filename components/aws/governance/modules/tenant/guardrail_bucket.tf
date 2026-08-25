@@ -19,5 +19,5 @@ module "guardrail_bucket" {
   }
 
   attach_deny_insecure_transport_policy = true
-  tags                                  = local.tenant_tags
+  tags                                  = local.data_tags
 }

@@ -22,5 +22,6 @@ module "tenant" {
   node_sg_id            = var.node_sg_id
   cluster_name          = var.cluster_name
   force_destroy_buckets = var.force_destroy_buckets
+  backup_policy         = var.backup_policy
   tags                  = local.tags
 }

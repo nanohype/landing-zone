@@ -591,6 +591,24 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-region-consistency.py
 
+  # The central backup plan selects on the BackupPolicy tag, so a data store no
+  # tag can reach cannot be backed up at all — and nothing reports that. No apply
+  # fails, no drift appears; the gap surfaces at the restore that does not happen.
+  # This gates the reachability, not the choice: whether a store IS enrolled is an
+  # operator's decision, whether it CAN be is the component's responsibility.
+  backup-coverage:
+    name: Every Data Store Can Be Backed Up
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-backup-coverage.py
+
   # A job with no timeout-minutes inherits GitHub's 360-minute default, which is a
   # six-hour bill for a job that stopped making progress. On drift.yml's weekday
   # schedule a hung run is still holding a runner when the next one starts, so the
@@ -898,6 +916,7 @@ jobs:
         workflows,
         version-coverage,
         workflow-budgets,
+        backup-coverage,
         scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,

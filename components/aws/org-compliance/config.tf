@@ -114,7 +114,7 @@ module "config_bucket" {
     ]
   })
 
-  tags = merge(local.tags, { Name = "org-config-snapshots" })
+  tags = merge(local.record_tags, { Name = "org-config-snapshots" })
 }
 
 ################################################################################

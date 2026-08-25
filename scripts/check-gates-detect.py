@@ -372,6 +372,20 @@ def mutations() -> list[Mutation]:
             marker='helm-version: "3.16"',
         ),
         Mutation(
+            "check-backup-coverage.py",
+            "a backup-eligible bucket exists that no BackupPolicy tag can reach",
+            lambda t: _append(
+                t,
+                "components/aws/model-import/main.tf",
+                '\n# ' + token("check-backup-coverage.py") + '\n'
+                'resource "aws_s3_bucket" "blind_spot_unprotectable" {\n'
+                '  bucket = "blind-spot"\n'
+                "  tags   = local.tags\n"
+                "}\n",
+            ),
+            marker=token("check-backup-coverage.py"),
+        ),
+        Mutation(
             "check-workflow-budgets.py",
             "a workflow job has no timeout-minutes and inherits the 360-minute default",
             lambda t: _edit(

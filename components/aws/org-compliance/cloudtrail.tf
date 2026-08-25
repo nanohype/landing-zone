@@ -81,7 +81,7 @@ module "cloudtrail_bucket" {
     ]
   })
 
-  tags = merge(local.tags, { Name = "org-cloudtrail-logs" })
+  tags = merge(local.record_tags, { Name = "org-cloudtrail-logs" })
 }
 
 ################################################################################
