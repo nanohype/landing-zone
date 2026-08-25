@@ -741,6 +741,34 @@ def self_test(base: Path) -> str | None:
     return None
 
 
+def git_unavailable() -> str | None:
+    """Why the tracked set cannot be determined, or None if it can.
+
+    git is not a tool this floor merely runs — it is the tool that TELLS the
+    floor which files exist to be examined. Every fixture is a repository, every
+    scoped gate reads `git ls-files`, and the base tree is built from it. That
+    makes it upstream of the entire run, so it is asserted once here rather than
+    per-gate, where the answer would arrive too late to mean anything.
+
+    Without this, its absence surfaced as `CalledProcessError ... exit status
+    127` from whichever call happened to be first. Non-zero, so never a silent
+    pass — and it named the BINARY rather than what could not be determined,
+    which sends a reader to the wrong question. An exit code is not the only
+    thing a failure owes you.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--git-dir"],
+            capture_output=True, text=True,
+        )
+    except (FileNotFoundError, OSError) as exc:
+        return f"git could not be executed ({exc.__class__.__name__})"
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip().splitlines()
+        return f"`git rev-parse` exited {proc.returncode}" + (f": {detail[-1][:80]}" if detail else "")
+    return None
+
+
 def vacuity_check(base: Path, shipped: set[str]) -> list[str]:
     """Every gate must REFUSE a tree that holds no repository.
 
@@ -784,6 +812,20 @@ def vacuity_check(base: Path, shipped: set[str]) -> list[str]:
 
 
 def main() -> int:
+    # Asserted before anything else, because it decides what "anything else"
+    # even is: the tracked set is the population every control and every scoped
+    # gate reasons over.
+    why = git_unavailable()
+    if why:
+        print(
+            f"FAIL: the tracked set could not be determined — {why}.\n"
+            f"This floor builds every fixture as a repository and every scoped "
+            f"gate reads `git ls-files`, so without git there is no population "
+            f"to examine and no verdict to report. Nothing below ran.",
+            file=sys.stderr,
+        )
+        return 1
+
     shipped = shipped_gates()
     controls = {m.gate: m for m in mutations()}
 
