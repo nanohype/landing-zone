@@ -573,6 +573,18 @@ def copy_tree(dest: Path) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, out)
     subprocess.run(["git", "-C", str(dest), "init", "-q"], check=True)
+    # Auto-gc off, both flavours. `git commit` may fire `gc --auto`, and by
+    # default it DETACHES — a background process that packs the loose objects
+    # this commit just wrote and unlinks them. Every per-control tree is a
+    # filesystem copy of this repository, so that background unlink races the
+    # copy and it loses: shutil.copytree walks .git/objects, finds entries that
+    # existed a moment earlier, and raises for each one that has since gone.
+    #
+    # It is a race, so it does not reproduce on demand. It appeared on a Linux
+    # runner while every local run was clean, which is the shape of a defect
+    # that only ever fails somewhere else.
+    subprocess.run(["git", "-C", str(dest), "config", "gc.auto", "0"], check=True)
+    subprocess.run(["git", "-C", str(dest), "config", "gc.autoDetach", "false"], check=True)
     subprocess.run(["git", "-C", str(dest), "add", "-A"], check=True)
     # Commit, so a later `git diff HEAD` is a real question. Without a commit
     # every file reads as newly added forever and any "did the tree change?"
@@ -580,6 +592,26 @@ def copy_tree(dest: Path) -> None:
     # nothing.
     subprocess.run(
         ["git", "-C", str(dest), "-c", "user.name=gate-controls",
+         "-c", "user.email=gate-controls@localhost", "commit", "-q", "-m", "base"],
+        check=True,
+    )
+
+
+def clone_tree(base: Path, tree: Path) -> None:
+    """A per-control copy of the base repository.
+
+    `.git/objects` is excluded and the copy is re-committed instead. The object
+    store is git's to manage — copying it means racing whatever git does to it
+    next — while what a control actually needs is a working repository whose
+    HEAD matches the unmutated tree, which a fresh commit gives exactly.
+    """
+    shutil.copytree(base, tree, ignore=shutil.ignore_patterns(".git"))
+    subprocess.run(["git", "-C", str(tree), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(tree), "config", "gc.auto", "0"], check=True)
+    subprocess.run(["git", "-C", str(tree), "config", "gc.autoDetach", "false"], check=True)
+    subprocess.run(["git", "-C", str(tree), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tree), "-c", "user.name=gate-controls",
          "-c", "user.email=gate-controls@localhost", "commit", "-q", "-m", "base"],
         check=True,
     )
@@ -638,7 +670,7 @@ def self_test(base: Path) -> str | None:
     tree = base.parent / "floor-selftest"
     if tree.exists():
         shutil.rmtree(tree)
-    shutil.copytree(base, tree)
+    clone_tree(base, tree)
 
     # A gate whose tool has vanished exits 127 having evaluated nothing, and it
     # may print NOTHING while doing so — no traceback, no "command not found".
@@ -739,7 +771,7 @@ def main() -> int:
         for gate in sorted(shipped):
             m = controls[gate]
             tree = Path(tmp) / gate.replace(".", "_")
-            shutil.copytree(base, tree)
+            clone_tree(base, tree)
 
             # The gate must be clean BEFORE the mutation, or a non-zero exit
             # afterwards proves nothing about the matcher.
