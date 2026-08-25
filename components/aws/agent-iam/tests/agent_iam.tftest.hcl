@@ -404,42 +404,57 @@ run "tenant_baseline_bedrock_is_model_scoped" {
   }
 }
 
-# The scoping is variable-driven, not hardcoded: the escape hatch back to
-# Resource=["*"] is an empty allowlist AND an explicit bedrock_allow_all_models.
-# Proving both directions rules out a coincidentally-correct default.
+# The scoping is variable-driven, not hardcoded, and an empty allowlist grants
+# NOTHING. Proving that direction is what rules out a coincidentally-correct
+# default, and it is the direction that matters: empty meaning "everything" would
+# turn a list that came back short — one rendered from a set of Platform CRs that
+# happens to be empty — into unrestricted bedrock:Invoke* on every model.
 #
-# The two inputs are separate because emptiness is the value a caller reaches by
-# accident: an allowlist rendered from a set of Platform CRs is empty whenever that
-# set is, and an empty list read as "everything" fails open on the grant that
-# decides what a tenant can spend against. The refusal below is the half that
-# matters — the wildcard is reachable, but only when someone asked for it.
-run "tenant_baseline_bedrock_empty_allowlist_alone_is_refused" {
+# The statement is absent rather than present-and-empty. An Allow with an empty
+# Resource list is not valid IAM, and an Allow with Resource=["*"] is the opposite
+# of what the caller asked for.
+run "tenant_baseline_bedrock_empty_allowlist_grants_nothing" {
   command = plan
 
   variables {
     bedrock_allowed_model_ids = []
-  }
-
-  expect_failures = [
-    var.bedrock_allowed_model_ids,
-  ]
-}
-
-run "tenant_baseline_bedrock_empty_allowlist_is_wildcard" {
-  command = plan
-
-  variables {
-    bedrock_allowed_model_ids = []
-    bedrock_allow_all_models  = true
   }
 
   assert {
     condition = length([
       for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
       s if try(s.Sid, "") == "BedrockInvoke"
-      && length(tolist(s.Resource)) == 1 && contains(tolist(s.Resource), "*")
+    ]) == 0
+    error_message = "an empty allowlist must emit NO BedrockInvoke statement — an empty list is a request for no Bedrock grant, and widening it to Resource=[\"*\"] hands every model to the caller who thought they were removing access"
+  }
+
+  # The rest of the baseline must survive the omission: dropping the invoke
+  # statement must not drop the guardrail or telemetry grants alongside it.
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      s if contains(["BedrockGuardrail", "Telemetry"], try(s.Sid, ""))
+    ]) == 2
+    error_message = "omitting BedrockInvoke must leave the BedrockGuardrail and Telemetry statements intact"
+  }
+}
+
+# Any-model stays expressible, but only by writing it: ["*"] at the call site sits
+# in config an auditor reads, which an empty list never showed them.
+run "tenant_baseline_bedrock_explicit_wildcard_is_honoured" {
+  command = plan
+
+  variables {
+    bedrock_allowed_model_ids = ["*"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_policy.tenant_baseline.policy).Statement :
+      s if try(s.Sid, "") == "BedrockInvoke"
+      && contains(tolist(s.Resource), "arn:aws:bedrock:*::foundation-model/*")
     ]) == 1
-    error_message = "an empty allowlist must fall back to exactly one BedrockInvoke statement with Resource=[\"*\"] (the explicit escape hatch)"
+    error_message = "an explicit [\"*\"] allowlist must expand to the any-model ARNs — the escape hatch stays reachable, just legible"
   }
 }
 
