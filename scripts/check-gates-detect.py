@@ -464,6 +464,27 @@ def mutations() -> list[Mutation]:
             ),
         ),
         Mutation(
+            "check-gate-deps-installed.py",
+            "a CI job runs a gate whose module it never installs",
+            # The real shape: a job added for a gate, without the install step
+            # the gate's import needs. The gate then fails closed, and the job
+            # reports it as a finding about the tree.
+            lambda t: _edit(
+                t,
+                ".github/workflows/ci.yml",
+                "  merge-gate:\n",
+                "  deps-probe:\n"
+                "    name: Deps Probe\n"
+                "    runs-on: ubuntu-latest\n"
+                "    timeout-minutes: 10\n"
+                "    steps:\n"
+                "      - run: python3 scripts/check-workflow-budgets.py\n"
+                "\n"
+                "  merge-gate:\n",
+            ),
+            marker="  deps-probe:",
+        ),
+        Mutation(
             "check-merge-gate-complete.py",
             "a CI job is added without being required by the merge gate",
             # The real shape: a new gate job wired into ci.yml and forgotten in

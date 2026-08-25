@@ -703,6 +703,24 @@ jobs:
       - run: pip install --quiet pyyaml==6.0.3
       - run: python3 scripts/check-merge-gate-complete.py
 
+  # A gate that fails closed on a missing module is behaving correctly, and the
+  # job around it cannot tell that refusal apart from a real finding — the build
+  # goes red pointing at the tree when the fault is a missing install step.
+  # Adding a gate is two edits and the second is easy to miss, because the module
+  # is usually present on the machine where the gate was written.
+  gate-deps-installed:
+    name: Jobs Install What Their Gates Import
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-gate-deps-installed.py
+
   # Prose that names a thing is a claim about the world, and it rots in one
   # direction: renaming a file updates every import and no sentence. So the prose
   # is always the half that goes stale, silently, in the documents a newcomer
@@ -1096,6 +1114,7 @@ jobs:
         fleet-ceiling-parity,
         bash-portability,
         merge-gate-complete,
+        gate-deps-installed,
         roots-tested,
         scp-deny-can-fire,
         datastore-ingress-source,
