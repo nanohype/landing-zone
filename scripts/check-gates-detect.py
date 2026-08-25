@@ -535,6 +535,60 @@ def run_gate(tree: Path, gate: str) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
+ADVERSARIAL_PROBE = '''#!/usr/bin/env python3
+"""Crashes ONLY on the bad fixture, with an exception naming the planted file."""
+import pathlib, sys
+MARKER = "-".join(["floor", "selftest", "planted"])
+if MARKER in pathlib.Path("README.md").read_text():
+    raise KeyError("README.md: unexpected key while checking README.md")
+print("ok (1 file scanned)")
+sys.exit(0)
+'''
+
+
+def self_test(base: Path) -> str | None:
+    """Prove this floor rejects a gate that defeats both rules at once.
+
+    The hardest liar is not one that always passes. It is one that fails ONLY on
+    the bad fixture, with a message NAMING the planted file — that reads as a
+    clean catch under exit-status and under name-the-mutation together, and only
+    the traceback tells them apart.
+
+    Runs on every ordinary invocation rather than behind a flag, so there is no
+    step to forget and no flag a caller can silently drop. Returns None on
+    success, or the reason the floor is not trustworthy.
+    """
+    tree = base.parent / "floor-selftest"
+    if tree.exists():
+        shutil.rmtree(tree)
+    shutil.copytree(base, tree)
+
+    probe = tree / "scripts" / "check-floor-selftest-probe.py"
+    probe.write_text(ADVERSARIAL_PROBE)
+    os.chmod(probe, 0o755)
+
+    clean_code, clean_out = run_gate(tree, probe.name)
+    if clean_code != 0:
+        return f"the adversarial probe did not pass a clean fixture (exit {clean_code})"
+
+    readme = tree / "README.md"
+    readme.write_text(readme.read_text() + "\n<!-- floor-selftest-planted -->\n")
+    bad_code, bad_out = run_gate(tree, probe.name)
+
+    if bad_code == 0:
+        return "the adversarial probe did not fail its own bad fixture"
+    # This is the verdict rule under test: non-zero AND naming the planted file,
+    # but a crash. The floor must call it a crash, not a catch.
+    if not (bad_code != 1 or "Traceback (most recent call last)" in bad_out):
+        return (
+            "this floor would score a gate that CRASHES on the bad fixture as a "
+            "catch — the crash exits non-zero and its message names the planted "
+            "file, so neither the exit-status rule nor the name-the-mutation rule "
+            "tells them apart on its own"
+        )
+    return None
+
+
 def main() -> int:
     shipped = shipped_gates()
     controls = {m.gate: m for m in mutations()}
@@ -571,6 +625,17 @@ def main() -> int:
         base = Path(tmp) / "base"
         base.mkdir()
         copy_tree(base)
+
+        # Before trusting any verdict this floor produces, prove the floor itself
+        # rejects the hardest liar. A floor that cannot is reporting testimony.
+        broken_floor = self_test(base)
+        if broken_floor:
+            print(
+                f"FAIL: the floor's own self-test failed — {broken_floor}.\n"
+                f"Every verdict below would be untrustworthy, so none is reported.",
+                file=sys.stderr,
+            )
+            return 1
 
         for gate in sorted(shipped):
             m = controls[gate]
@@ -773,14 +838,17 @@ def main() -> int:
         return 1
 
     if misreported:
-        print("Gate(s) that did not answer, or cited the wrong line:\n", file=sys.stderr)
+        print("Gate(s) that did not answer, or answered about something else:\n", file=sys.stderr)
         for gate, why in misreported:
             print(f"  {gate}: {why}", file=sys.stderr)
         print(
-            "\nA citation that names the wrong line sends a reader somewhere the "
-            "violation is not, and the exit code looks identical either way. The "
-            "usual cause is a pattern anchored with \\s, which spans newlines and "
-            "walks the match onto a neighbouring line.",
+            "\nThree different failures share this bucket and they are worth telling "
+            "apart. A CRASH exits non-zero and looks identical to a rejection — the "
+            "gate did not answer the question. A rejection that names nothing the "
+            "mutation touched failed for some other reason, so the control proves "
+            "nothing. A citation outside the mutated lines sends a reader where the "
+            "violation is not; its usual cause is an anchor using \\s, which spans "
+            "newlines and walks the match onto a neighbouring line.",
             file=sys.stderr,
         )
         return 1
