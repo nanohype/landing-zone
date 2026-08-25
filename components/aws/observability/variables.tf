@@ -111,3 +111,45 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_slo_alarms" {
+  description = <<-EOT
+    Declare the cluster availability SLO: the burn-rate window alarms, their pair
+    composites, and the SLO row on the dashboard.
+
+    Requires the enhanced Container Insights control-plane metric set, which the
+    cluster component enables — the SLI reads apiserver_request_total and
+    apiserver_request_total_5xx, the same series the API-server alarm already
+    depends on. Rides enable_cluster_alarms: without the per-severity composites
+    there is nothing for a burn-rate pair to roll up into.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "slo_availability_objective" {
+  description = <<-EOT
+    Target fraction of API-server requests that are not 5xx, measured over a
+    rolling 30 days. The error budget is 1 - this, and a burn rate of 1.0 spends
+    that budget exactly over the window.
+
+    Three nines is the default because it is the standard's default objective for
+    an availability SLI, not because it is the right number for any particular
+    cluster: the budget it implies is about 43 minutes of full outage per 30 days.
+    Raising it narrows the budget and makes every burn-rate alarm fire sooner.
+  EOT
+  type        = number
+  default     = 0.999
+
+  validation {
+    condition     = var.slo_availability_objective > 0 && var.slo_availability_objective < 1
+    error_message = "slo_availability_objective is a fraction strictly between 0 and 1 (0.999 = three nines). At 1 the error budget is zero and every burn-rate alarm divides by zero."
+  }
+
+  # An objective looser than two nines makes the alarms nearly unfireable and the
+  # SLO decorative; if that is genuinely the target, the SLO is the wrong control.
+  validation {
+    condition     = var.slo_availability_objective >= 0.99
+    error_message = "slo_availability_objective below 0.99 leaves a budget so wide the burn-rate alarms cannot practically fire — an SLO that never alerts is a dashboard, not an objective."
+  }
+}

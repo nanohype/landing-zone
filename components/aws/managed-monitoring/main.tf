@@ -23,6 +23,79 @@ resource "aws_prometheus_workspace" "this" {
   tags = local.tags
 }
 
+# The receiver carries a real destination or this resource does not exist.
+#
+# A receiver declared with a name and no configuration — `- name: default` and
+# nothing else — is a valid Alertmanager config that accepts every alert routed to
+# it and drops it. Nothing errors: the workspace reports the definition installed,
+# the route matches, and the alert is discarded. That is indistinguishable from a
+# quiet cluster, which is the worst way for an alerting path to be wrong.
+#
+# The topic is therefore a required input whenever the flag is set (validated on
+# the variable). It is not defaulted, because a default topic ARN would be an
+# estate value and a wrong one fails the same silent way an absent one does.
+resource "aws_iam_role" "amp_alertmanager_sns" {
+  count = var.amp_alert_rules_enabled ? 1 : 0
+
+  name = "${local.role_name_prefix}-amp-alertmanager-sns"
+
+  # AMP publishes to SNS by assuming a role in this account rather than acting as a
+  # service principal, so the topic's own policy cannot admit it the way it admits
+  # cloudwatch.amazonaws.com. The role is minted here because the publisher owns
+  # its own identity, and requiring the caller to supply one would put a second
+  # estate ARN in every leaf that turns alerting on.
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "aps.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+        ArnEquals    = { "aws:SourceArn" = aws_prometheus_workspace.this.arn }
+      }
+    }]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy" "amp_alertmanager_sns" {
+  count = var.amp_alert_rules_enabled ? 1 : 0
+
+  name = "publish"
+  role = aws_iam_role.amp_alertmanager_sns[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat(
+      [{
+        Sid      = "PublishAlerts"
+        Effect   = "Allow"
+        Action   = "sns:Publish"
+        Resource = var.amp_alert_sns_topic_arn
+      }],
+      # Only when the topic carries a CMK. SNS calls KMS as the publishing
+      # principal, so without this the publish is accepted and the encrypt is
+      # denied — a drop with no error at the Alertmanager.
+      var.amp_alert_kms_key_arn == "" ? [] : [{
+        Sid    = "EncryptAlerts"
+        Effect = "Allow"
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt",
+        ]
+        Resource = var.amp_alert_kms_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "sns.${var.region}.amazonaws.com"
+          }
+        }
+      }],
+    )
+  })
+}
+
 resource "aws_prometheus_alert_manager_definition" "this" {
   count        = var.amp_alert_rules_enabled ? 1 : 0
   workspace_id = aws_prometheus_workspace.this.id
@@ -34,6 +107,11 @@ resource "aws_prometheus_alert_manager_definition" "this" {
         group_by: [alertname, cluster]
       receivers:
         - name: default
+          sns_configs:
+            - topic_arn: ${var.amp_alert_sns_topic_arn}
+              sigv4:
+                region: ${var.region}
+                role_arn: ${aws_iam_role.amp_alertmanager_sns[0].arn}
   EOT
 }
 

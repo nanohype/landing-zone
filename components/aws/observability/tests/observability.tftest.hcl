@@ -402,3 +402,162 @@ run "alarms_watch_cluster_scoped_metrics_that_exist" {
     error_message = "every cluster-health alarm must key on ClusterName alone — a narrower dimension set makes it unmatchable at cluster scope"
   }
 }
+
+# A silent cluster must not read as a well cluster.
+#
+# Every metric this component alarms on is published by the
+# amazon-cloudwatch-observability agent. CloudWatch's default for absent data is
+# `missing`, which a composite alarm does not treat as ALARM — so an agent that
+# stops publishing takes the liveness alarms to INSUFFICIENT_DATA and the critical
+# composite goes quiet, at the moment it is most needed. The failure is invisible:
+# the dashboard empties rather than reddens.
+#
+# The split is per-signal, not per-severity. Absence of a liveness datapoint is a
+# fault; absence of a saturation datapoint says nothing about saturation, and
+# paging on it would fire a second time for the same missing agent.
+#
+# Asserted because these are absence-by-default settings: delete either line and
+# the old behaviour returns with nothing in the diff to notice.
+run "missing_data_is_a_fault_on_liveness_and_ignored_on_saturation" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for a in [
+        aws_cloudwatch_metric_alarm.cluster_api_server_errors[0],
+        aws_cloudwatch_metric_alarm.cluster_failed_node_count[0],
+      ] : a.treat_missing_data == "breaching"
+    ])
+    error_message = "the liveness alarms (api-server 5xx, failed nodes) must set treat_missing_data = \"breaching\" — on CloudWatch's default the composite stays quiet exactly when the metric pipeline dies"
+  }
+
+  assert {
+    condition = alltrue([
+      for a in [
+        aws_cloudwatch_metric_alarm.node_cpu_utilization[0],
+        aws_cloudwatch_metric_alarm.node_memory_utilization[0],
+      ] : a.treat_missing_data == "missing"
+    ])
+    error_message = "the saturation alarms must set treat_missing_data = \"missing\" — absent utilization data is not evidence of saturation, and breaching here would page a second time for the same dead agent"
+  }
+}
+
+# The SLO half of the observability-slo standard.
+#
+# The fleet-alerting half (composites own the action, children stay actionless) is
+# asserted above. This is the half that was absent: an objective, an error budget,
+# and burn-rate alerting at the standard's four window pairs.
+#
+# What makes it worth asserting rather than trusting is that every part of it is
+# quiet when wrong. A burn-rate pair whose composite ORs instead of ANDs pages on
+# every spike; one that never rolls into a severity composite computes state
+# nobody sees; a factor that drifts off the standard's value still produces a
+# plausible-looking alarm. None of that surfaces at apply.
+run "slo_burn_rate_pairs_match_the_standard" {
+  command = plan
+
+  # Four pairs, eight window alarms. The count is the assertion: a pair silently
+  # dropped from the map is the shape this catches.
+  assert {
+    condition     = length(aws_cloudwatch_composite_alarm.slo_burn) == 4 && length(aws_cloudwatch_metric_alarm.slo_burn_window) == 8
+    error_message = "the SLO must declare the standard's four burn-rate window pairs, each as a long and a short window alarm"
+  }
+
+  # The standard's factors, keyed to their windows. A factor is what converts an
+  # error ratio into "budget spent per window", so a wrong one is an alarm that
+  # fires at the wrong spend rate while reading as correct.
+  assert {
+    condition = alltrue([
+      aws_cloudwatch_metric_alarm.slo_burn_window["fast-long"].threshold == 14.4,
+      aws_cloudwatch_metric_alarm.slo_burn_window["fast-short"].threshold == 14.4,
+      aws_cloudwatch_metric_alarm.slo_burn_window["quick-long"].threshold == 6,
+      aws_cloudwatch_metric_alarm.slo_burn_window["steady-long"].threshold == 3,
+      aws_cloudwatch_metric_alarm.slo_burn_window["slow-long"].threshold == 1,
+    ])
+    error_message = "burn-rate factors must be the standard's 14.4 / 6 / 3 / 1 for the 1h / 6h / 1d / 3d windows"
+  }
+
+  # Multi-window means AND. An OR here turns the whole mechanism into the
+  # instantaneous-error-ratio alerting the standard's do_not list rejects, and it
+  # would look identical in the console.
+  assert {
+    condition = alltrue([
+      for c in values(aws_cloudwatch_composite_alarm.slo_burn) :
+      strcontains(c.alarm_rule, " AND ") && !strcontains(c.alarm_rule, " OR ")
+    ])
+    error_message = "a burn-rate composite must AND its long and short window alarms — an OR fires on a one-off spike, which is the flapping the multi-window method exists to suppress"
+  }
+
+  # Children compute, composites notify. The same contract the cluster-health
+  # rollups hold, extended to the pairs.
+  assert {
+    condition = alltrue([
+      for a in values(aws_cloudwatch_metric_alarm.slo_burn_window) : length(a.alarm_actions) == 0
+    ])
+    error_message = "burn-rate window alarms must carry NO SNS action — they exist to compute state, and the per-severity composites own the notification so a burning cluster pages once"
+  }
+
+  assert {
+    condition = alltrue([
+      for c in values(aws_cloudwatch_composite_alarm.slo_burn) : length(c.alarm_actions) == 0
+    ])
+    error_message = "a burn-rate PAIR composite must also stay actionless — it rolls up into the per-severity cluster composite, which is the single notification surface"
+  }
+
+  # The rollup is what makes the pairs reachable. Without it they are eight alarms
+  # and four composites nobody is subscribed to.
+  assert {
+    condition = (
+      strcontains(aws_cloudwatch_composite_alarm.cluster_health_critical[0].alarm_rule, aws_cloudwatch_composite_alarm.slo_burn["fast"].alarm_name)
+      && strcontains(aws_cloudwatch_composite_alarm.cluster_health_critical[0].alarm_rule, aws_cloudwatch_composite_alarm.slo_burn["quick"].alarm_name)
+    )
+    error_message = "the page-tier burn-rate pairs (1h/5m and 6h/30m) must roll into the critical composite, or a budget burning at 14.4x notifies nobody"
+  }
+
+  assert {
+    condition = (
+      strcontains(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_rule, aws_cloudwatch_composite_alarm.slo_burn["steady"].alarm_name)
+      && strcontains(aws_cloudwatch_composite_alarm.cluster_health_degraded[0].alarm_rule, aws_cloudwatch_composite_alarm.slo_burn["slow"].alarm_name)
+    )
+    error_message = "the ticket-tier burn-rate pairs (1d/2h and 3d/6h) must roll into the degraded composite"
+  }
+
+  # The SLI is the ratio the objective is defined over. Reading the wrong
+  # numerator — apiserver_request_total in place of the 5xx counter — yields a
+  # burn rate near 1.0 on a perfectly healthy cluster.
+  assert {
+    condition = alltrue([
+      for a in values(aws_cloudwatch_metric_alarm.slo_burn_window) : anytrue([
+        for q in a.metric_query : try(q.metric[0].metric_name, "") == "apiserver_request_total_5xx"
+      ]) && anytrue([
+        for q in a.metric_query : try(q.metric[0].metric_name, "") == "apiserver_request_total"
+      ])
+    ])
+    error_message = "every burn-rate alarm must compute its ratio from apiserver_request_total_5xx over apiserver_request_total — the two series the enhanced Container Insights control-plane set publishes and the API-server alarm already reads"
+  }
+
+  # No traffic is not a burn. Breaching here would page on an idle cluster, and
+  # the liveness alarms already carry the cluster-unreachable case.
+  assert {
+    condition = alltrue([
+      for a in values(aws_cloudwatch_metric_alarm.slo_burn_window) : a.treat_missing_data == "notBreaching"
+    ])
+    error_message = "burn-rate alarms must treat missing data as notBreaching — no requests means no errors means no burn, and the unreachable-cluster case belongs to the liveness alarms"
+  }
+}
+
+# The 3-day window is the one the platform cannot express directly: CloudWatch
+# caps a metric period at 86400s. It is rendered as three consecutive daily
+# evaluations, which requires the burn to persist rather than to average out —
+# strictly less likely to fire than the standard's 3-day ratio, never more.
+run "three_day_window_is_rendered_as_consecutive_daily_evaluations" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.slo_burn_window["slow-long"].evaluation_periods == 3
+      && aws_cloudwatch_metric_alarm.slo_burn_window["slow-long"].datapoints_to_alarm == 3
+    )
+    error_message = "the 3d window must require 3 of 3 daily datapoints — with datapoints_to_alarm below evaluation_periods it fires on a single bad day, which is a different and much noisier alert than the standard's"
+  }
+}
