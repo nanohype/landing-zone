@@ -582,6 +582,15 @@ def run_gate(tree: Path, gate: str) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
+SILENT_127 = '''#!/usr/bin/env python3
+"""Exits 127 having evaluated nothing, and says nothing about it."""
+import os, sys
+sys.stdout.close()
+sys.stderr.close()
+os._exit(127)
+'''
+
+
 ADVERSARIAL_PROBE = '''#!/usr/bin/env python3
 """Crashes ONLY on the bad fixture, with an exception naming the planted file."""
 import pathlib, sys
@@ -609,6 +618,28 @@ def self_test(base: Path) -> str | None:
     if tree.exists():
         shutil.rmtree(tree)
     shutil.copytree(base, tree)
+
+    # A gate whose tool has vanished exits 127 having evaluated nothing, and it
+    # may print NOTHING while doing so — no traceback, no "command not found".
+    # Screening crashes by output alone scores that as the strictest gate in the
+    # suite. The number is the only signal, so it is the one asserted here.
+    silent = tree / "scripts" / "check-floor-selftest-silent.py"
+    silent.write_text(SILENT_127)
+    os.chmod(silent, 0o755)
+    s_code, s_out = run_gate(tree, silent.name)
+    if s_code != 127 or s_out.strip():
+        # The control itself has to keep being the case it exists for: one that
+        # starts printing stops testing the silent shape.
+        return (
+            f"the silent-127 control no longer reproduces its own case "
+            f"(exit {s_code}, output {s_out.strip()[:60]!r}; expected 127 and nothing)"
+        )
+    if not (s_code != 1 or "Traceback (most recent call last)" in s_out):
+        return (
+            "this floor would score a gate that exits 127 SILENTLY as a "
+            "rejection — no traceback and no message, so only the exit number "
+            "distinguishes a vanished tool from the strictest gate in the suite"
+        )
 
     probe = tree / "scripts" / "check-floor-selftest-probe.py"
     probe.write_text(ADVERSARIAL_PROBE)
@@ -693,11 +724,17 @@ def main() -> int:
             # afterwards proves nothing about the matcher.
             clean_code, clean_output = run_gate(tree, gate)
             if clean_code != 0:
-                why = (
-                    "crashes on the unmutated tree"
-                    if "Traceback (most recent call last)" in clean_output
-                    else "does not pass on the unmutated tree"
-                )
+                # Three outcomes, told apart by NUMBER first and text second.
+                # 127 is a vanished tool — the gate evaluated nothing — and it
+                # is indistinguishable from a strict rejection if only the text
+                # is consulted, because a gate whose binary is missing may print
+                # nothing at all.
+                if clean_code == 127:
+                    why = "exited 127 on the unmutated tree — a missing tool, not a verdict"
+                elif "Traceback (most recent call last)" in clean_output:
+                    why = "crashes on the unmutated tree"
+                else:
+                    why = "does not pass on the unmutated tree"
                 broken.append((
                     gate,
                     f"{why}: {clean_output.strip().splitlines()[-1][:120] if clean_output.strip() else '<no output>'}",
