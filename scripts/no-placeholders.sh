@@ -55,4 +55,4 @@ if [ -n "$hits" ]; then
   echo "exclude list in scripts/no-placeholders.sh."
   exit 1
 fi
-echo "✓ no placeholder sentinels in deploy config"
+echo "✓ no placeholder sentinels in deploy config (${scanned} config file(s) scanned)"

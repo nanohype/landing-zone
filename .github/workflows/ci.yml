@@ -591,6 +591,24 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-region-consistency.py
 
+  # Prose that names a thing is a claim about the world, and it rots in one
+  # direction: renaming a file updates every import and no sentence. So the prose
+  # is always the half that goes stale, silently, in the documents a newcomer
+  # reads first. This repo learned it once already — CLAUDE.md named a gate as
+  # .sh when the file is .py, in the document every session here loads.
+  named-paths:
+    name: Paths Named In Prose Resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-named-paths-resolve.py
+
   # The central backup plan selects on the BackupPolicy tag, so a data store no
   # tag can reach cannot be backed up at all — and nothing reports that. No apply
   # fails, no drift appears; the gap surfaces at the restore that does not happen.
@@ -917,6 +935,7 @@ jobs:
         version-coverage,
         workflow-budgets,
         backup-coverage,
+        named-paths,
         scp-deny-can-fire,
         datastore-ingress-source,
         engine-version-pins,

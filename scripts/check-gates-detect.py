@@ -68,6 +68,7 @@ no control, or the scan could not see the tree.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -157,6 +158,37 @@ def _append(tree: Path, rel: str, text: str) -> None:
 # but in a mutation.
 def token(gate: str) -> str:
     return "blind-spot-control-" + gate.replace(".", "-")
+
+
+# A finding that names a file and a line, in the ::error or the plain form both
+# gates here use.
+CITES_LINES = re.compile(r"(?:line=|:)\d+(?::|\b)")
+
+
+def _first_citation(output: str) -> str:
+    m = re.search(r"^.*?(?:line=|:)\d+.*$", output, re.M)
+    return m.group(0).strip() if m else "<none>"
+
+
+def touched_lines(tree: Path) -> set[int]:
+    """Every line number the mutation added, read from the diff.
+
+    The property is "the citation points at the mutation", not "the citation
+    equals one particular line". A mutation spans lines — a comment above the
+    violation, a block of several — and any line inside it is a correct place to
+    send a reader. Anchoring on one chosen line would be asserting the
+    implementation of the control rather than the behaviour of the gate.
+    """
+    diff = subprocess.run(
+        ["git", "-C", str(tree), "diff", "--cached", "-U0", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    lines: set[int] = set()
+    for m in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", diff, re.M):
+        start = int(m.group(1))
+        count = int(m.group(2) or 1)
+        lines.update(range(start, start + count))
+    return lines
 
 
 def _contains(path: Path, needle: str) -> bool:
@@ -372,6 +404,17 @@ def mutations() -> list[Mutation]:
             marker='helm-version: "3.16"',
         ),
         Mutation(
+            "check-named-paths-resolve.py",
+            "prose names a repo-relative path that does not exist",
+            lambda t: _append(
+                t,
+                "README.md",
+                "\n<!-- " + token("check-named-paths-resolve.py") + " -->\n"
+                "See `docs/no-such-guide.md`.\n",
+            ),
+            marker=token("check-named-paths-resolve.py"),
+        ),
+        Mutation(
             "check-backup-coverage.py",
             "a backup-eligible bucket exists that no BackupPolicy tag can reach",
             lambda t: _append(
@@ -449,7 +492,7 @@ def copy_tree(dest: Path) -> None:
     )
 
 
-def run_gate(tree: Path, gate: str) -> int:
+def run_gate(tree: Path, gate: str) -> tuple[int, str]:
     script = tree / "scripts" / gate
     if not script.exists():
         # The scratch tree is built from `git ls-files`, so a gate that exists on
@@ -464,7 +507,7 @@ def run_gate(tree: Path, gate: str) -> int:
     proc = subprocess.run(
         cmd, cwd=tree, capture_output=True, text=True, timeout=300
     )
-    return proc.returncode
+    return proc.returncode, proc.stdout + proc.stderr
 
 
 def main() -> int:
@@ -497,6 +540,7 @@ def main() -> int:
 
     blind: list[tuple[str, str]] = []
     broken: list[tuple[str, str]] = []
+    misreported: list[tuple[str, str]] = []
 
     with tempfile.TemporaryDirectory(prefix="gate-controls-") as tmp:
         base = Path(tmp) / "base"
@@ -510,7 +554,7 @@ def main() -> int:
 
             # The gate must be clean BEFORE the mutation, or a non-zero exit
             # afterwards proves nothing about the matcher.
-            if run_gate(tree, gate) != 0:
+            if run_gate(tree, gate)[0] != 0:
                 broken.append((gate, "does not pass on the unmutated tree"))
                 continue
 
@@ -591,8 +635,34 @@ def main() -> int:
                 )
                 continue
 
-            if run_gate(tree, gate) == 0:
+            code, output = run_gate(tree, gate)
+            if code == 0:
                 blind.append((gate, m.what))
+                continue
+
+            # Property, not mechanism: a gate that rejects but cites the wrong
+            # line sends a reader to the wrong place, and no exit code shows it.
+            # This is the check that survives a refactor — it asserts what a
+            # citation must MEAN, rather than anything about how the gate
+            # computes one, so a future change of matching strategy is judged by
+            # the same standard as today's.
+            #
+            # Only asked of gates that cite lines at all: some report a whole
+            # file, or a missing artifact, and demanding a line of them would be
+            # asserting a shape they never claimed.
+            if CITES_LINES.search(output):
+                cited = {int(x) for x in re.findall(r"(?:line=|:)(\d+)", output)}
+                planted = touched_lines(tree)
+                if planted and not (cited & planted):
+                    misreported.append(
+                        (
+                            gate,
+                            f"rejected, but every line it cited "
+                            f"({sorted(cited)[:5]}) is outside the lines the "
+                            f"mutation touched ({sorted(planted)[:5]}). "
+                            f"Output: {_first_citation(output)}",
+                        )
+                    )
 
     if broken:
         print("Control(s) could not be run:\n", file=sys.stderr)
@@ -601,6 +671,19 @@ def main() -> int:
         print(
             "\nA control that cannot introduce its violation is testing nothing. "
             "Re-anchor it on something the gate still reasons about.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if misreported:
+        print("Gate(s) that rejected but cited the wrong line:\n", file=sys.stderr)
+        for gate, why in misreported:
+            print(f"  {gate}: {why}", file=sys.stderr)
+        print(
+            "\nA citation that names the wrong line sends a reader somewhere the "
+            "violation is not, and the exit code looks identical either way. The "
+            "usual cause is a pattern anchored with \\s, which spans newlines and "
+            "walks the match onto a neighbouring line.",
             file=sys.stderr,
         )
         return 1
