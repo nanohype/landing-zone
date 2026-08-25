@@ -1,0 +1,7 @@
+# zizmor configuration. The audit set and its settings live here rather than on
+# the CI command line so a local run and the gating run are the same run.
+#
+# Nothing is disabled. If a finding is ever genuinely inapplicable it gets an
+# `# zizmor: ignore[<rule>]` comment at the site with the reason, which keeps the
+# exception next to the thing it excepts rather than in a list that outlives it.
+rules: {}

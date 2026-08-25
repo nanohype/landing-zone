@@ -5,10 +5,12 @@ on:
     - cron: "0 6 * * 1-5"
   workflow_dispatch:
 
+# Read-only by default. detect-drift restates the three scopes it needs
+# (id-token for OIDC, contents for checkout, issues for the drift report), so the
+# discover job — which only lists files — holds neither the OIDC token nor the
+# ability to open issues.
 permissions:
-  id-token: write
   contents: read
-  issues: write
 
 jobs:
   # Auto-discovers the drift matrix from the working tree, mirroring ci.yml's
@@ -24,7 +26,9 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - id: matrix
         run: |
           matrix=$(
@@ -72,11 +76,13 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
         with:
           tofu_version: "1.11.5"
-      - uses: gruntwork-io/terragrunt-action@v3
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
           # terragrunt-action@v3 runs tofu inside its own container, so it needs
           # tofu_version told to it directly — the setup-opentofu step above only
@@ -86,7 +92,7 @@ jobs:
           tg_version: "1.0.8"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ matrix.region }}
@@ -113,7 +119,7 @@ jobs:
 
       - name: Report drift
         if: steps.plan.outputs.exitcode == '2'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const fs = require('fs');
@@ -154,7 +160,7 @@ jobs:
       # report so a persistently-broken component doesn't spawn an issue per run.
       - name: Report plan error
         if: steps.plan.outputs.exitcode == '1'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const fs = require('fs');

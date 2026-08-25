@@ -50,26 +50,35 @@ jobs:
     environment: ${{ inputs.environment }}
     if: inputs.confirm == inputs.environment
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
         with:
           tofu_version: "1.11.5"
-      - uses: gruntwork-io/terragrunt-action@v3
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
           tg_version: "1.0.8"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
 
       - name: Destroy
         working-directory: live/aws/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
+        # The dispatch input reaches the shell through env, never through ${{ }}
+        # inside the script — a ${{ }} expansion is substituted into the script
+        # TEXT, so an input carrying shell syntax becomes shell syntax. It matters
+        # most here: this job already holds credentials whose whole purpose is
+        # deleting infrastructure.
+        env:
+          COMPONENT: ${{ inputs.component }}
         run: |
-          if [ "${{ inputs.component }}" = "all" ]; then
+          if [ "$COMPONENT" = "all" ]; then
             terragrunt run --all --non-interactive -- destroy
           else
-            cd ${{ inputs.component }}
+            cd "$COMPONENT"
             terragrunt destroy
           fi

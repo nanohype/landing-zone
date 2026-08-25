@@ -192,6 +192,10 @@ def mutations() -> list[Mutation]:
         ),
         Mutation(
             "check-region-consistency.py",
+            # region-ok: eu-west-1 IS the injected violation — a region no tree
+            # deploys into is the whole point of this control, and the region gate
+            # correctly reports it here, which is the two gates confirming each
+            # other rather than a conflict.
             "prose names a region no live tree deploys into",
             lambda t: _append(t, "README.md", "\nDeploy into eu-west-1.\n"),
         ),
@@ -255,6 +259,19 @@ def mutations() -> list[Mutation]:
             ),
         ),
         Mutation(
+            "check-version-coverage.py",
+            "a workflow pins a tool version no Renovate customManager matches",
+            # A real input line, not a commented one: the gate deliberately
+            # ignores comments, so commenting the pin would test that it ignores
+            # comments rather than that it catches an unwatched pin.
+            lambda t: _edit(
+                t,
+                ".github/workflows/ci.yml",
+                'python-version: "3.12"',
+                'python-version: "3.12"\n          helm-version: "3.16"',
+            ),
+        ),
+        Mutation(
             "no-placeholders.sh",
             "a placeholder sentinel survives into deploy config",
             lambda t: _append(
@@ -300,6 +317,14 @@ def copy_tree(dest: Path) -> None:
 
 def run_gate(tree: Path, gate: str) -> int:
     script = tree / "scripts" / gate
+    if not script.exists():
+        # The scratch tree is built from `git ls-files`, so a gate that exists on
+        # disk but is not tracked never arrives. That is worth saying plainly:
+        # an untracked gate is also one CI would never run.
+        raise AssertionError(
+            f"{gate} is not tracked by git, so it was not copied into the scratch "
+            f"tree — and CI would not run it either. `git add` it."
+        )
     os.chmod(script, 0o755)
     cmd = ["python3", str(script)] if gate.endswith(".py") else ["bash", str(script)]
     proc = subprocess.run(
