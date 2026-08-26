@@ -68,6 +68,19 @@ jobs:
           persist-credentials: false
       - id: matrices
         run: |
+          # jq is what decides whether the matrix is safe to publish, so its
+          # absence is not a verdict about the tree. Without this, the first use
+          # aborts under errexit with "jq: command not found" — naming the
+          # BINARY and leaving a reader looking at the pipeline rather than at
+          # the missing checker.
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "::error::The matrix could not be validated — jq is not available." >&2
+            echo "This step checks every discovered path component before publishing it as a" >&2
+            echo "matrix value. Without jq that check cannot run, so there is no safe matrix" >&2
+            echo "to emit." >&2
+            exit 1
+          fi
+
           validate=$(
             git ls-files components/ fleet/ modules/ \
             | awk -F'/' 'NF >= 3 && $1 != "" && $2 != "" && $3 != "" { print $1 "/" $2 "/" $3 }' \
@@ -110,7 +123,45 @@ jobs:
             # test reads that as "no offenders" — the offender that hides is the
             # one whose rendering is indistinguishable from finding none.
             bad_count=$(printf '%s' "$set" | jq '[ .[] | .[] | select(type != "string" or (test("^[A-Za-z0-9][A-Za-z0-9._-]*$") | not)) ] | length')
-            if [ "$bad_count" -ne 0 ]; then
+
+            # An EMPTY count is not a count of zero. `[ "" -ne 0 ]` exits 2 with
+            # "integer expected", and in an `if` an exit of 2 reads as FALSE — so
+            # the guard below would be SKIPPED and execution would continue to
+            # the pass. Most readers assume the test simply fails; it does not.
+            #
+            # The default below is 1, not 0, and that DIRECTION IS THE FIX. Zero
+            # is the obvious choice and the wrong one: it reads as a clean count
+            # and it is the value an absent or broken tool most resembles, so
+            # defaulting to it writes the defect into its own repair.
+            #
+            # Reported separately from the unsafe-value case, because "the matrix
+            # could not be checked" and "the matrix holds something unsafe" are
+            # different facts and a reader needs to know which stopped the job.
+            #
+            # Three layers here, and they are not equally strong. Saying which is
+            # which is what makes them defensible rather than redundant:
+            #
+            #   the jq assertion above  ARRANGEMENT — it works because of the
+            #     order of two statements in this one file. Reorder them and it
+            #     stops protecting anything.
+            #   this -z branch          GUARANTEE — it evaluates the actual value
+            #     at the point of use, whatever ran before it.
+            #   the :-1 default below   GUARANTEE, and belt to this brace.
+            #
+            # The direction of that default is site-specific and CANNOT be applied
+            # by blanket edit. This is a VIOLATION COUNTER: it fires on non-zero,
+            # so undetermined must default to 1. The corpus-size floor in
+            # scripts/no-placeholders.sh fires on TOO FEW, so undetermined defaults
+            # to 0 there. Same rule, opposite numbers — ask which value fires THIS
+            # test, not what a sensible default looks like.
+            if [ -z "$bad_count" ]; then
+              echo "::error::The matrix could not be validated — the safety check produced no count." >&2
+              echo "Every matrix value reaches run: and working-directory:, so a matrix that has" >&2
+              echo "not been checked cannot be published. Nothing was written to the job output." >&2
+              exit 1
+            fi
+
+            if [ "${bad_count:-1}" -ne 0 ]; then
               echo "::error::Refusing to build a matrix from $bad_count unsafe path component(s):" >&2
               printf '%s' "$set" | jq -r '.[] | .[] | select(type != "string" or (test("^[A-Za-z0-9][A-Za-z0-9._-]*$") | not)) | "  [" + (. | tostring) + "]"' >&2
               echo "A matrix value reaches run: and working-directory:. Path components must match ^[A-Za-z0-9][A-Za-z0-9._-]*$." >&2
