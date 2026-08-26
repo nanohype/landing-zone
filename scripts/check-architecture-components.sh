@@ -20,6 +20,25 @@
 # (a local `.terraform/` cache, say) is not mistaken for a component.
 set -euo pipefail
 
+# The tools that decide what this gate can SEE, asserted before any of them is
+# used. Absent, the first one to be reached aborts the script mid-pipeline with
+# "line 40: grep: command not found" — non-zero, so never a silent pass, and it
+# names the BINARY rather than the thing that could not be determined. A reader
+# sent to line 40 looks at the parsing; the fault is that there is no parser.
+#
+# git enumerates the components, grep and sed extract the documented names, and
+# comm compares the two sets. Any of them missing means one side of the
+# comparison does not exist, which is not a verdict about the tree.
+for tool in git grep sed comm sort cut tr; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "FAIL: the documented and actual component sets could not be determined — $tool is not available." >&2
+    echo "This gate compares names parsed out of the docs against names enumerated" >&2
+    echo "from the tree. Without $tool one side of that comparison does not exist," >&2
+    echo "so there is no verdict to report." >&2
+    exit 1
+  fi
+done
+
 cd "$(dirname "$0")/.."
 
 DOC="docs/architecture.md"
