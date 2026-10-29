@@ -203,7 +203,7 @@ component: it is written on `Platform.spec.datastores` and provisioned by
 | **service-quotas** | CloudWatch alarms for service quota utilization | platform |
 | **cost** | AWS Budgets alerts, Cost Anomaly Detection | finops |
 | **dns** | Route53 zones, subdomain delegation, ACM certificates | platform |
-| **github-oidc** | GitHub Actions OIDC provider + deploy role trusted from named contexts (`environment:*`, `ref:refs/tags/*`) in named repos — never a bare `:*` — plus a read-only plan role trusted from `environment:plan`; no long-lived keys | platform |
+| **github-oidc** | GitHub Actions OIDC provider + deploy role trusted from named contexts (`environment:*`, `ref:refs/tags/*`) in named repos — never a bare `:*` — plus a read-only plan role trusted from `environment:plan`, and an optional ECR Public pull role whose only permissions mint a public.ecr.aws token; no long-lived keys | platform |
 | **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed per environment — each workload environment runs its own for that environment's cluster, and the hub runs one for its own. | *(required input)* |
 | **private-dns** | Private hosted zones for a workload account, `create` or `adopt` mode, associated to the shared Route53 profile | platform |
 | **shared-dns** | Owner side of private DNS: the hosted zones plus the Route53 profile the workload accounts adopt | platform |

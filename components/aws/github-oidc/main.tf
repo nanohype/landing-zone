@@ -55,6 +55,8 @@ locals {
 ################################################################################
 
 data "aws_iam_policy_document" "trust" {
+  count = var.create_deploy_role ? 1 : 0
+
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -76,8 +78,9 @@ data "aws_iam_policy_document" "trust" {
 }
 
 resource "aws_iam_role" "deploy" {
+  count                = var.create_deploy_role ? 1 : 0
   name                 = var.role_name
-  assume_role_policy   = data.aws_iam_policy_document.trust.json
+  assume_role_policy   = data.aws_iam_policy_document.trust[0].json
   permissions_boundary = var.permissions_boundary_arn != "" ? var.permissions_boundary_arn : null
   max_session_duration = var.max_session_duration
   description          = "GitHub Actions deploy/e2e role, trust scoped to ${join(", ", local.subjects)}"
@@ -85,8 +88,8 @@ resource "aws_iam_role" "deploy" {
 }
 
 resource "aws_iam_role_policy_attachment" "deploy" {
-  for_each   = toset(var.managed_policy_arns)
-  role       = aws_iam_role.deploy.name
+  for_each   = var.create_deploy_role ? toset(var.managed_policy_arns) : toset([])
+  role       = aws_iam_role.deploy[0].name
   policy_arn = each.value
 }
 
@@ -160,4 +163,93 @@ resource "aws_iam_role_policy_attachment" "plan" {
   for_each   = var.create_plan_role ? toset(var.plan_managed_policy_arns) : toset([])
   role       = aws_iam_role.plan[0].name
   policy_arn = each.value
+}
+
+################################################################################
+# ECR Public pull role — assumed by CI jobs that pull from public.ecr.aws
+#
+# ECR Public meters an anonymous client by its source address, and a hosted
+# runner shares its address with every other workflow scheduled onto it, so an
+# anonymous pull can arrive with that address's data allowance already spent and
+# fail with TOOMANYREQUESTS no retry outlasts. An authenticated pull is metered
+# against the AWS account that issued the token instead.
+#
+# The role trusts pull_request, which the deploy and plan roles refuse. That
+# holds because of what the role can do: its only permissions mint an ECR Public
+# authorization token, and that token reads public repositories — data any
+# anonymous client can already read. A pull request that obtains it gains a
+# quota, never access. The role carries no managed policy and no permissions
+# boundary input, so nothing attached later can widen it from this component.
+#
+# GitHub issues no OIDC token to a workflow running for a pull request from a
+# fork, so fork pull requests never reach this trust; those jobs pull
+# anonymously.
+################################################################################
+
+locals {
+  ecr_public_pull_subjects = flatten([
+    for r in var.ecr_public_pull_repos : [
+      for c in var.ecr_public_pull_subject_claims : "repo:${var.github_org}/${r}:${c}"
+    ]
+  ])
+}
+
+data "aws_iam_policy_document" "ecr_public_pull_trust" {
+  count = var.create_ecr_public_pull_role ? 1 : 0
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [local.oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = local.ecr_public_pull_subjects
+    }
+  }
+}
+
+# An authenticated pull from public.ecr.aws needs exactly these two actions, and
+# both are account-level calls with no resource to scope to, so the resource is
+# "*":
+# https://docs.aws.amazon.com/AmazonECR/latest/public/docker-pull-ecr-image.html
+# ECR Public issues tokens from us-east-1 only, so the caller requests the token
+# there whatever region the rest of its job uses:
+# https://docs.aws.amazon.com/AmazonECR/latest/public/public-registry-auth.html
+data "aws_iam_policy_document" "ecr_public_pull" {
+  count = var.create_ecr_public_pull_role ? 1 : 0
+
+  statement {
+    sid    = "EcrPublicPullToken"
+    effect = "Allow"
+    actions = [
+      "ecr-public:GetAuthorizationToken",
+      "sts:GetServiceBearerToken",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role" "ecr_public_pull" {
+  count                = var.create_ecr_public_pull_role ? 1 : 0
+  name                 = var.ecr_public_pull_role_name
+  assume_role_policy   = data.aws_iam_policy_document.ecr_public_pull_trust[0].json
+  max_session_duration = var.max_session_duration
+  description          = "GitHub Actions ECR Public pull role, trust scoped to ${join(", ", local.ecr_public_pull_subjects)}"
+  tags                 = local.tags
+}
+
+resource "aws_iam_role_policy" "ecr_public_pull" {
+  count  = var.create_ecr_public_pull_role ? 1 : 0
+  name   = "ecr-public-pull"
+  role   = aws_iam_role.ecr_public_pull[0].id
+  policy = data.aws_iam_policy_document.ecr_public_pull[0].json
 }

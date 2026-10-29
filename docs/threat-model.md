@@ -35,6 +35,14 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   the role. No long-lived keys; OIDC federation only.
 - **Elevation of privilege** — the deploy role is powerful. Residual: scope it
   per-environment; do not share one role across development and production.
+- **Spoofing** — a workflow assuming the ECR Public pull role. Accepted within a
+  bound: this role alone trusts `pull_request`
+  (`repo:<org>/<repo>:pull_request` and `repo:<org>/<repo>:ref:refs/heads/main`
+  by default), because its policy holds only `ecr-public:GetAuthorizationToken`
+  and `sts:GetServiceBearerToken`. The token they mint reads public repositories,
+  which any anonymous client can read already; a pull request that obtains it
+  gains the account's pull quota, never access. GitHub issues no OIDC token to a
+  fork's pull request, so forks pull anonymously.
 - **Repudiation** — CloudTrail records the assumed-role session; the `Revision`
   default tag (GITHUB_SHA) ties every mutation to a commit.
 
