@@ -67,6 +67,12 @@ variable "allowed_subject_claims" {
   }
 }
 
+variable "create_deploy_role" {
+  description = "Create the deploy role. Set false on a leaf that manages only the other roles this component offers, so applying it creates no deploy role."
+  type        = bool
+  default     = true
+}
+
 variable "role_name" {
   description = "Name of the GitHub Actions deploy role"
   type        = string
@@ -147,4 +153,52 @@ variable "plan_managed_policy_arns" {
   description = "Managed policies attached to the plan role. Defaults to ReadOnlyAccess — a plan reads, it does not write. Note this is account-wide read INCLUDING the Terraform state bucket, whose objects hold plaintext values for any attribute a provider does not mark sensitive; that is inherent to letting CI plan at all, since plan reads state."
   type        = list(string)
   default     = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+}
+
+variable "create_ecr_public_pull_role" {
+  description = "Create the ECR Public pull role, whose only permissions mint a public.ecr.aws authorization token so CI pulls are metered against this account rather than the runner's shared address."
+  type        = bool
+  default     = false
+}
+
+variable "ecr_public_pull_role_name" {
+  description = "Name of the GitHub Actions ECR Public pull role"
+  type        = string
+  default     = "github-actions-ecr-public-pull"
+}
+
+variable "ecr_public_pull_repos" {
+  description = "Repos whose Actions workflows may assume the ECR Public pull role (trust is scoped to repo:<org>/<repo>:<claim> for each ecr_public_pull_subject_claims entry). Independent of github_repos: the repos that pull public images are not the repos that deploy this substrate."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = !var.create_ecr_public_pull_role || length(var.ecr_public_pull_repos) > 0
+    error_message = "ecr_public_pull_repos must contain at least one repo when create_ecr_public_pull_role is true; an empty list would render an empty sub condition, which AWS drops — making the pull role assumable by any GitHub Actions workflow."
+  }
+}
+
+variable "ecr_public_pull_subject_claims" {
+  description = <<-EOT
+    GitHub OIDC `sub` claim suffixes the ECR Public pull role trusts, applied to every
+    repo in ecr_public_pull_repos. Default is the two contexts a CI workflow runs in
+    on its own repo: "pull_request" (a pull request from a branch of that repo; GitHub
+    issues no OIDC token to one from a fork) and "ref:refs/heads/main" (a push to
+    main, a schedule, or a dispatch on main). pull_request is acceptable here and on
+    no other role this component offers, because this role reads only public data.
+    Add contexts the workflows run in, such as a merge queue's
+    "ref:refs/heads/gh-readonly-queue/main/*".
+  EOT
+  type        = list(string)
+  default     = ["pull_request", "ref:refs/heads/main"]
+
+  validation {
+    condition     = length(var.ecr_public_pull_subject_claims) > 0
+    error_message = "ecr_public_pull_subject_claims must contain at least one claim; an empty list would render an empty sub condition, which AWS drops — making the pull role assumable by any GitHub Actions workflow."
+  }
+
+  validation {
+    condition     = !contains(var.ecr_public_pull_subject_claims, "*")
+    error_message = "ecr_public_pull_subject_claims must not contain a bare \"*\": name the contexts the pulling workflows run in."
+  }
 }

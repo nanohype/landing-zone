@@ -82,6 +82,8 @@ EXEMPT: dict[str, str] = {
     "private-dns": "As dns — shared, and outlives the run.",
     "github-oidc": "Account-scoped CI trust. Destroying it at teardown would break the CI "
     "identity of the very workflow running the e2e.",
+    "ecr-public-pull": "Account-scoped CI trust, as github-oidc. Destroying it at teardown "
+    "would leave the pulling repos' CI with a role variable naming a role that no longer exists.",
     "service-quotas": "Quota increase requests are account-scoped, asynchronous, and not "
     "reversible by a destroy.",
     "managed-monitoring": "Hub-side Amazon Managed Grafana. Runs on the fleet hub, not in a "

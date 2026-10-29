@@ -15,7 +15,7 @@
 # (aws_iam_openid_connect_provider) so the account-qualified provider ARN
 # resolves without STS. create_oidc_provider = false routes the provider ARN
 # through the overridable data source (the create=true path yields an unknown ARN
-# at plan time). Every assertion below decodes aws_iam_role.deploy.assume_role_policy
+# at plan time). Every assertion below decodes aws_iam_role.deploy[0].assume_role_policy
 # — the actual rendered, wired-up trust JSON — never an override'd stub value.
 
 provider "aws" {
@@ -59,7 +59,7 @@ run "trust_sub_scoped_to_configured_repos_and_claims" {
 
   assert {
     condition = length([
-      for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
       s if toset(flatten([
         try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
         ])) == toset([
@@ -77,7 +77,7 @@ run "trust_sub_scoped_to_configured_repos_and_claims" {
   # pull_request context (an untrusted PR must never assume a deploy role).
   assert {
     condition = alltrue([
-      for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
       length([
         for sub in flatten([try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])]) :
         sub if sub == "*" || sub == "repo:*/*"
@@ -102,7 +102,7 @@ run "trust_sub_honors_allowed_subject_claims" {
 
   assert {
     condition = length([
-      for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
       s if toset(flatten([
         try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
       ])) == toset(["repo:nanohype/landing-zone:environment:production"])
@@ -121,7 +121,7 @@ run "trust_aud_pinned_and_federated_principal" {
 
   assert {
     condition = length([
-      for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
       s if try(s.Condition.StringEquals["token.actions.githubusercontent.com:aud"], "") == "sts.amazonaws.com"
     ]) == 1
     error_message = "trust must StringEquals-pin the aud claim to sts.amazonaws.com exactly once"
@@ -129,7 +129,7 @@ run "trust_aud_pinned_and_federated_principal" {
 
   assert {
     condition = length([
-      for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
       s if try(s.Principal.Federated, "") == "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
       && try(s.Effect, "") == "Allow"
       && try(s.Action, "") == "sts:AssumeRoleWithWebIdentity"
@@ -231,7 +231,7 @@ run "deploy_role_trust_is_unchanged_by_the_plan_role" {
 
   assert {
     condition = alltrue([
-      for s in jsondecode(aws_iam_role.deploy.assume_role_policy).Statement :
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
       alltrue([
         for sub in tolist(try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])) :
         !strcontains(sub, "environment:plan")
@@ -239,4 +239,138 @@ run "deploy_role_trust_is_unchanged_by_the_plan_role" {
     ])
     error_message = "the deploy role must not have acquired the plan role's environment claim — the two roles exist to keep those trust surfaces separate"
   }
+}
+
+# ─────────────────────────── ECR Public pull role ───────────────────────────
+#
+# The pull role is the one role here that trusts pull_request. What keeps that
+# safe is its permission set: an ECR Public authorization token reads public
+# repositories and nothing else. These assertions pin both halves — the exact
+# subjects it trusts, and the exact two actions it holds — plus the guardrails
+# that keep an empty or wildcard claim set from reaching AWS, and the default
+# that leaves the role absent until a leaf asks for it.
+
+run "ecr_public_pull_role_absent_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_iam_role.ecr_public_pull) == 0 && length(aws_iam_role_policy.ecr_public_pull) == 0
+    error_message = "the ECR Public pull role must not exist unless create_ecr_public_pull_role is set"
+  }
+}
+
+run "ecr_public_pull_trust_subjects_are_exact" {
+  command = plan
+
+  variables {
+    create_ecr_public_pull_role = true
+    ecr_public_pull_repos       = ["eks-gitops"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.ecr_public_pull[0].assume_role_policy).Statement :
+      s if toset(flatten([
+        try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
+        ])) == toset([
+        "repo:nanohype/eks-gitops:pull_request",
+        "repo:nanohype/eks-gitops:ref:refs/heads/main",
+      ])
+    ]) == 1
+    error_message = "the pull role's sub must StringLike-pin exactly repo:nanohype/eks-gitops:{pull_request,ref:refs/heads/main}"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role.ecr_public_pull[0].assume_role_policy).Statement :
+      alltrue([
+        for sub in flatten([try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])]) :
+        sub != "*" && sub != "repo:*/*" && !can(regex("^repo:[^:]+/[^:]+:\\*$", sub))
+      ])
+    ])
+    error_message = "the pull role's sub must never contain \"*\", \"repo:*/*\", or a bare per-repo \":*\""
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.ecr_public_pull[0].assume_role_policy).Statement :
+      s if try(s.Condition.StringEquals["token.actions.githubusercontent.com:aud"], "") == "sts.amazonaws.com"
+      && try(s.Principal.Federated, "") == "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+      && try(s.Action, "") == "sts:AssumeRoleWithWebIdentity"
+      && try(s.Effect, "") == "Allow"
+    ]) == 1
+    error_message = "the pull role must Allow sts:AssumeRoleWithWebIdentity for the GitHub OIDC provider with aud pinned to sts.amazonaws.com"
+  }
+}
+
+run "ecr_public_pull_policy_holds_exactly_the_token_actions" {
+  command = plan
+
+  variables {
+    create_ecr_public_pull_role = true
+    ecr_public_pull_repos       = ["eks-gitops"]
+  }
+
+  assert {
+    condition = toset(flatten([
+      for s in jsondecode(aws_iam_role_policy.ecr_public_pull[0].policy).Statement : flatten([s.Action])
+    ])) == toset(["ecr-public:GetAuthorizationToken", "sts:GetServiceBearerToken"])
+    error_message = "the pull role's policy must grant exactly ecr-public:GetAuthorizationToken and sts:GetServiceBearerToken — any other action widens a pull_request-reachable credential"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.ecr_public_pull[0].policy).Statement :
+      s.Effect == "Allow"
+    ])
+    error_message = "the pull role's policy must hold Allow statements only"
+  }
+}
+
+run "ecr_public_pull_only_leaf_creates_no_other_role" {
+  command = plan
+
+  variables {
+    create_deploy_role          = false
+    create_plan_role            = false
+    create_ecr_public_pull_role = true
+    ecr_public_pull_repos       = ["eks-gitops"]
+  }
+
+  assert {
+    condition     = length(aws_iam_role.deploy) == 0 && length(aws_iam_role.plan) == 0 && length(aws_iam_role.ecr_public_pull) == 1
+    error_message = "with the deploy and plan roles switched off, the component must plan the pull role alone"
+  }
+
+  assert {
+    condition     = output.deploy_role_arn == null && output.plan_role_arn == null
+    error_message = "the deploy and plan role outputs must be null when those roles are not created"
+  }
+}
+
+run "ecr_public_pull_empty_repos_rejected" {
+  command = plan
+
+  variables {
+    create_ecr_public_pull_role = true
+    ecr_public_pull_repos       = []
+  }
+
+  expect_failures = [
+    var.ecr_public_pull_repos,
+  ]
+}
+
+run "ecr_public_pull_bare_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    create_ecr_public_pull_role    = true
+    ecr_public_pull_repos          = ["eks-gitops"]
+    ecr_public_pull_subject_claims = ["*"]
+  }
+
+  expect_failures = [
+    var.ecr_public_pull_subject_claims,
+  ]
 }

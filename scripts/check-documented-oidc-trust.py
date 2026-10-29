@@ -26,7 +26,8 @@ WHAT THIS ASSERTS
 Wherever prose shows a `token.actions.githubusercontent.com:sub` value, or names
 a `repo:<org>/<repo>:...` subject, the claim suffix is one the component can
 actually emit — never a bare `*`. The permitted suffixes are read from
-`allowed_subject_claims` and `plan_allowed_subject_claims` in the component's
+`allowed_subject_claims`, `plan_allowed_subject_claims` and
+`ecr_public_pull_subject_claims` in the component's
 own `variables.tf`, so widening the component widens what may be documented, and
 the two cannot drift apart in the direction that matters.
 
@@ -58,7 +59,7 @@ COMPONENT_VARS = ROOT / "components" / "aws" / "github-oidc" / "variables.tf"
 SUBJECT = re.compile(r"repo:[^\s`\"']+/[^\s`\"':]+:(?P<claim>[^\s`\"',\]]+)")
 # A default list on either claims variable.
 DEFAULT_LIST = re.compile(
-    r'variable\s+"(?:allowed_subject_claims|plan_allowed_subject_claims)".*?default\s*=\s*\[(?P<body>[^\]]*)\]',
+    r'variable\s+"(?:allowed_subject_claims|plan_allowed_subject_claims|ecr_public_pull_subject_claims)".*?default\s*=\s*\[(?P<body>[^\]]*)\]',
     re.S,
 )
 QUOTED = re.compile(r'"([^"]+)"')
