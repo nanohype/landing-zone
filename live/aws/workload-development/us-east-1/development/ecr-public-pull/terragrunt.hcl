@@ -21,9 +21,10 @@ include "envcommon" {
 # it to decide whether to log in, and pulls anonymously while it is unset.
 #
 # The subjects are the component default, repo:nanohype/eks-gitops:pull_request
-# and repo:nanohype/eks-gitops:ref:refs/heads/main, which are the contexts that
-# repo's CI workflows run in: ci.yml on pull_request and on push to main,
-# chart-provenance.yml on a schedule and on dispatch from main.
+# and repo:nanohype/eks-gitops:ref:refs/heads/main: the contexts eks-gitops'
+# ci.yml runs in, on pull_request and on push to main. A workflow that adds
+# another trigger whose token presents a different sub, such as a merge queue,
+# adds that claim here.
 inputs = {
   create_oidc_provider        = false
   create_deploy_role          = false
