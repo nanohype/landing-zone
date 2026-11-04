@@ -13,8 +13,6 @@ variable "environment" {
   }
 }
 
-# Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
-# tflint-ignore: terraform_unused_declarations
 variable "region" {
   description = "AWS region"
   type        = string
@@ -59,20 +57,22 @@ variable "max_azs" {
 
 variable "availability_zone_ids" {
   description = <<-EOT
-    Availability zone IDs (use1-az1, not us-east-1a) the subnets may land in, in preference
-    order; the first max_azs are used, and subnet i sits in the i-th. An ID names the same
-    physical zone in every account while a zone name is remapped per account, so pinning IDs
-    lands the network-owner VPCs and every workload VPC in the same zones, and a zone AWS adds
-    to the region later never joins the set on its own. The default is us-east-1's zones less
-    use1-az3, which EKS does not accept for control-plane subnets; a deployment into another
-    region must set its own.
+    Optional allowlist of availability zone IDs (use1-az1, not us-east-1a), in preference
+    order. Empty (the default) keeps the first max_azs zones the region returns, by name. Set,
+    the subnets are built in its first max_azs IDs, in order, and subnet i sits in the i-th.
+    An ID names the same physical zone in every account while a zone name is remapped per
+    account, so pinning the same IDs on the network-owner and workload VPCs lands them in the
+    same zones, and a zone AWS adds to the region later never joins the set on its own. For
+    an EKS VPC in us-east-1, leave use1-az3 out: EKS does not accept it for control-plane
+    subnets. Setting this on an already-applied VPC can move its subnets — review the plan.
   EOT
   type        = list(string)
-  default     = ["use1-az1", "use1-az2", "use1-az4", "use1-az5", "use1-az6"]
+  default     = []
+  nullable    = false
 
   validation {
-    condition     = length(var.availability_zone_ids) >= var.max_azs && length(distinct(var.availability_zone_ids)) == length(var.availability_zone_ids)
-    error_message = "availability_zone_ids must list at least max_azs distinct zone IDs: the first max_azs are the zones the subnets are spread across."
+    condition     = length(var.availability_zone_ids) == 0 || (length(var.availability_zone_ids) >= var.max_azs && length(distinct(var.availability_zone_ids)) == length(var.availability_zone_ids))
+    error_message = "availability_zone_ids, when set, must list at least max_azs distinct zone IDs: the first max_azs are the zones the subnets are spread across."
   }
 }
 

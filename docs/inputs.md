@@ -150,7 +150,7 @@ own subnet tags, `adopt` defers to the VPC owner).
 | `ipam_netmask_length` | create | `0` | required 16–20 with a pool; subnets carve 8 bits smaller (min /28) |
 | `transit_gateway_id` | create | `""` | attach to the org TGW (requires an IPAM CIDR — a literal `/16` can overlap another attached VPC) |
 | `centralized_egress` | create | `false` | route egress via the TGW to `egress-network` instead of local NAT (requires a TGW) |
-| `availability_zone_ids` | create | us-east-1 less `use1-az3` | zone-ID allowlist; the first `max_azs` are the subnet zones, the same physical zones in every account |
+| `availability_zone_ids` | create | `[]` | opt-in zone-ID allowlist; set, the first `max_azs` IDs are the subnet zones (the same physical zones in every account); empty, the first `max_azs` zones by name |
 | `nat_gateways` | create | `1` | `1` (shared) or `max_azs` (per-AZ HA); an in-between value is rejected |
 | `enable_flow_logs` | create | `false` | set explicitly at each leaf (staging/production on) |
 | `enable_eks_interface_endpoint` | create | `true` | set `false` for an eks-fleet provisioning hub (its private DNS shadows the OIDC issuer) |

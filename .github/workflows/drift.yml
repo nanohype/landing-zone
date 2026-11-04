@@ -77,6 +77,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [discover, require-role]
+    # The read-only plan role, the same one ci.yml's plan job assumes. Declaring
+    # `environment: plan` makes the OIDC token present
+    # repo:<org>/<repo>:environment:plan — the only sub the plan role trusts —
+    # instead of the bare branch claim (ref:refs/heads/main) a scheduled run would
+    # otherwise carry, which neither the plan role nor the deploy role trusts. If
+    # the `plan` environment requires reviewers, every scheduled run waits for an
+    # approval before any leaf is planned.
+    environment: plan
     # Grant the OIDC token permission at the JOB level, mirroring ci.yml's plan
     # job. aws-actions/configure-aws-credentials needs id-token:write to mint the
     # web-identity token; without it the step fails with "Could not load

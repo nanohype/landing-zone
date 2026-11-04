@@ -2,8 +2,11 @@
 # AWS access), so they gate the create/adopt behavior contract:
 #
 #   create default    — a VPC is built, no IPAM preview/pin, no TGW attachment; subnet AZ
-#                        IDs are the first max_azs of the pinned allowlist, in its order
-#                        (use1-az3 skipped even though the region returns it).
+#                        IDs resolve to cross-account-stable zone IDs, and with
+#                        availability_zone_ids unset the zones are the first max_azs the
+#                        region returns, by name (the pre-pinning selection, unchanged).
+#   create pinned      — availability_zone_ids set: subnets land in its first max_azs IDs,
+#                        in its order, named by this account's names for them.
 #   pinned zone gone  — an allowlisted zone ID the account does not report fails the plan
 #                        at the AZ data source's postcondition.
 #   create + IPAM      — the VPC CIDR is drawn from the pool; the carving base is pinned.
@@ -152,12 +155,12 @@ run "create_default" {
     error_message = "no IPAM carving-base pin should exist when ipam_pool_id is unset"
   }
   assert {
-    condition     = join(",", output.private_subnet_az_ids) == "use1-az1,use1-az2,use1-az4"
-    error_message = "create mode must place subnets in the first max_azs zones of availability_zone_ids, in its order — use1-az3 is not on the default allowlist even though the region returns it"
+    condition     = join(",", output.private_subnet_az_ids) == "use1-az1,use1-az2,use1-az3"
+    error_message = "create mode must resolve subnet AZ IDs (use1-azN) from the AZ data source's zone_ids, in order"
   }
   assert {
-    condition     = join(",", output.private_subnet_azs) == "us-east-1a,us-east-1b,us-east-1d"
-    error_message = "subnet AZ names must be this account's names for the pinned zone IDs, not the first max_azs names the region returns"
+    condition     = join(",", output.private_subnet_azs) == "us-east-1a,us-east-1b,us-east-1c"
+    error_message = "with availability_zone_ids unset, subnets must take the first max_azs zone names the region returns — the selection existing VPCs were built with"
   }
   assert {
     condition     = length(output.nat_gateway_ids) == 1
@@ -277,6 +280,24 @@ run "adopt_rejects_availability_zone_ids" {
   }
 
   expect_failures = [var.availability_zone_ids]
+}
+
+# ── create + availability_zone_ids: the opt-in zone-ID path ──
+run "create_pinned_zone_ids" {
+  command = plan
+
+  variables {
+    availability_zone_ids = ["use1-az1", "use1-az2", "use1-az4"]
+  }
+
+  assert {
+    condition     = join(",", output.private_subnet_az_ids) == "use1-az1,use1-az2,use1-az4"
+    error_message = "a pinned availability_zone_ids must place subnets in its first max_azs IDs, in its order"
+  }
+  assert {
+    condition     = join(",", output.private_subnet_azs) == "us-east-1a,us-east-1b,us-east-1d"
+    error_message = "subnet AZ names must be this account's names for the pinned zone IDs, not the first max_azs names the region returns"
+  }
 }
 
 # ── a pinned zone the account does not report fails the plan, not the subnet carving ──
