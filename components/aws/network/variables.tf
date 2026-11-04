@@ -171,6 +171,33 @@ variable "max_azs" {
   default     = 3
 }
 
+variable "availability_zone_ids" {
+  description = <<-EOT
+    Availability zone IDs (use1-az1, not us-east-1a) the subnets may land in, in preference
+    order; the first max_azs are used, and subnet i sits in the i-th. An ID names the same
+    physical zone in every account while a zone name is remapped per account, so pinning IDs
+    lands the network-owner VPCs and every workload VPC in the same zones, and a zone AWS adds
+    to the region later never joins the set on its own. The default is us-east-1's zones less
+    use1-az3, which EKS does not accept for control-plane subnets; a deployment into another
+    region must set its own.
+  EOT
+  type        = list(string)
+  default     = ["use1-az1", "use1-az2", "use1-az4", "use1-az5", "use1-az6"]
+
+  validation {
+    condition     = length(var.availability_zone_ids) >= var.max_azs && length(distinct(var.availability_zone_ids)) == length(var.availability_zone_ids)
+    error_message = "availability_zone_ids must list at least max_azs distinct zone IDs: the first max_azs are the zones the subnets are spread across."
+  }
+
+  # Create-mode lever: it chooses the zones this component builds subnets in, and an adopted
+  # VPC's subnets are the owner's (adopt.tf reads their zones from the subnets themselves).
+  # The default is the sentinel, as with vpc_cidr.
+  validation {
+    condition     = var.network_mode != "adopt" || join(",", var.availability_zone_ids) == "use1-az1,use1-az2,use1-az4,use1-az5,use1-az6"
+    error_message = "availability_zone_ids is a create-mode lever and does not apply when network_mode = adopt — an adopted VPC's subnet zones are the owner's (set it on shared-network instead)."
+  }
+}
+
 variable "nat_gateways" {
   description = <<-EOT
     Number of NAT gateways for local egress. Must be either 1 (a single shared NAT gateway —

@@ -270,29 +270,25 @@ jobs:
       # durability, provider-managed encryption, public endpoints with IP
       # allowlists) and checkov false positives are enumerated there as
       # skip-check entries, one line of rationale each — accepted and documented,
-      # never silently advisory. The same config_file (its global skip list)
+      # never silently advisory. The same config file (its global skip list)
       # applies to all three scans.
+      #
+      # checkov is pip-installed at a pinned version rather than run through
+      # bridgecrewio/checkov-action. The action's container image is fixed inside
+      # its action.yml, so the checkov that gated a PR was whatever the action
+      # commit happened to pin — a version no manager here could see or move, and
+      # one that had fallen behind the checks a current checkov runs. The pip pin
+      # is matched by renovate.json's bare-pip customManager.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet checkov==3.4.3
       - name: Scan components/aws
-        uses: bridgecrewio/checkov-action@59b9d7edfcad5b87fbe3f473a9a134a721ad03f8 # v12
-        with:
-          directory: components/aws/
-          framework: terraform
-          soft_fail: false
-          config_file: .checkov.yaml
+        run: checkov --directory components/aws/ --framework terraform --config-file .checkov.yaml --compact
       - name: Scan fleet/aws
-        uses: bridgecrewio/checkov-action@59b9d7edfcad5b87fbe3f473a9a134a721ad03f8 # v12
-        with:
-          directory: fleet/aws/
-          framework: terraform
-          soft_fail: false
-          config_file: .checkov.yaml
+        run: checkov --directory fleet/aws/ --framework terraform --config-file .checkov.yaml --compact
       - name: Scan modules/aws
-        uses: bridgecrewio/checkov-action@59b9d7edfcad5b87fbe3f473a9a134a721ad03f8 # v12
-        with:
-          directory: modules/aws/
-          framework: terraform
-          soft_fail: false
-          config_file: .checkov.yaml
+        run: checkov --directory modules/aws/ --framework terraform --config-file .checkov.yaml --compact
 
   # Credential-less evaluation of every live leaf. `terragrunt render` resolves the
   # full config — includes, functions, and dependency wiring — against mock outputs,

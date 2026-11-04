@@ -47,7 +47,7 @@ mock_provider "aws" {
     defaults = { issuer_arn = "arn:aws:iam::123456789012:role/creator" }
   }
   mock_data "aws_availability_zones" {
-    defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c"], zone_ids = ["use1-az1", "use1-az2", "use1-az3"] }
+    defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d"], zone_ids = ["use1-az1", "use1-az2", "use1-az3", "use1-az4"] }
   }
   mock_resource "aws_iam_role" { defaults = { arn = "arn:aws:iam::123456789012:role/mock" } }
   mock_resource "aws_iam_policy" { defaults = { arn = "arn:aws:iam::123456789012:policy/mock" } }

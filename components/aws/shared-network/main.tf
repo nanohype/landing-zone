@@ -14,8 +14,25 @@
 # DescribeVpcEndpoints on foreign interface endpoints, so endpoint completeness rides this
 # component's own contract.
 
+# Zones are selected by ID from var.availability_zone_ids, never by taking the first N names
+# the region returns. The zone-id filter closes the set: a zone AWS adds to the region later
+# cannot enter it unasked (CKV_AWS_394), and an ID names the same physical zone in every
+# account, where a name does not. The postcondition fails the plan when a pinned zone is not
+# available to this account, instead of letting a shorter result reach the subnet carving.
 data "aws_availability_zones" "available" {
   state = "available"
+
+  filter {
+    name   = "zone-id"
+    values = local.pinned_zone_ids
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = alltrue([for id in local.pinned_zone_ids : contains(self.zone_ids, id)])
+      error_message = "availability_zone_ids pins ${join(", ", local.pinned_zone_ids)} but this account reports only ${join(", ", self.zone_ids)} as available among them. Set availability_zone_ids to zone IDs this region offers (aws ec2 describe-availability-zones --query 'AvailabilityZones[].ZoneId')."
+    }
+  }
 }
 
 # The org IPAM env sub-pool, discovered by the tag org-networking stamps on it
@@ -47,14 +64,21 @@ locals {
   # is evaluated, so one().id resolves cleanly on the discovery path.
   ipam_pool_id = var.ipam_pool_id != "" ? var.ipam_pool_id : one(data.aws_vpc_ipam_pools.env[0].ipam_pools).id
 
-  azs = slice(data.aws_availability_zones.available.names, 0, var.max_azs)
+  # The first max_azs zone IDs of the allowlist, in its order. The data source filters on
+  # these, so it returns exactly the zones the subnets are built in.
+  pinned_zone_ids = slice(var.availability_zone_ids, 0, var.max_azs)
+
+  # Zone names in the order of local.pinned_zone_ids. The data source returns names and
+  # zone_ids as parallel lists, so zipping them maps each pinned ID to this account's name.
+  zone_name_by_id = zipmap(data.aws_availability_zones.available.zone_ids, data.aws_availability_zones.available.names)
+  azs             = [for id in local.pinned_zone_ids : local.zone_name_by_id[id]]
 
   # AZ IDs parallel to local.azs. Names (us-east-1a) map to different physical zones per
   # account; IDs (use1-az1) are the only cross-account-stable zone identifier — which is
-  # exactly what a cross-account subnet consumer must pin on. aws_availability_zones returns
-  # names and zone_ids in the same order, so the same slice lines them up. Subnets are built
-  # one-per-AZ across local.azs in order, so subnet i sits in az_ids[i].
-  az_ids = slice(data.aws_availability_zones.available.zone_ids, 0, var.max_azs)
+  # exactly what a cross-account subnet consumer must pin on. Here they are the pinned
+  # allowlist itself, so the owner and its consumers name the same physical zones. Subnets
+  # are built one-per-AZ across local.azs in order, so subnet i sits in az_ids[i].
+  az_ids = local.pinned_zone_ids
 
   # The subnet-carving base is the pinned IPAM CIDR, never the raw preview. An IPAM-drawn
   # VPC CIDR is unknown at plan, so subnets can't be carved off the VPC's computed

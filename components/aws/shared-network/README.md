@@ -167,6 +167,7 @@ will stop you if one does:
 |-------|---------|-------|
 | `ipam_pool_id` | `""` | empty = discover the env sub-pool by tag; set to pin explicitly |
 | `ipam_netmask_length` | `16` | 16–20; subnets carve 8 bits smaller (min /28) |
+| `availability_zone_ids` | us-east-1 less `use1-az3` | zone-ID allowlist; the first `max_azs` are the shared subnets' zones, the same physical zones consumers see |
 | `nat_gateways` | `1` | 1/2/3 by environment; ignored under `centralized_egress` |
 | `transit_gateway_id` | `""` | required when `centralized_egress = true` |
 | `centralized_egress` | `false` | route default egress via TGW instead of local NAT |

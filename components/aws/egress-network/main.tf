@@ -14,12 +14,36 @@
 # lives in org-networking, the TGW owner. This component builds everything a participant is
 # permitted to build and publishes tgw_attachment_id for the owner to target. See README.
 
+# Zones are selected by ID from var.availability_zone_ids, never by taking the first N names
+# the region returns. The zone-id filter closes the set: a zone AWS adds to the region later
+# cannot enter it unasked (CKV_AWS_394), and an ID names the same physical zone in every
+# account, where a name does not. The postcondition fails the plan when a pinned zone is not
+# available to this account, instead of letting a shorter result reach the subnet carving.
 data "aws_availability_zones" "available" {
   state = "available"
+
+  filter {
+    name   = "zone-id"
+    values = local.pinned_zone_ids
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = alltrue([for id in local.pinned_zone_ids : contains(self.zone_ids, id)])
+      error_message = "availability_zone_ids pins ${join(", ", local.pinned_zone_ids)} but this account reports only ${join(", ", self.zone_ids)} as available among them. Set availability_zone_ids to zone IDs this region offers (aws ec2 describe-availability-zones --query 'AvailabilityZones[].ZoneId')."
+    }
+  }
 }
 
 locals {
-  azs = slice(data.aws_availability_zones.available.names, 0, var.max_azs)
+  # The first max_azs zone IDs of the allowlist, in its order. The data source filters on
+  # these, so it returns exactly the zones the subnets are built in.
+  pinned_zone_ids = slice(var.availability_zone_ids, 0, var.max_azs)
+
+  # Zone names in the order of local.pinned_zone_ids. The data source returns names and
+  # zone_ids as parallel lists, so zipping them maps each pinned ID to this account's name.
+  zone_name_by_id = zipmap(data.aws_availability_zones.available.zone_ids, data.aws_availability_zones.available.names)
+  azs             = [for id in local.pinned_zone_ids : local.zone_name_by_id[id]]
 
   # Subnets are carved to a fixed /28 off the dedicated egress CIDR: newbits = 28 - base.
   # Public subnets (low indices) hold the NAT gateways + internet gateway; private subnets
