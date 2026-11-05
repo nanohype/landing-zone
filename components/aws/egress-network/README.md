@@ -155,6 +155,7 @@ discipline, not an AWS backstop:
 | `egress_vpc_cidr` | `100.64.0.0/24` | dedicated infra space, /16–/24, outside the supernet |
 | `spoke_supernet_cidr` | `10.0.0.0/8` | org workload supernet; the return route target |
 | `transit_gateway_id` | (required) | the org TGW, RAM-shared to this account |
+| `availability_zone_ids` | `[]` | opt-in zone-ID allowlist; set, the first `max_azs` IDs are the subnet zones; empty, the first `max_azs` by name |
 | `nat_gateways` | `1` | 1 (single) or `max_azs` (per-AZ HA); ties to subnet count |
 | `enable_flow_logs` | `false` | egress traffic visibility |
 

@@ -2,7 +2,13 @@
 # AWS access), so they gate the create/adopt behavior contract:
 #
 #   create default    — a VPC is built, no IPAM preview/pin, no TGW attachment; subnet AZ
-#                        IDs resolve to cross-account-stable zone IDs.
+#                        IDs resolve to cross-account-stable zone IDs, and with
+#                        availability_zone_ids unset the zones are the first max_azs the
+#                        region returns, by name (the pre-pinning selection, unchanged).
+#   create pinned      — availability_zone_ids set: subnets land in its first max_azs IDs,
+#                        in its order, named by this account's names for them.
+#   pinned zone gone  — an allowlisted zone ID the account does not report fails the plan
+#                        at the AZ data source's postcondition.
 #   create + IPAM      — the VPC CIDR is drawn from the pool; the carving base is pinned.
 #   create + TGW +     — zero NAT gateways and a default egress route to the transit
 #     centralized        gateway are planned.
@@ -16,7 +22,8 @@
 #                        preflight asserts the egress target, not just the destination.
 #   mode conflicts     — adopt + a create-mode lever, and create + adopt_* fields, are
 #                        rejected at variable validation, not silently ignored. Covered per
-#                        lever: vpc_cidr, enable_flow_logs, ipam_pool_id. See the note above
+#                        lever: vpc_cidr, enable_flow_logs, ipam_pool_id,
+#                        availability_zone_ids. See the note above
 #                        adopt_rejects_vpc_cidr for why nat_gateways carries the same guard
 #                        with no test, and adopt_accepts_max_azs for the input that must
 #                        stay accepted.
@@ -152,6 +159,10 @@ run "create_default" {
     error_message = "create mode must resolve subnet AZ IDs (use1-azN) from the AZ data source's zone_ids, in order"
   }
   assert {
+    condition     = join(",", output.private_subnet_azs) == "us-east-1a,us-east-1b,us-east-1c"
+    error_message = "with availability_zone_ids unset, subnets must take the first max_azs zone names the region returns — the selection existing VPCs were built with"
+  }
+  assert {
     condition     = length(output.nat_gateway_ids) == 1
     error_message = "nat_gateways = 1 (default) must plan exactly one shared NAT gateway"
   }
@@ -254,6 +265,50 @@ run "adopt_rejects_vpc_cidr" {
   }
 
   expect_failures = [var.vpc_cidr]
+}
+
+run "adopt_rejects_availability_zone_ids" {
+  command = plan
+
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+    availability_zone_ids    = ["use1-az2"]
+  }
+
+  expect_failures = [var.availability_zone_ids]
+}
+
+# ── create + availability_zone_ids: the opt-in zone-ID path ──
+run "create_pinned_zone_ids" {
+  command = plan
+
+  variables {
+    availability_zone_ids = ["use1-az1", "use1-az2", "use1-az4"]
+  }
+
+  assert {
+    condition     = join(",", output.private_subnet_az_ids) == "use1-az1,use1-az2,use1-az4"
+    error_message = "a pinned availability_zone_ids must place subnets in its first max_azs IDs, in its order"
+  }
+  assert {
+    condition     = join(",", output.private_subnet_azs) == "us-east-1a,us-east-1b,us-east-1d"
+    error_message = "subnet AZ names must be this account's names for the pinned zone IDs, not the first max_azs names the region returns"
+  }
+}
+
+# ── a pinned zone the account does not report fails the plan, not the subnet carving ──
+run "create_pinned_zone_unavailable" {
+  command = plan
+
+  variables {
+    availability_zone_ids = ["use1-az1", "use1-az2", "use1-az9"]
+  }
+
+  expect_failures = [data.aws_availability_zones.available]
 }
 
 # ── max_azs is NOT create-only: adopt uses it, so it must stay accepted ──

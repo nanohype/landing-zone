@@ -51,17 +51,40 @@ jobs:
           )
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
+  # Credential guard. Unlike ci.yml's plan job, which skips green on a PR where
+  # no role is wired up, this workflow exists only to talk to AWS: a scheduled run
+  # with no role has detected nothing, and skipping to green reported every
+  # unattended run as "no drift" while it checked no account at all. So an unset
+  # AWS_ROLE_ARN fails the run here, and detect-drift (which needs this job) does
+  # not start. With the variable set this job passes and nothing else changes.
+  require-role:
+    name: Require AWS_ROLE_ARN
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail when the drift role is not configured
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+        run: |
+          if [ -z "$AWS_ROLE_ARN" ]; then
+            echo "::error title=AWS_ROLE_ARN is not set::Drift detection cannot run: the AWS_ROLE_ARN repository variable (Settings > Secrets and variables > Actions > Variables) is unset, so no account was planned and no drift was checked. Set it to the OIDC role drift.yml assumes (see docs/first-deploy-aws.md)."
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN is set; drift detection will assume it."
+
   detect-drift:
     name: Drift Check (${{ matrix.env }}/${{ matrix.component }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: discover
-    # Credential guard, mirroring ci.yml's plan job: skip the whole job (green,
-    # not red) until the OIDC role is wired up as the AWS_ROLE_ARN repo variable.
-    # Without a role, configure-aws-credentials fails with "Could not load
-    # credentials from any providers" — a config gap, not drift. Runs for real
-    # once AWS_ROLE_ARN is set in repo settings.
-    if: ${{ vars.AWS_ROLE_ARN != '' }}
+    needs: [discover, require-role]
+    # The read-only plan role, the same one ci.yml's plan job assumes. Declaring
+    # `environment: plan` makes the OIDC token present
+    # repo:<org>/<repo>:environment:plan — the only sub the plan role trusts —
+    # instead of the bare branch claim (ref:refs/heads/main) a scheduled run would
+    # otherwise carry, which neither the plan role nor the deploy role trusts. If
+    # the `plan` environment requires reviewers, every scheduled run waits for an
+    # approval before any leaf is planned.
+    environment: plan
     # Grant the OIDC token permission at the JOB level, mirroring ci.yml's plan
     # job. aws-actions/configure-aws-credentials needs id-token:write to mint the
     # web-identity token; without it the step fails with "Could not load

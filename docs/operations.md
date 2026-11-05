@@ -152,7 +152,7 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 **Scope:** every `production` and `staging` live leaf, matrix auto-discovered from the tree with `git ls-files` (mirroring `ci.yml`) -- a new production/staging component starts being watched with no workflow edit. Development is ephemeral and the `org`/`hub` control planes are covered by their own bring-up, so both are excluded.
 
-**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. Credential-gated: the job skips green until `AWS_ROLE_ARN` is set.
+**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. Credential-gated: with `AWS_ROLE_ARN` unset the run fails (the `require-role` job errors and no leaf is planned) rather than reporting a check that never ran as green. `detect-drift` runs in the `plan` GitHub environment, so it assumes the read-only plan role (the same trust ci.yml's plan job uses); if that environment requires reviewers, each scheduled run waits for an approval before planning.
 
 **Response:** See [RB-001: Drift Detected](runbooks.md#rb-001-drift-detected) in the runbooks.
 

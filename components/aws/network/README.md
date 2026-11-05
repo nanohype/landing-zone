@@ -134,6 +134,7 @@ carefully:
 | `transit_gateway_id` | `""` | create, attach to the org TGW (requires an IPAM CIDR) |
 | `centralized_egress` | `false` | create, route egress via TGW to the egress hub (requires a TGW) |
 | `max_azs` | `3` | zones spanned |
+| `availability_zone_ids` | `[]` | create; opt-in zone-ID allowlist (first `max_azs` used, in order). Empty = first `max_azs` zones by name |
 | `nat_gateways` | `1` | `1` (shared) or `max_azs` (per-AZ HA); 0 under centralized egress |
 | `enable_flow_logs` | `false` | create; the owner logs an adopted VPC |
 | `enable_s3_gateway_endpoint` | `true` | create; free S3 gateway endpoint, worth keeping on |
