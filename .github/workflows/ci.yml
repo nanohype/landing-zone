@@ -34,14 +34,14 @@ jobs:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
-          tofu_version: "1.11.5"
+          tofu_version: "1.13.9"
       - run: tofu fmt -check -recursive components/
       - run: tofu fmt -check -recursive modules/
       - run: tofu fmt -check -recursive fleet/
       - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
-          tg_version: "1.0.8"
-          tofu_version: "1.11.5"
+          tg_version: "1.2.1"
+          tofu_version: "1.13.9"
       # `tofu fmt` only covers .tf. The Terragrunt HCL layer (live/ includes,
       # _envcommon, generate blocks) drifts unchecked without this gate.
       - run: terragrunt hcl format --check --diff
@@ -187,7 +187,7 @@ jobs:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
-          tofu_version: "1.11.5"
+          tofu_version: "1.13.9"
       - name: Init and Validate
         working-directory: ${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }}
         run: |
@@ -210,7 +210,7 @@ jobs:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
-          tofu_version: "1.11.5"
+          tofu_version: "1.13.9"
       - name: tofu test
         run: |
           set -euo pipefail
@@ -243,7 +243,7 @@ jobs:
           persist-credentials: false
       - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6
         with:
-          tflint_version: v0.63.1
+          tflint_version: v0.65.0
       - run: tflint --init --config .tflint-aws.hcl
       # tflint rule severities are fixed per rule, not configurable: the documented-
       # variables/outputs rules emit at `notice`, the unused-declaration and
@@ -309,11 +309,11 @@ jobs:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
-          tofu_version: "1.11.5"
+          tofu_version: "1.13.9"
       - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
-          tg_version: "1.0.8"
-          tofu_version: "1.11.5"
+          tg_version: "1.2.1"
+          tofu_version: "1.13.9"
       - name: Render every live leaf
         run: |
           set -uo pipefail
@@ -865,7 +865,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
-      - run: pip install zizmor==1.16.3
+      - run: pip install zizmor==1.32.0
       # --persona=auditor with a high-severity floor, not the default persona.
       # `regular` does not run the excessive-permissions audit at all, so a
       # workflow-level `id-token: write` — every job in the file able to mint an
@@ -1063,15 +1063,15 @@ jobs:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
-          tofu_version: "1.11.5"
+          tofu_version: "1.13.9"
       - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
-          tg_version: "1.0.8"
+          tg_version: "1.2.1"
           # gruntwork-io/terragrunt-action@v3 manages its own tool versions
           # via mise. Without a mise.toml in the repo it requires tofu_version
           # to be passed explicitly — even though the previous opentofu/setup
           # step put tofu on PATH already.
-          tofu_version: "1.11.5"
+          tofu_version: "1.13.9"
 
       # Credential guard. The auth step runs only when the AWS_ROLE_ARN repo
       # variable is set. When unset, the auth step skips and the Plan step
