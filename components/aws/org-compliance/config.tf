@@ -67,7 +67,7 @@ resource "aws_iam_role_policy" "config_s3" {
 
 module "config_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   count = var.enable_config ? 1 : 0
 

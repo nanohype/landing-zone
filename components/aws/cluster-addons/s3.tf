@@ -66,7 +66,7 @@ locals {
 # Velero backup storage (conditional)
 module "velero_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
   count   = var.velero_enabled ? 1 : 0
 
   bucket = "${local.bucket_prefix}-velero"
@@ -167,7 +167,7 @@ resource "aws_ssm_parameter" "tempo_bucket" {
 # Loki log storage
 module "loki_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket = "${local.bucket_prefix}-loki"
 
@@ -204,7 +204,7 @@ module "loki_bucket" {
 # Tempo trace storage
 module "tempo_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket = "${local.bucket_prefix}-tempo"
 
@@ -241,7 +241,7 @@ module "tempo_bucket" {
 # Argo Workflows artifact storage (conditional)
 module "argo_workflows_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
   count   = var.argo_workflows_enabled ? 1 : 0
 
   bucket = "${local.bucket_prefix}-argo-workflows"

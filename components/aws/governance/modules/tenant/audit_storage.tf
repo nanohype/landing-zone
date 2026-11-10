@@ -33,7 +33,7 @@ resource "aws_kms_alias" "audit" {
 
 module "audit_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket        = "${local.bucket_prefix}-audit"
   force_destroy = local.allow_teardown

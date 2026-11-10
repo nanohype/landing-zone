@@ -13,7 +13,7 @@ resource "aws_db_subnet_group" "relational" {
 
 module "relational" {
   source   = "terraform-aws-modules/rds-aurora/aws"
-  version  = "~> 9.0"
+  version  = "~> 10.0"
   for_each = local.relational_stores
 
   name           = "${local.prefix}-${each.key}"
@@ -39,13 +39,13 @@ module "relational" {
 
   vpc_id               = var.vpc_id
   db_subnet_group_name = aws_db_subnet_group.relational[each.key].name
-  security_group_rules = {
+  security_group_ingress_rules = {
     eks_ingress = {
-      type                     = "ingress"
-      from_port                = 5432
-      to_port                  = 5432
-      source_security_group_id = var.node_sg_id
-      description              = "PostgreSQL from the EKS nodes. Pods egress via the node ENI, so the cluster SG (control-plane ENIs) would admit nothing"
+      from_port                    = 5432
+      to_port                      = 5432
+      ip_protocol                  = "tcp"
+      referenced_security_group_id = var.node_sg_id
+      description                  = "PostgreSQL from the EKS nodes. Pods egress via the node ENI, so the cluster SG (control-plane ENIs) would admit nothing"
     }
   }
 
@@ -57,7 +57,7 @@ module "relational" {
     max_capacity = each.value.relational.max_acu
   }
 
-  instance_class = "db.serverless"
+  cluster_instance_class = "db.serverless"
   instances = {
     one = {}
   }

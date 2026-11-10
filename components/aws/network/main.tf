@@ -104,7 +104,7 @@ resource "terraform_data" "ipam_cidr_pin" {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0"
+  version = "~> 6.0"
 
   count = local.create_mode ? 1 : 0
 

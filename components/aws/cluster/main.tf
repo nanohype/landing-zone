@@ -118,7 +118,7 @@ locals {
 
 module "kms" {
   source  = "terraform-aws-modules/kms/aws"
-  version = "~> 3.0"
+  version = "~> 4.0"
 
   aliases     = ["eks/${local.cluster_name}"]
   description = "KMS key for EKS secrets encryption"

@@ -38,7 +38,7 @@ resource "aws_kms_alias" "datalake" {
 
 module "raw_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket        = "${local.bucket_prefix}-raw"
   force_destroy = local.allow_teardown
@@ -77,7 +77,7 @@ module "raw_bucket" {
 
 module "staging_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket        = "${local.bucket_prefix}-staging"
   force_destroy = local.allow_teardown
@@ -111,7 +111,7 @@ module "staging_bucket" {
 
 module "curated_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket        = "${local.bucket_prefix}-curated"
   force_destroy = local.allow_teardown

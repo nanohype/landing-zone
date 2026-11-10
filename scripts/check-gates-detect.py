@@ -248,8 +248,8 @@ def mutations() -> list[Mutation]:
             lambda t: _edit(
                 t,
                 "components/aws/tenant-substrate/modules/tenant/relational.tf",
-                "source_security_group_id = var.node_sg_id",
-                "source_security_group_id = var.cluster_sg_id # "
+                "referenced_security_group_id = var.node_sg_id",
+                "referenced_security_group_id = var.cluster_sg_id # "
                 + token("check-datastore-ingress-source.py"),
             ),
             marker=token("check-datastore-ingress-source.py"),
