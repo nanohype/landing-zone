@@ -108,5 +108,18 @@
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>[0-9]+\\.[0-9]+)"
     }
+  ],
+  "packageRules": [
+    {
+      "description": [
+        "Hold the EKS control-plane version (cluster_version, the `# k8s-version` pin) for an explicit decision instead of riding the non-major group.",
+        "Blocker: a control-plane minor cannot move alone. scripts/check-version-coverage.py fails when the kube-proxy addon pin in components/aws/cluster/variables.tf is not built for the same minor, and the whole eks_addon_versions map (vpc-cni, coredns, kube-proxy, aws-ebs-csi-driver, eks-pod-identity-agent, amazon-cloudwatch-observability) is re-pinned from `aws eks describe-addon-versions --kubernetes-version <minor>`, which needs AWS credentials. Moving the default also upgrades every cluster that does not override it on its next apply. Renovate grouped 1.36 -> 1.37 into the non-major PR (#270), where it failed version-coverage and the gates-detect control.",
+        "dependencyDashboardApproval rather than enabled:false, the pattern kx uses for cilium: the update stays on the Dependency Dashboard with a checkbox, visible and releasable when the addon map is re-pinned alongside it, instead of silently ceasing to exist."
+      ],
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["kubernetes/kubernetes"],
+      "groupName": null,
+      "dependencyDashboardApproval": true
+    }
   ]
 }
