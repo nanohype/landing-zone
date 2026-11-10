@@ -181,7 +181,7 @@ resource "kubernetes_job_v1" "restart_pre_cilium_addons" {
 
         container {
           name    = "kubectl"
-          image   = "docker.io/alpine/k8s:1.36.2"
+          image   = "docker.io/alpine/k8s:1.37.2"
           command = ["sh", "-c"]
           args = [<<-EOT
             set -e
