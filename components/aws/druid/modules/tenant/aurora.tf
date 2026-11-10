@@ -39,7 +39,7 @@ resource "aws_db_subnet_group" "this" {
 
 module "aurora" {
   source  = "terraform-aws-modules/rds-aurora/aws"
-  version = "~> 9.0"
+  version = "~> 10.0"
 
   name        = "${local.prefix}-aurora"
   engine      = "aurora-postgresql"

@@ -4,7 +4,7 @@
 
 module "deepstorage_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket = "${local.bucket_prefix}-deepstorage"
 
@@ -31,7 +31,7 @@ module "deepstorage_bucket" {
 
 module "indexlogs_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket = "${local.bucket_prefix}-indexlogs"
 
@@ -67,7 +67,7 @@ module "indexlogs_bucket" {
 
 module "msq_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   bucket = "${local.bucket_prefix}-msq"
 

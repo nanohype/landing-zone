@@ -199,7 +199,7 @@ resource "aws_computeoptimizer_enrollment_status" "this" {
 
 module "cur_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "~> 4.0"
+  version = "~> 5.0"
 
   count = var.enable_cur_export ? 1 : 0
 

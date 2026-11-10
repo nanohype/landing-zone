@@ -13,7 +13,7 @@ resource "aws_db_subnet_group" "relational" {
 
 module "relational" {
   source   = "terraform-aws-modules/rds-aurora/aws"
-  version  = "~> 9.0"
+  version  = "~> 10.0"
   for_each = local.relational_stores
 
   name           = "${local.prefix}-${each.key}"
