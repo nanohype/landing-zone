@@ -51,7 +51,7 @@ variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
   # renovate: datasource=github-releases depName=kubernetes/kubernetes
-  default = "1.37" # k8s-version
+  default = "1.36" # k8s-version
 
   # EKS takes the control-plane version as major.minor only ("1.36", not "1.36.2"
   # or "v1.36"). Reject the common malformed shapes at plan time rather than
