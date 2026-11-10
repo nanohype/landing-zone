@@ -60,13 +60,13 @@ module "aurora" {
 
   vpc_id               = var.vpc_id
   db_subnet_group_name = aws_db_subnet_group.this.name
-  security_group_rules = {
+  security_group_ingress_rules = {
     eks_ingress = {
-      type                     = "ingress"
-      from_port                = 5432
-      to_port                  = 5432
-      source_security_group_id = var.node_sg_id
-      description              = "PostgreSQL from the EKS node ENIs"
+      from_port                    = 5432
+      to_port                      = 5432
+      ip_protocol                  = "tcp"
+      referenced_security_group_id = var.node_sg_id
+      description                  = "PostgreSQL from the EKS node ENIs"
     }
   }
 
@@ -78,7 +78,7 @@ module "aurora" {
     max_capacity = var.tenant_config.rds_max_acu
   }
 
-  instance_class = "db.serverless"
+  cluster_instance_class = "db.serverless"
   instances = {
     one = {}
   }

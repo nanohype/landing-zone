@@ -30,11 +30,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Attributes whose value names the SOURCE of an ingress rule.
-INGRESS_SOURCE_ATTRS = ("source_security_group_id", "security_groups")
+# Attributes whose value names the SOURCE of an ingress rule. The third is the
+# shape rds-aurora v10 takes: its security_group_ingress_rules map feeds
+# aws_vpc_security_group_ingress_rule, which names the source group
+# referenced_security_group_id. Without it the two Aurora clusters' ingress
+# would leave this scan unseen the moment they moved to v10.
+INGRESS_SOURCE_ATTRS = (
+    "source_security_group_id",
+    "security_groups",
+    "referenced_security_group_id",
+)
 
 # An inline waiver must name why the control-plane SG is genuinely the source:
-#   source_security_group_id = var.cluster_sg_id # cluster-sg-ingress-ok: <reason>
+#   referenced_security_group_id = var.cluster_sg_id # cluster-sg-ingress-ok: <reason>
 WAIVER = re.compile(r"#\s*cluster-sg-ingress-ok:\s*\S")
 
 ASSIGN = re.compile(
