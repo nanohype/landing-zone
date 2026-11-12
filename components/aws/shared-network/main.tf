@@ -10,9 +10,10 @@
 # The seam this closes: a participant account cannot tag, endpoint, or egress a VPC it does
 # not own. Everything a participant cannot do for itself, the owner does here — which is why
 # the owner-side contract (checks.tf + README.md) is load-bearing: the participant's adopt
-# preflight can observe the S3 gateway route and default egress from its side, but it cannot
-# DescribeVpcEndpoints on foreign interface endpoints, so endpoint completeness rides this
-# component's own contract.
+# preflight can observe default egress from its side, but it cannot DescribeVpcEndpoints on
+# foreign interface endpoints and cannot see the S3 gateway route (the provider's route-table
+# data sources omit VPC endpoint routes), so endpoint completeness, the S3 gateway path
+# included, rides this component's own contract.
 
 # Two selection paths, one data source. By default the subnets take the first max_azs zones
 # the region returns, by name, as they always have. The zone-name filter matches every zone

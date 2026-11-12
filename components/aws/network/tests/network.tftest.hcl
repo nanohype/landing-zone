@@ -13,11 +13,10 @@
 #   create + TGW +     — zero NAT gateways and a default egress route to the transit
 #     centralized        gateway are planned.
 #   adopt (happy)      — nothing is built (no endpoint SG, no TGW, no preview); outputs
-#                        resolve from the supplied IDs; the preflight passes.
+#                        resolve from the supplied IDs; the preflight passes against a route
+#                        table shaped the way aws_route_table actually returns one.
+#   adopt (tgw egress) — a default route to the transit gateway satisfies the preflight.
 #   adopt (bad vpc)    — a subnet outside adopt_vpc_id fails the plan at the preflight.
-#   adopt (no S3 rt)   — a private route table without any S3 gateway route fails the plan.
-#   adopt (wrong plist)— a route table with a non-S3 (e.g. DynamoDB) prefix-list route
-#                        fails: the preflight matches the exact S3 prefix list, not any.
 #   adopt (blackhole)  — a 0.0.0.0/0 route with no live target (deleted NAT) fails: the
 #                        preflight asserts the egress target, not just the destination.
 #   mode conflicts     — adopt + a create-mode lever, and create + adopt_* fields, are
@@ -52,16 +51,9 @@ mock_provider "aws" {
       cidr_block = "10.9.0.0/16"
     }
   }
-  # The region's AWS-managed S3 gateway prefix list. The adopt preflight asserts this exact
-  # ID is routed, so the happy-path route-table mock below routes pl-s3mock to match.
-  mock_data "aws_ec2_managed_prefix_list" {
-    defaults = {
-      id = "pl-s3mock"
-    }
-  }
   # Happy-path adopt defaults: every subnet is in adopt_vpc_id and every private route
-  # table carries the S3 gateway prefix-list route plus a default egress route. The
-  # failure runs override these per-instance to inject the contract violation.
+  # table carries a default egress route. The failure runs override these per-instance to
+  # inject the contract violation.
   mock_data "aws_subnet" {
     defaults = {
       vpc_id               = "vpc-adopt"
@@ -70,29 +62,19 @@ mock_provider "aws" {
     }
   }
   # A route object carries the full aws_route_table.routes schema; the mock must supply
-  # every field. The S3 gateway route sets destination_prefix_list_id + vpc_endpoint_id;
-  # the default egress route sets cidr_block + nat_gateway_id. All other targets are "".
+  # every field. The default egress route sets cidr_block + nat_gateway_id; all other
+  # targets are "".
+  #
+  # This is the route list aws_route_table returns for a correctly wired shared private
+  # route table: the local route, propagated routes and every VPC endpoint route (the S3
+  # gateway endpoint's prefix-list route among them) are filtered out by the provider, so
+  # only the default egress route remains. A mock that also lists the S3 gateway route
+  # describes a data source that does not exist, and is what let a postcondition reading it
+  # pass here while failing on every real plan.
   mock_data "aws_route_table" {
     defaults = {
       route_table_id = "rtb-mock"
       routes = [
-        {
-          cidr_block                 = ""
-          ipv6_cidr_block            = ""
-          destination_prefix_list_id = "pl-s3mock"
-          carrier_gateway_id         = ""
-          core_network_arn           = ""
-          egress_only_gateway_id     = ""
-          gateway_id                 = ""
-          instance_id                = ""
-          local_gateway_id           = ""
-          nat_gateway_id             = ""
-          network_interface_id       = ""
-          odb_network_arn            = ""
-          transit_gateway_id         = ""
-          vpc_endpoint_id            = "vpce-s3mock"
-          vpc_peering_connection_id  = ""
-        },
         {
           cidr_block                 = "0.0.0.0/0"
           ipv6_cidr_block            = ""
@@ -457,6 +439,50 @@ run "adopt_happy" {
   }
 }
 
+# ── adopt + centralized egress: a default route to the transit gateway is a live target ──
+run "adopt_tgw_egress" {
+  command = plan
+
+  variables {
+    network_mode             = "adopt"
+    adopt_vpc_id             = "vpc-adopt"
+    adopt_private_subnet_ids = ["subnet-a"]
+    adopt_public_subnet_ids  = []
+    max_azs                  = 1
+  }
+
+  override_data {
+    target = data.aws_route_table.adopt_private
+    values = {
+      route_table_id = "rtb-tgw"
+      routes = [
+        {
+          cidr_block                 = "0.0.0.0/0"
+          ipv6_cidr_block            = ""
+          destination_prefix_list_id = ""
+          carrier_gateway_id         = ""
+          core_network_arn           = ""
+          egress_only_gateway_id     = ""
+          gateway_id                 = ""
+          instance_id                = ""
+          local_gateway_id           = ""
+          nat_gateway_id             = ""
+          network_interface_id       = ""
+          odb_network_arn            = ""
+          transit_gateway_id         = "tgw-mock"
+          vpc_endpoint_id            = ""
+          vpc_peering_connection_id  = ""
+        },
+      ]
+    }
+  }
+
+  assert {
+    condition     = output.private_route_table_ids == ["rtb-tgw"]
+    error_message = "a shared private route table whose default route targets the transit gateway must pass the preflight and resolve"
+  }
+}
+
 # ── adopt failure: a subnet outside adopt_vpc_id fails the preflight at plan ──
 run "adopt_subnet_wrong_vpc" {
   command = plan
@@ -482,115 +508,6 @@ run "adopt_subnet_wrong_vpc" {
   ]
 }
 
-# ── adopt failure: a private route table missing the S3 gateway route fails at plan ──
-run "adopt_missing_s3_route" {
-  command = plan
-
-  variables {
-    network_mode             = "adopt"
-    adopt_vpc_id             = "vpc-adopt"
-    adopt_private_subnet_ids = ["subnet-a"]
-    adopt_public_subnet_ids  = []
-    max_azs                  = 1
-  }
-
-  # A route table with a default egress route but NO S3 gateway prefix-list route —
-  # the exact contract violation the preflight must catch.
-  override_data {
-    target = data.aws_route_table.adopt_private
-    values = {
-      route_table_id = "rtb-nobody"
-      routes = [
-        {
-          cidr_block                 = "0.0.0.0/0"
-          ipv6_cidr_block            = ""
-          destination_prefix_list_id = ""
-          carrier_gateway_id         = ""
-          core_network_arn           = ""
-          egress_only_gateway_id     = ""
-          gateway_id                 = ""
-          instance_id                = ""
-          local_gateway_id           = ""
-          nat_gateway_id             = "nat-mock"
-          network_interface_id       = ""
-          odb_network_arn            = ""
-          transit_gateway_id         = ""
-          vpc_endpoint_id            = ""
-          vpc_peering_connection_id  = ""
-        },
-      ]
-    }
-  }
-
-  expect_failures = [
-    data.aws_route_table.adopt_private,
-  ]
-}
-
-# ── adopt failure: a prefix-list route for a NON-S3 service passes a loose check but must
-#    fail the exact-S3 assertion (the wrong-prefix-list probe) ──
-run "adopt_wrong_s3_prefix" {
-  command = plan
-
-  variables {
-    network_mode             = "adopt"
-    adopt_vpc_id             = "vpc-adopt"
-    adopt_private_subnet_ids = ["subnet-a"]
-    adopt_public_subnet_ids  = []
-    max_azs                  = 1
-  }
-
-  # A route table whose only prefix-list route targets a DynamoDB (not S3) gateway, plus a
-  # live default egress route. A "any non-empty prefix_list_id" check would wrongly pass;
-  # the exact-S3 assertion must reject it.
-  override_data {
-    target = data.aws_route_table.adopt_private
-    values = {
-      route_table_id = "rtb-ddbonly"
-      routes = [
-        {
-          cidr_block                 = ""
-          ipv6_cidr_block            = ""
-          destination_prefix_list_id = "pl-dynamodb"
-          carrier_gateway_id         = ""
-          core_network_arn           = ""
-          egress_only_gateway_id     = ""
-          gateway_id                 = ""
-          instance_id                = ""
-          local_gateway_id           = ""
-          nat_gateway_id             = ""
-          network_interface_id       = ""
-          odb_network_arn            = ""
-          transit_gateway_id         = ""
-          vpc_endpoint_id            = "vpce-ddbmock"
-          vpc_peering_connection_id  = ""
-        },
-        {
-          cidr_block                 = "0.0.0.0/0"
-          ipv6_cidr_block            = ""
-          destination_prefix_list_id = ""
-          carrier_gateway_id         = ""
-          core_network_arn           = ""
-          egress_only_gateway_id     = ""
-          gateway_id                 = ""
-          instance_id                = ""
-          local_gateway_id           = ""
-          nat_gateway_id             = "nat-mock"
-          network_interface_id       = ""
-          odb_network_arn            = ""
-          transit_gateway_id         = ""
-          vpc_endpoint_id            = ""
-          vpc_peering_connection_id  = ""
-        },
-      ]
-    }
-  }
-
-  expect_failures = [
-    data.aws_route_table.adopt_private,
-  ]
-}
-
 # ── adopt failure: a 0.0.0.0/0 route with no live target (blackholed by a deleted NAT)
 #    passes a destination-only check but must fail the egress-target assertion ──
 run "adopt_blackholed_default" {
@@ -604,30 +521,13 @@ run "adopt_blackholed_default" {
     max_azs                  = 1
   }
 
-  # A valid S3 gateway route, but the default route's target is empty — a blackhole. A
-  # "cidr_block == 0.0.0.0/0" check would wrongly pass; asserting the target must reject it.
+  # The default route's target is empty — a blackhole. A "cidr_block == 0.0.0.0/0" check
+  # would wrongly pass; asserting the target must reject it.
   override_data {
     target = data.aws_route_table.adopt_private
     values = {
       route_table_id = "rtb-blackhole"
       routes = [
-        {
-          cidr_block                 = ""
-          ipv6_cidr_block            = ""
-          destination_prefix_list_id = "pl-s3mock"
-          carrier_gateway_id         = ""
-          core_network_arn           = ""
-          egress_only_gateway_id     = ""
-          gateway_id                 = ""
-          instance_id                = ""
-          local_gateway_id           = ""
-          nat_gateway_id             = ""
-          network_interface_id       = ""
-          odb_network_arn            = ""
-          transit_gateway_id         = ""
-          vpc_endpoint_id            = "vpce-s3mock"
-          vpc_peering_connection_id  = ""
-        },
         {
           cidr_block                 = "0.0.0.0/0"
           ipv6_cidr_block            = ""

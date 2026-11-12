@@ -1,9 +1,11 @@
 # Owner-side contract assertions. These are the half of the adopt contract a participant
 # account CANNOT verify from its own side: the consumer's adopt preflight (in the `network`
-# component) can observe the S3 gateway route and a live default egress route on the shared
-# route tables, but it cannot DescribeVpcEndpoints on foreign interface endpoints and cannot
-# see owner-written subnet tags through RAM. So the owner asserts endpoint completeness, the
-# role-tag convention, and that a consumer is actually declared — here, where it is
+# component) can observe a live default egress route on the shared route tables, but it
+# cannot DescribeVpcEndpoints on foreign interface endpoints, cannot see the S3 gateway route
+# (aws_route_table omits every VPC endpoint route from `routes`), and cannot see owner-written
+# subnet tags through RAM. So the owner asserts endpoint completeness (the S3 gateway
+# endpoint, which endpoints.tf associates with every private route table, is in the required
+# set), the role-tag convention, and that a consumer is actually declared — here, where it is
 # observable — and the README documents the same contract in prose for anyone hand-rolling a
 # non-terraform owner network against it.
 #
