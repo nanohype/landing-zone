@@ -27,14 +27,30 @@ locals {
 ################################################################################
 
 resource "aws_route53_zone" "primary" {
-  count = local.create_mode ? 1 : 0
+  count    = local.create_mode ? 1 : 0
+  provider = aws.route53
 
   name    = var.domain_name
   comment = "${var.environment} primary hosted zone"
 
-  tags = merge(local.tags, {
+  tags = merge(local.route53_tags, {
     Name = var.domain_name
   })
+
+  lifecycle {
+    precondition {
+      condition     = length(merge(local.route53_tags, { Name = var.domain_name })) <= local.route53_tag_limit
+      error_message = "hosted zone ${var.domain_name} would carry ${length(merge(local.route53_tags, { Name = var.domain_name }))} tags; Route 53 accepts at most ${local.route53_tag_limit} per ChangeTagsForResource call. Trim var.tags."
+    }
+
+    # tags_all is the set the provider sends to ChangeTagsForResource: tags plus the
+    # provider's default_tags. The precondition above counts tags alone, which is the whole
+    # set only while the route53 provider carries no default_tags.
+    postcondition {
+      condition     = length(self.tags_all) <= local.route53_tag_limit
+      error_message = "hosted zone ${self.name} would be sent ${length(self.tags_all)} tags; Route 53 accepts at most ${local.route53_tag_limit} per ChangeTagsForResource call. The route53 provider in route53-tags.tf must not carry default_tags."
+    }
+  }
 }
 
 ################################################################################
@@ -43,13 +59,29 @@ resource "aws_route53_zone" "primary" {
 
 resource "aws_route53_zone" "subdomains" {
   for_each = local.create_mode ? toset(var.subdomain_prefixes) : toset([])
+  provider = aws.route53
 
   name    = "${each.value}.${var.domain_name}"
   comment = "${var.environment} subdomain zone for ${each.value}"
 
-  tags = merge(local.tags, {
+  tags = merge(local.route53_tags, {
     Name = "${each.value}.${var.domain_name}"
   })
+
+  lifecycle {
+    precondition {
+      condition     = length(merge(local.route53_tags, { Name = "${each.value}.${var.domain_name}" })) <= local.route53_tag_limit
+      error_message = "hosted zone ${each.value}.${var.domain_name} would carry ${length(merge(local.route53_tags, { Name = "${each.value}.${var.domain_name}" }))} tags; Route 53 accepts at most ${local.route53_tag_limit} per ChangeTagsForResource call. Trim var.tags."
+    }
+
+    # tags_all is the set the provider sends to ChangeTagsForResource: tags plus the
+    # provider's default_tags. The precondition above counts tags alone, which is the whole
+    # set only while the route53 provider carries no default_tags.
+    postcondition {
+      condition     = length(self.tags_all) <= local.route53_tag_limit
+      error_message = "hosted zone ${self.name} would be sent ${length(self.tags_all)} tags; Route 53 accepts at most ${local.route53_tag_limit} per ChangeTagsForResource call. The route53 provider in route53-tags.tf must not carry default_tags."
+    }
+  }
 }
 
 resource "aws_route53_record" "subdomain_delegation" {

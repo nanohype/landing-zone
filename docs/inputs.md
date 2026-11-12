@@ -39,6 +39,14 @@ resource-tagging standard) and are the identity every resource inherits.
 `environment` must match `^[a-z][a-z0-9-]*$` (enforced by variable validation in
 every component).
 
+Route 53 hosted zones are the one exception to "every resource inherits". Route 53's
+`ChangeTagsForResource` accepts at most 10 tags per call, and the default tag set alone is
+11, so `dns`, `private-dns` and `shared-dns` create their zones through a `route53` provider
+without `default_tags` and tag them with an allowlisted subset (`Environment`, `ManagedBy`,
+`Project`, `CostCenter`, `BusinessUnit`, `DataClassification`, `Owner`) plus `Component`,
+`Team` and `Name`. `Compliance`, `Repository`, `Revision` and `Lifecycle` are not on hosted
+zones. See each component's `route53-tags.tf`.
+
 ## Injected by CI — environment variables
 
 | Var | Purpose |

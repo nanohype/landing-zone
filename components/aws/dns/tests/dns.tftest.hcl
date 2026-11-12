@@ -15,8 +15,31 @@
 #                        adopt_zone_id, and adopt without adopt_zone_id are all rejected at
 #                        variable validation, not silently ignored.
 #   bad mode           — a dns_mode outside {create, adopt} is rejected at variable validation.
+#   zone tag limit     — every hosted zone carries at most 10 tags (Route 53's
+#                        ChangeTagsForResource limit) under the real root default_tags, and
+#                        one tag more fails the plan at the zone's precondition.
 
 mock_provider "aws" {
+  # The default_tags live/root.hcl generates into every leaf's provider, as the provider
+  # reports them through aws_default_tags. Eleven keys: on their own one more than a
+  # Route 53 hosted zone accepts.
+  mock_data "aws_default_tags" {
+    defaults = {
+      tags = {
+        Environment        = "development"
+        ManagedBy          = "opentofu"
+        Project            = "landing-zone"
+        CostCenter         = "platform-engineering"
+        BusinessUnit       = "engineering"
+        DataClassification = "internal"
+        Compliance         = "soc2"
+        Repository         = "nanohype/landing-zone"
+        Owner              = "platform-engineering"
+        Revision           = "local"
+        Lifecycle          = "persistent"
+      }
+    }
+  }
   mock_data "aws_caller_identity" {
     defaults = {
       account_id = "111111111111"
@@ -52,6 +75,11 @@ mock_provider "aws" {
       ]
     }
   }
+}
+
+# Hosted zones are created through the default_tags-free provider in route53-tags.tf.
+mock_provider "aws" {
+  alias = "route53"
 }
 
 variables {
@@ -300,5 +328,79 @@ run "bad_mode" {
 
   expect_failures = [
     var.dns_mode,
+  ]
+}
+
+# ── zone tag limit: the root default_tags plus the component's tags fit in one Route 53 call ──
+#
+# ChangeTagsForResource takes at most 10 tags, and the provider sends a zone's whole set in
+# one call. Before route53-tags.tf the primary zone carried the 11 default tags plus
+# Component, Team and Name: 14, refused by Route 53 on create.
+run "zone_tags_within_route53_limit" {
+  command = plan
+
+  variables {
+    subdomain_prefixes = ["api"]
+  }
+
+  assert {
+    condition     = alltrue([for z in concat(aws_route53_zone.primary, values(aws_route53_zone.subdomains)) : length(z.tags) <= 10])
+    error_message = "every hosted zone must carry at most 10 tags, the most one Route 53 ChangeTagsForResource call accepts"
+  }
+  assert {
+    condition = alltrue([
+      for k in ["Environment", "ManagedBy", "CostCenter", "BusinessUnit", "DataClassification", "Team"] :
+      contains(keys(aws_route53_zone.primary[0].tags), k)
+    ])
+    error_message = "the hosted zone must keep every key the org-compliance required-tags rule checks"
+  }
+  assert {
+    condition     = !contains(keys(aws_route53_zone.primary[0].tags), "Revision")
+    error_message = "the per-commit Revision tag must stay off hosted zones"
+  }
+}
+
+# ── one tag over the limit fails the plan, not the CreateHostedZone that follows it ──
+run "zone_tags_over_route53_limit_fail_the_plan" {
+  command = plan
+
+  variables {
+    tags = { CostAllocation = "shared" }
+  }
+
+  expect_failures = [
+    aws_route53_zone.primary,
+  ]
+}
+
+# ── the provider's own count: a default tag set reaching the zone is caught too ──
+#
+# The provider sends tags_all, not tags. Were default_tags ever added to the route53
+# provider, tags would still fit while tags_all did not; the postcondition reads tags_all.
+# The override stands in for the provider computing tags_all from the root default_tags.
+run "zone_tags_all_over_route53_limit_fail_the_plan" {
+  command = plan
+
+  override_resource {
+    target = aws_route53_zone.primary
+    values = {
+      tags_all = {
+        Environment        = "development"
+        ManagedBy          = "opentofu"
+        Project            = "landing-zone"
+        CostCenter         = "platform-engineering"
+        BusinessUnit       = "engineering"
+        DataClassification = "internal"
+        Compliance         = "soc2"
+        Repository         = "nanohype/landing-zone"
+        Owner              = "platform-engineering"
+        Revision           = "local"
+        Lifecycle          = "persistent"
+      }
+    }
+  }
+
+  expect_failures = [
+    aws_route53_zone.primary,
   ]
 }
