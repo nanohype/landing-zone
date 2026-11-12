@@ -152,7 +152,7 @@ inputs = {
     }
 
     Auditor = {
-      description      = "Read-only auditor — logs/athena/glue read, explicit data-plane deny"
+      description      = "Read-only auditor - logs/athena/glue read, explicit data-plane deny"
       session_duration = "PT4H"
       managed_policies = ["arn:aws:iam::aws:policy/SecurityAudit"]
       inline_policy = jsonencode({

@@ -29,6 +29,18 @@ variable "permission_sets" {
     boundary_policy  = optional(string)
   }))
   default = {}
+
+  # CreatePermissionSet restricts Description to tab, newline, carriage return and printable
+  # Latin-1, 1 to 700 characters, and refuses anything else (an em dash, a curly quote) with a
+  # ValidationException at apply. This accepts the printable ASCII subset, so a description
+  # pasted from prose with typographic punctuation fails the plan instead.
+  validation {
+    condition = alltrue([
+      for ps in values(var.permission_sets) :
+      can(regex("^[\\t\\n\\r\\x20-\\x7E]{1,700}$", ps.description))
+    ])
+    error_message = "every permission_sets[*].description must be 1-700 characters of printable ASCII (plus tab, newline, carriage return). Replace typographic characters such as an em dash or curly quotes with their ASCII equivalents. Offending permission sets: ${join(", ", [for name, ps in var.permission_sets : name if !can(regex("^[\\t\\n\\r\\x20-\\x7E]{1,700}$", ps.description))])}."
+  }
 }
 
 variable "groups" {

@@ -167,3 +167,44 @@ run "an_unknown_account_name_fails_the_apply" {
     aws_ssoadmin_account_assignment.this,
   ]
 }
+
+# CreatePermissionSet refuses a Description outside its character set, and an em dash is
+# outside it. The management leaf's Auditor description carried one, which plans cleanly
+# and fails the apply. The variable rejects it at plan.
+run "a_non_ascii_permission_set_description_fails_the_plan" {
+  command = plan
+
+  variables {
+    org_wide_assignments = []
+    account_assignments  = []
+    permission_sets = {
+      Auditor = {
+        description = "Read-only auditor — logs/athena/glue read, explicit data-plane deny"
+      }
+    }
+  }
+
+  expect_failures = [
+    var.permission_sets,
+  ]
+}
+
+# The same description with an ASCII hyphen is accepted and reaches the resource verbatim.
+run "an_ascii_permission_set_description_plans" {
+  command = plan
+
+  variables {
+    org_wide_assignments = []
+    account_assignments  = []
+    permission_sets = {
+      Auditor = {
+        description = "Read-only auditor - logs/athena/glue read, explicit data-plane deny"
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_ssoadmin_permission_set.this["Auditor"].description == "Read-only auditor - logs/athena/glue read, explicit data-plane deny"
+    error_message = "an ASCII description must reach the permission set unchanged"
+  }
+}
