@@ -63,7 +63,7 @@ variable "enable_cur_export" {
 variable "cost_categories" {
   description = "Map of cost categories to create"
   type = map(object({
-    rule_version  = optional(string, "1")
+    rule_version  = optional(string, "CostCategoryExpression.v1")
     default_value = optional(string, "Other")
     rules = list(object({
       value = string
@@ -76,6 +76,14 @@ variable "cost_categories" {
     }))
   }))
   default = {}
+
+  # Cost Explorer accepts exactly one rule version, CostCategoryExpression.v1, and rejects
+  # any other value at CreateCostCategoryDefinition. Rejecting it here fails the plan, not
+  # the apply.
+  validation {
+    condition     = alltrue([for c in values(var.cost_categories) : c.rule_version == "CostCategoryExpression.v1"])
+    error_message = "cost_categories[*].rule_version must be \"CostCategoryExpression.v1\", the only rule version Cost Explorer accepts."
+  }
 }
 
 variable "team" {
