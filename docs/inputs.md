@@ -39,6 +39,14 @@ resource-tagging standard) and are the identity every resource inherits.
 `environment` must match `^[a-z][a-z0-9-]*$` (enforced by variable validation in
 every component).
 
+Route 53 hosted zones are the one exception to "every resource inherits". Route 53's
+`ChangeTagsForResource` accepts at most 10 tags per call, and the default tag set alone is
+11, so `dns`, `private-dns` and `shared-dns` create their zones through a `route53` provider
+without `default_tags` and tag them with an allowlisted subset (`Environment`, `ManagedBy`,
+`Project`, `CostCenter`, `BusinessUnit`, `DataClassification`, `Owner`) plus `Component`,
+`Team` and `Name`. `Compliance`, `Repository`, `Revision` and `Lifecycle` are not on hosted
+zones. See each component's `route53-tags.tf`.
+
 ## Injected by CI — environment variables
 
 | Var | Purpose |
@@ -161,8 +169,9 @@ own subnet tags, `adopt` defers to the VPC owner).
 A field from the wrong side (a create-mode lever under `adopt`, or an `adopt_*` input under
 `create`) is a contradiction and is rejected at variable validation, not silently ignored. In
 `adopt` mode a consumer-side preflight asserts at plan — not at cluster-Ready — that every
-adopted subnet is in the VPC, carries the exact S3 gateway route, and has a live default-egress
-route. The owner side of that contract is documented in
+adopted subnet is in the VPC and has a live default-egress route. The S3 gateway route is the
+owner's to assert: the provider's route-table data source omits VPC endpoint routes, so a
+participant cannot observe it. The owner side of that contract is documented in
 `components/aws/shared-network/README.md`; the mode itself in `components/aws/network/README.md`.
 
 ## EKS API endpoint posture

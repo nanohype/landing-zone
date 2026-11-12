@@ -5,13 +5,20 @@
 #
 # The data sources carry the consumer-side adopt preflight: assertions that run at plan
 # and fail there, not silently at cluster-Ready. What CAN be asserted from the
-# participant side is asserted hard here — subnet placement, the S3 gateway route, a
-# default egress route, AZ coverage. What CANNOT: a participant cannot DescribeVpcEndpoints
-# on the owner's foreign interface endpoints, so interface-endpoint completeness is not
-# assertable here. That completeness rides the owner's contract (shared-network's own
-# check blocks + README) plus real DNS resolution at bootstrap. The gateway route and
-# subnet-placement checks below are the hard, observable-from-the-participant-side
-# guarantees.
+# participant side is asserted hard here — subnet placement, a live default egress route,
+# AZ coverage. What CANNOT:
+#
+#   - Interface-endpoint completeness. A participant cannot DescribeVpcEndpoints on the
+#     owner's foreign interface endpoints.
+#   - The S3 gateway route. aws_route_table (and aws_route) omit every route whose target
+#     is a VPC endpoint (a prefix-list destination via a vpce- gateway), so the route the
+#     S3 gateway endpoint installs never appears in self.routes, whether or not it exists.
+#     The participant cannot see the owner's gateway endpoint either.
+#
+# Both ride the owner's contract (shared-network's endpoint_set_complete check, which
+# requires the S3 gateway endpoint, associated there with every private route table) plus
+# real DNS resolution at bootstrap. The subnet-placement and egress checks below are the
+# hard, observable-from-the-participant-side guarantees.
 
 data "aws_vpc" "adopt" {
   count = local.adopt_mode ? 1 : 0
@@ -42,31 +49,15 @@ data "aws_subnet" "adopt_public" {
   }
 }
 
-# The AWS-managed S3 gateway prefix list for this region. The adopt preflight asserts the
-# *exact* prefix list ID is routed in every shared private route table — matching any
-# non-empty prefix-list route would also accept a DynamoDB (or other) gateway route and
-# pass a network that has no S3 path at all.
-data "aws_ec2_managed_prefix_list" "s3" {
-  count = local.adopt_mode ? 1 : 0
-  name  = "com.amazonaws.${var.region}.s3"
-}
-
 data "aws_route_table" "adopt_private" {
   for_each  = local.adopt_mode ? toset(var.adopt_private_subnet_ids) : toset([])
   subnet_id = each.value
 
   lifecycle {
-    # The S3 gateway endpoint installs a route to the region's S3 managed prefix list into
-    # every private route table it associates with. Asserting the *exact* S3 prefix-list ID
-    # (not just any non-empty prefix-list route) is what makes this participant-observable
-    # proof the owner wired the S3 gateway path — a DynamoDB or other gateway route would
-    # otherwise satisfy a looser check while S3 pulls still fall to NAT/public resolution:
-    # slower, and billed on NAT data processing.
-    postcondition {
-      condition     = anytrue([for r in self.routes : try(r.destination_prefix_list_id, "") == data.aws_ec2_managed_prefix_list.s3[0].id])
-      error_message = "adopted private route table ${self.id} (subnet ${each.key}) has no route to the S3 gateway prefix list (${data.aws_ec2_managed_prefix_list.s3[0].id}). The network owner must associate the S3 gateway VPC endpoint with every shared private route table (see shared-network's contract)."
-    }
-
+    # No S3 gateway assertion here: self.routes never carries a VPC endpoint route (see the
+    # header), so any condition on one fails for every route table, wired or not. The S3
+    # path is the owner's contract.
+    #
     # A default egress route must both exist AND point at a live target (NAT gateway or
     # TGW). A 0.0.0.0/0 route left blackholed by a deleted NAT still shows the destination
     # but reaches nothing, so private-subnet nodes couldn't hit the EKS API endpoint or

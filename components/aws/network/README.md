@@ -100,14 +100,15 @@ contract `shared-network` (or any owner network) must satisfy:
 | Preflight assertion | Guards against |
 |---------------------|----------------|
 | every adopted subnet resides in `adopt_vpc_id` | a stray subnet ID from the wrong VPC |
-| every private route table routes the region's **exact** S3 gateway prefix list (`com.amazonaws.<region>.s3`) | a missing S3 path (matching *any* prefix list would also accept a DynamoDB route while S3 pulls silently fall to NAT) |
 | every private route table has a `0.0.0.0/0` route with a **live target** (NAT or TGW) | a blackholed default route left by a deleted NAT — the destination shows but reaches nothing |
 | the private subnets span at least `max_azs` zones | a node group that cannot spread across the AZs the environment expects |
 
 What the preflight **cannot** assert: a participant cannot `DescribeVpcEndpoints` on the
 owner's foreign interface endpoints, so interface-endpoint completeness rides the owner's
 contract (`shared-network`'s own `check` blocks + README) plus real DNS resolution at cluster
-bootstrap. See `components/aws/shared-network/README.md` for the owner side of this contract.
+bootstrap. The S3 gateway route is likewise out of reach: the provider's `aws_route_table`
+and `aws_route` data sources omit every VPC endpoint route, so a condition on it would fail
+for every route table, correctly wired or not. The owner asserts it. See `components/aws/shared-network/README.md` for the owner side of this contract.
 
 ## Consuming this component
 
@@ -176,7 +177,7 @@ adopted private subnets span at least that many zones, so it applies in both mod
 
 `tofu test` (`tests/network.tftest.hcl`) covers, against a mocked provider: create default,
 create + IPAM (with the carving-base pin holding across a day-2 preview shift), create + TGW +
-centralized egress (zero NAT, default route to the TGW), the adopt happy path, and each
-preflight failure (subnet in the wrong VPC, a missing S3 gateway route, a non-S3 prefix-list
-route, a blackholed default route), plus the mode-conflict rejections, the IPAM netmask range
+centralized egress (zero NAT, default route to the TGW), the adopt happy path against a route
+table shaped the way `aws_route_table` returns one, adopt with transit-gateway egress, and each
+preflight failure (subnet in the wrong VPC, a blackholed default route), plus the mode-conflict rejections, the IPAM netmask range
 guard, and the in-between `nat_gateways` rejection.

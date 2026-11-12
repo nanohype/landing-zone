@@ -126,8 +126,9 @@ Provisions the network foundation for each environment:
 
 In `adopt` mode the component builds nothing — it resolves an existing VPC and subnet IDs
 (same-account or cross-account via RAM) and re-exports them through the same outputs, with a
-consumer-side preflight that fails at `plan` if the adopted network is missing the S3 gateway
-route or a live default egress route.
+consumer-side preflight that fails at `plan` if an adopted subnet is outside the VPC or its
+route table lacks a live default egress route. The S3 gateway route is not visible to it (the
+provider's route-table data source omits VPC endpoint routes), so the owner asserts that half.
 
 ### Shared Network Layer
 

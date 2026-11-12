@@ -13,7 +13,7 @@ variable "environment" {
 }
 
 variable "region" {
-  description = "AWS region — also selects the AWS-managed S3 gateway prefix list the adopt preflight asserts against (com.amazonaws.<region>.s3)."
+  description = "AWS region the component deploys into; scopes the availability-zone lookup."
   type        = string
 }
 

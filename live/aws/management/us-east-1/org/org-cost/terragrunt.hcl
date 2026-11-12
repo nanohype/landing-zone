@@ -28,7 +28,7 @@ inputs = {
 
   cost_categories = {
     ByEnvironment = {
-      rule_version = "1"
+      rule_version = "CostCategoryExpression.v1"
       rules = [
         {
           value = "Production"

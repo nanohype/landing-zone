@@ -17,6 +17,7 @@ locals {
 
 resource "aws_route53_zone" "private" {
   for_each = toset(var.private_zones)
+  provider = aws.route53
 
   name    = each.value
   comment = "${var.environment} private zone ${each.value} (shared via Route53 Profile)"
@@ -25,7 +26,7 @@ resource "aws_route53_zone" "private" {
     vpc_id = var.seed_vpc_id
   }
 
-  tags = merge(local.tags, {
+  tags = merge(local.route53_tags, {
     Name = each.value
   })
 
@@ -34,6 +35,19 @@ resource "aws_route53_zone" "private" {
   # resource does not manage), so ignore them — the Profile owns them, not this zone resource.
   lifecycle {
     ignore_changes = [vpc]
+
+    precondition {
+      condition     = length(merge(local.route53_tags, { Name = each.value })) <= local.route53_tag_limit
+      error_message = "hosted zone ${each.value} would carry ${length(merge(local.route53_tags, { Name = each.value }))} tags; Route 53 accepts at most ${local.route53_tag_limit} per ChangeTagsForResource call. Trim var.tags."
+    }
+
+    # tags_all is the set the provider sends to ChangeTagsForResource: tags plus the
+    # provider's default_tags. The precondition above counts tags alone, which is the whole
+    # set only while the route53 provider carries no default_tags.
+    postcondition {
+      condition     = length(self.tags_all) <= local.route53_tag_limit
+      error_message = "hosted zone ${self.name} would be sent ${length(self.tags_all)} tags; Route 53 accepts at most ${local.route53_tag_limit} per ChangeTagsForResource call. The route53 provider in route53-tags.tf must not carry default_tags."
+    }
   }
 }
 

@@ -10,12 +10,29 @@
 #   bad seed vpc       — a seed_vpc_id that is not a vpc- id fails at variable validation.
 #   empty zones        — an empty private_zones list fails at variable validation.
 #   bad consumer id    — a non-12-digit consumer account id fails at variable validation.
+#   zone tag limit     — every zone carries at most 10 tags (Route 53's ChangeTagsForResource
+#                        limit) under the real root default_tags, and one tag more fails the
+#                        plan at the zone's precondition.
 
 mock_provider "aws" {
-  # aws_route53_zone.arn is consumed by the resource association; give it a well-formed value.
-  mock_resource "aws_route53_zone" {
+  # The default_tags live/root.hcl generates into every leaf's provider, as the provider
+  # reports them through aws_default_tags. Eleven keys: on their own one more than a
+  # Route 53 hosted zone accepts.
+  mock_data "aws_default_tags" {
     defaults = {
-      arn = "arn:aws:route53:::hostedzone/ZMOCKPRIVATE001"
+      tags = {
+        Environment        = "development"
+        ManagedBy          = "opentofu"
+        Project            = "landing-zone"
+        CostCenter         = "platform-engineering"
+        BusinessUnit       = "engineering"
+        DataClassification = "internal"
+        Compliance         = "soc2"
+        Repository         = "nanohype/landing-zone"
+        Owner              = "platform-engineering"
+        Revision           = "local"
+        Lifecycle          = "persistent"
+      }
     }
   }
   mock_resource "aws_route53profiles_profile" {
@@ -29,6 +46,18 @@ mock_provider "aws" {
   mock_resource "aws_ram_resource_share" {
     defaults = {
       arn = "arn:aws:ram:us-east-1:111111111111:resource-share/mock-0000-0000-000000000000"
+    }
+  }
+}
+
+# Hosted zones are created through the default_tags-free provider in route53-tags.tf.
+mock_provider "aws" {
+  alias = "route53"
+
+  # aws_route53_zone.arn is consumed by the resource association; give it a well-formed value.
+  mock_resource "aws_route53_zone" {
+    defaults = {
+      arn = "arn:aws:route53:::hostedzone/ZMOCKPRIVATE001"
     }
   }
 }
@@ -173,5 +202,71 @@ run "bad_consumer_id" {
 
   expect_failures = [
     var.consumer_account_ids,
+  ]
+}
+
+# ── zone tag limit: the root default_tags plus the component's tags fit in one Route 53 call ──
+#
+# ChangeTagsForResource takes at most 10 tags, and the provider sends a zone's whole set in
+# one call. Before route53-tags.tf each zone carried the 11 default tags plus Component,
+# Team and Name: 14, refused by Route 53 on create.
+run "zone_tags_within_route53_limit" {
+  command = plan
+
+  assert {
+    condition     = alltrue([for z in values(aws_route53_zone.private) : length(z.tags) <= 10])
+    error_message = "every shared private hosted zone must carry at most 10 tags, the most one Route 53 ChangeTagsForResource call accepts"
+  }
+  assert {
+    condition = alltrue([
+      for k in ["Environment", "ManagedBy", "CostCenter", "BusinessUnit", "DataClassification", "Team"] :
+      contains(keys(aws_route53_zone.private["internal.nanohype"].tags), k)
+    ])
+    error_message = "the hosted zone must keep every key the org-compliance required-tags rule checks"
+  }
+}
+
+# ── one tag over the limit fails the plan, not the CreateHostedZone that follows it ──
+run "zone_tags_over_route53_limit_fail_the_plan" {
+  command = plan
+
+  variables {
+    tags = { CostAllocation = "shared" }
+  }
+
+  expect_failures = [
+    aws_route53_zone.private,
+  ]
+}
+
+# ── the provider's own count: a default tag set reaching the zone is caught too ──
+#
+# The provider sends tags_all, not tags. Were default_tags ever added to the route53
+# provider, tags would still fit while tags_all did not; the postcondition reads tags_all.
+# The override stands in for the provider computing tags_all from the root default_tags.
+run "zone_tags_all_over_route53_limit_fail_the_plan" {
+  command = plan
+
+  override_resource {
+    target = aws_route53_zone.private
+    values = {
+      tags_all = {
+        Environment        = "development"
+        ManagedBy          = "opentofu"
+        Project            = "landing-zone"
+        CostCenter         = "platform-engineering"
+        BusinessUnit       = "engineering"
+        DataClassification = "internal"
+        Compliance         = "soc2"
+        Repository         = "nanohype/landing-zone"
+        Owner              = "platform-engineering"
+        Revision           = "local"
+        Lifecycle          = "persistent"
+      }
+    }
+  }
+
+  expect_failures = [
+    aws_route53_zone.private,
   ]
 }

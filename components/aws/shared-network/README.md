@@ -58,15 +58,19 @@ issuer subdomain).
 
 ### Route tables (participant-observable)
 
-Every **private** route table carries, and the consumer's adopt preflight asserts by exact
-match:
+Every **private** route table carries:
 
 - a route to the region's AWS-managed **S3 gateway prefix list**
   (`com.amazonaws.<region>.s3`) — the S3 gateway endpoint installs this into each associated
-  route table. A DynamoDB or other gateway route does **not** satisfy the contract.
+  route table. A DynamoDB or other gateway route does **not** satisfy the contract. This one
+  is **owner-asserted only**: the provider's `aws_route_table` and `aws_route` data sources
+  omit every VPC endpoint route, so the consumer's preflight cannot see it whether or not it
+  exists. This component associates the S3 gateway endpoint with every private route table
+  and `checks.tf` requires the endpoint.
 - a **default egress route** (`0.0.0.0/0`) with a **live target** — a NAT gateway (local
   egress) or the transit gateway (centralized egress). A blackholed default route (e.g. left
-  behind by a deleted NAT) does **not** satisfy the contract.
+  behind by a deleted NAT) does **not** satisfy the contract. The consumer's adopt preflight
+  asserts this one.
 
 **Explicit route-table associations are mandatory.** The consumer preflight's
 `data.aws_route_table` lookup keys on `subnet_id` and only matches a subnet with an
