@@ -64,7 +64,7 @@ jobs:
           tofu_version: "1.13.9"
       - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
-          tg_version: "1.2.1"
+          tg_version: "1.2.2"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6

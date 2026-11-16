@@ -99,7 +99,7 @@ jobs:
           install -m 0755 /tmp/terragrunt /usr/local/bin/terragrunt
           terragrunt --version
         env:
-          TERRAGRUNT_VERSION: "1.2.1"
+          TERRAGRUNT_VERSION: "1.2.2"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.27"

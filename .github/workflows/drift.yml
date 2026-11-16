@@ -114,7 +114,7 @@ jobs:
           # installs tofu on the runner. Without this the action aborts every run
           # ("No mise.toml found, so 'tofu_version' is required").
           tofu_version: "1.13.9"
-          tg_version: "1.2.1"
+          tg_version: "1.2.2"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
