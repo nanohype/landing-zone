@@ -204,7 +204,7 @@ run "create_mode_publishes_empty_network_config" {
 
   assert {
     condition     = kubernetes_config_map_v1.network_config.data["private_subnet_ids"] == "" && kubernetes_config_map_v1.network_config.data["public_subnet_ids"] == ""
-    error_message = "in create mode both network-config subnet CSVs must be empty — the Kyverno policy needs no explicit injection, but the ConfigMap must still exist so its context lookup never misses"
+    error_message = "in create mode both network-config subnet CSVs must be empty — the Kyverno policy needs no explicit injection, but the ConfigMap must still exist so the record states create rather than leaving the mode to be inferred from absence"
   }
 }
 
