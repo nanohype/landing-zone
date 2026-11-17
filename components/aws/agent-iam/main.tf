@@ -370,8 +370,9 @@ resource "aws_iam_role_policy" "operator" {
       },
       {
         # Create + manage the EKS Pod Identity associations that bind each
-        # tenant ServiceAccount (tenant-runtime) to its role. Scoped to this
-        # environment's cluster + its association resources.
+        # tenant's ServiceAccounts to its role: tenant-runtime for the
+        # workloads, and <platform>-gateway for the model gateway's Envoy.
+        # Scoped to this environment's cluster + its association resources.
         Sid    = "TenantPodIdentityAssociations"
         Effect = "Allow"
         Action = [
