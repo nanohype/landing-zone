@@ -91,8 +91,13 @@ echo "  ArgoCD application controller ready (${CTRL_READY} replicas)"
 
 # --- Network config ConfigMap ---
 # The eks-gitops scheme-aware Kyverno load-balancer subnet-injection policy reads
-# this at admission time; it must exist on every cluster (both modes) or that
-# mutation fails its context lookup.
+# this at admission time. A missing (NotFound) ConfigMap is not an error: the
+# policy's lookup resolves to empty and it silently injects nothing, so an adopt
+# cluster's load balancers come up without subnets. This check is the signal.
+# (A lookup that fails another way, e.g. RBAC-denied, does error, and failurePolicy
+# Ignore admits the object unmutated.)
+# cluster-bootstrap writes it in both modes, so its absence on any cluster means
+# the apply did not land.
 echo "Checking kube-system/network-config ConfigMap..."
 NET_MODE=$(kubectl get configmap network-config -n kube-system -o jsonpath='{.data.network_mode}' 2>/dev/null || echo "NOT_FOUND")
 if [[ "$NET_MODE" != "create" && "$NET_MODE" != "adopt" ]]; then
