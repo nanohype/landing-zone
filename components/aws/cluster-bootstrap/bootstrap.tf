@@ -512,10 +512,12 @@ resource "kubernetes_secret_v1" "argocd_cluster" {
 # provisioned and which subnets it uses. The eks-gitops scheme-aware Kyverno
 # MutatingPolicy inject-adopt-lb-subnets reads this with a CEL resource lookup at
 # admission time — an ApplicationSet generator can only see the cluster-registry
-# Secret, but Kyverno needs an in-cluster resource. An absent ConfigMap raises no
-# error: the lookup resolves every field to empty and the policy injects nothing,
-# so on an adopt cluster a missing record silently leaves load balancers without
-# subnets (they then fail to provision). Written in BOTH modes so the record
+# Secret, but Kyverno needs an in-cluster resource. An absent (NotFound) ConfigMap
+# is not an error: the lookup resolves every field to empty and the policy
+# injects nothing, so on an adopt cluster a missing record silently leaves load
+# balancers without subnets (they then fail to provision). A lookup that fails
+# another way (e.g. RBAC-denied) does error, and failurePolicy Ignore admits the
+# object unmutated. Written in BOTH modes so the record
 # states the mode rather than leaving it to be inferred from absence: a create
 # cluster carries empty subnet CSVs (its load balancer controllers auto-discover
 # subnets by the ELB role tags the cluster stamps), an adopt cluster carries the
