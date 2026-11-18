@@ -52,6 +52,7 @@ zones. See each component's `route53-tags.tf`.
 | Var | Purpose |
 |-----|---------|
 | `TERRAGRUNT_ACCOUNT_ID` | real AWS account id (overrides the `account.hcl` placeholder) |
+| `TERRAGRUNT_ACCOUNT_IDS` | drift.yml only: a JSON object mapping each account directory to its real account id; each drift leaf exports its own entry as `TERRAGRUNT_ACCOUNT_ID` (repo Variable; see [operations.md](operations.md#driftyml----drift-detection)) |
 | `GITHUB_SHA` | short commit → the `Revision` tag; `"local"` off-CI |
 | `AWS_ROLE_ARN` | the OIDC deploy role CI assumes (repo Variable; unset ⇒ PR Plan jobs skip green; scheduled drift detection fails) |
 
@@ -223,5 +224,8 @@ Leave them unset for a private endpoint.
    `live/aws/<account>/<region>/<env>/` path.
 2. Fill the six required `env.hcl` locals above.
 3. Set `AWS_ROLE_ARN` (repo Variable) and the OIDC trust for the new repo/env.
+   For a `staging` or `production` env in a new account directory, add that
+   directory and its account id to the `TERRAGRUNT_ACCOUNT_IDS` repo Variable,
+   or every drift.yml leaf in it reports a plan error.
 4. `terragrunt run --all -- plan` from the env dir; deploy components in dependency
    order (see [architecture.md](architecture.md) Dependency Graph).

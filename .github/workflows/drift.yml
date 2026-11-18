@@ -15,7 +15,9 @@ permissions:
 jobs:
   # Auto-discovers the drift matrix from the working tree, mirroring ci.yml's
   # discover job, so a new production/staging live entry starts getting watched
-  # without a workflow edit. The matrix is every
+  # without a workflow edit. A leaf in an account directory TERRAGRUNT_ACCOUNT_IDS
+  # does not list reports a plan error until the map has an entry for it (see
+  # require-config). The matrix is every
   # live/<cloud>/<account>/<region>/<env>/<component>/terragrunt.hcl whose env is
   # production or staging — the two long-lived deployed environments (development is
   # ephemeral, org/hub are management/fleet control planes covered by their own
@@ -51,32 +53,62 @@ jobs:
           )
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
-  # Credential guard. Unlike ci.yml's plan job, which skips green on a PR where
-  # no role is wired up, this workflow exists only to talk to AWS: a scheduled run
-  # with no role has detected nothing, and skipping to green reported every
-  # unattended run as "no drift" while it checked no account at all. So an unset
-  # AWS_ROLE_ARN fails the run here, and detect-drift (which needs this job) does
-  # not start. With the variable set this job passes and nothing else changes.
-  require-role:
-    name: Require AWS_ROLE_ARN
+  # Configuration guard. Unlike ci.yml's plan job, which skips green on a PR where
+  # nothing is wired up, this workflow exists only to talk to AWS: a scheduled run
+  # with no role has detected nothing, and skipping to green reports every
+  # unattended run as "no drift" while it checked no account at all. So this job
+  # fails the run, and detect-drift (which needs it) does not start, unless both
+  # repository variables are set:
+  #
+  #   AWS_ROLE_ARN            the OIDC plan role detect-drift assumes.
+  #   TERRAGRUNT_ACCOUNT_IDS  a JSON object mapping each account directory under
+  #                           live/aws/ to its 12-digit account id, as a string so
+  #                           a leading zero survives, for example
+  #                           {"workload-staging":"222222222222","network":"444444444444"}.
+  #
+  # The map exists because the matrix spans several accounts. root.hcl names the
+  # state bucket after TERRAGRUNT_ACCOUNT_ID and falls back to the tracked
+  # account.hcl placeholder when it is unset, so a leaf planned without its real id
+  # dies at backend init against a bucket in an account that does not exist. One
+  # id cannot serve leaves in different accounts, so each leaf looks up its own
+  # account directory in the Plan step. A map that is not a JSON object would fail
+  # every leaf with a misleading "no entry" error, so it is rejected here once.
+  # An account directory missing from a valid map fails only that account's
+  # leaves, so the accounts the map does list keep being checked.
+  require-config:
+    name: Require AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_IDS
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fail when the drift role is not configured
+      - name: Fail when the drift role or account ids are not configured
         env:
           AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          ACCOUNT_IDS: ${{ vars.TERRAGRUNT_ACCOUNT_IDS }}
         run: |
+          unset_vars=0
           if [ -z "$AWS_ROLE_ARN" ]; then
-            echo "::error title=AWS_ROLE_ARN is not set::Drift detection cannot run: the AWS_ROLE_ARN repository variable (Settings > Secrets and variables > Actions > Variables) is unset, so no account was planned and no drift was checked. Set it to the OIDC role drift.yml assumes (see docs/first-deploy-aws.md)."
+            echo "::error title=AWS_ROLE_ARN is not set::Drift detection cannot run: the AWS_ROLE_ARN repository variable (Settings > Secrets and variables > Actions > Variables) is unset, so no account was planned and no drift was checked. Set it to the OIDC plan role drift.yml assumes (see docs/operations.md)."
+            unset_vars=1
+          fi
+          if [ -z "$ACCOUNT_IDS" ]; then
+            echo "::error title=TERRAGRUNT_ACCOUNT_IDS is not set::Drift detection cannot run: the TERRAGRUNT_ACCOUNT_IDS repository variable is unset, so no leaf can name its state bucket. Set it to a JSON object mapping each account directory under live/aws/ to its account id (see docs/operations.md)."
+            unset_vars=1
+          fi
+          if [ "$unset_vars" -ne 0 ]; then
             exit 1
           fi
-          echo "AWS_ROLE_ARN is set; drift detection will assume it."
+
+          if ! printf '%s' "$ACCOUNT_IDS" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            echo "::error title=TERRAGRUNT_ACCOUNT_IDS is not a JSON object::Drift detection cannot run: TERRAGRUNT_ACCOUNT_IDS must be a JSON object mapping account directory to account id, for example {\"workload-staging\":\"222222222222\"}."
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_IDS are set."
 
   detect-drift:
     name: Drift Check (${{ matrix.env }}/${{ matrix.component }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [discover, require-role]
+    needs: [discover, require-config]
     # The read-only plan role, the same one ci.yml's plan job assumes. Declaring
     # `environment: plan` makes the OIDC token present
     # repo:<org>/<repo>:environment:plan — the only sub the plan role trusts —
@@ -134,13 +166,56 @@ jobs:
       #       not a CI failure).
       # `set +e` keeps the step from aborting on code 1 before we can branch on it;
       # PIPESTATUS[0] captures terragrunt's code through the `tee` pipe.
+      #
+      # Before planning, the leaf's account id is resolved from
+      # TERRAGRUNT_ACCOUNT_IDS by its account directory and exported as the
+      # TERRAGRUNT_ACCOUNT_ID root.hcl reads, the same injection ci.yml's plan job
+      # and scripts/e2e.sh use. root.hcl assumes no role, so the backend and the
+      # provider both run as the credential configured above, and that credential
+      # has to be in the leaf's own account. A credential in another account either
+      # fails at backend init or, where a bucket policy lets it read the state,
+      # refreshes every resource in the wrong account and reports the whole leaf as
+      # drift. So a leaf whose account is not the credential's account is reported
+      # as a plan error, through the same path as a failed plan, and never planned.
+      #
+      # plan.txt becomes the body of a drift-error issue on a public repository, so
+      # these messages name the account directory and never an account id. The
+      # STS error goes to the job log only.
       - name: Plan
         id: plan
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
+        env:
+          ACCOUNT: ${{ matrix.account }}
+          ACCOUNT_IDS: ${{ vars.TERRAGRUNT_ACCOUNT_IDS }}
         run: |
+          # Writes the reason where the Report plan error step reads it and records
+          # exit code 1, so that step and Fail on plan error both run. The step
+          # itself exits 0: a failed step would skip both of them.
+          plan_error() {
+            printf '%s\n' "$1" | tee plan.txt
+            echo "exitcode=1" >> "$GITHUB_OUTPUT"
+          }
+
+          account_id=$(printf '%s' "$ACCOUNT_IDS" | jq -r --arg account "$ACCOUNT" '.[$account] | strings' 2>/dev/null || true)
+          if ! [[ "$account_id" =~ ^[0-9]{12}$ ]]; then
+            plan_error "TERRAGRUNT_ACCOUNT_IDS has no 12-digit account id for account directory ${ACCOUNT}, so this leaf's state bucket cannot be named. Add an entry for ${ACCOUNT}."
+            exit 0
+          fi
+
+          if ! caller_account=$(aws sts get-caller-identity --query Account --output text 2>"$RUNNER_TEMP/sts.err"); then
+            cat "$RUNNER_TEMP/sts.err" >&2
+            plan_error "Could not read the account of the assumed AWS_ROLE_ARN credential, so this leaf was not planned. The STS error is in the job log."
+            exit 0
+          fi
+          if [ "$caller_account" != "$account_id" ]; then
+            plan_error "The assumed AWS_ROLE_ARN credential is not in the account TERRAGRUNT_ACCOUNT_IDS maps to ${ACCOUNT}. This leaf can only be planned with a credential in its own account, so it was not planned."
+            exit 0
+          fi
+
+          export TERRAGRUNT_ACCOUNT_ID="$account_id"
           set +e
           terragrunt plan -detailed-exitcode -no-color 2>&1 | tee plan.txt
-          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Report drift
         if: steps.plan.outputs.exitcode == '2'

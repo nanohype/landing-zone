@@ -150,9 +150,18 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 **Trigger:** Cron schedule, 6 AM UTC Monday-Friday. Also supports manual dispatch.
 
-**Scope:** every `production` and `staging` live leaf, matrix auto-discovered from the tree with `git ls-files` (mirroring `ci.yml`) -- a new production/staging component starts being watched with no workflow edit. Development is ephemeral and the `org`/`hub` control planes are covered by their own bring-up, so both are excluded.
+**Scope:** every `production` and `staging` live leaf, matrix auto-discovered from the tree with `git ls-files` (mirroring `ci.yml`) -- a new production/staging component starts being watched with no workflow edit. A new account directory also needs an entry in `TERRAGRUNT_ACCOUNT_IDS`; until it has one, each of its leaves reports a plan error. Development is ephemeral and the `org`/`hub` control planes are covered by their own bring-up, so both are excluded.
 
-**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. Credential-gated: with `AWS_ROLE_ARN` unset the run fails (the `require-role` job errors and no leaf is planned) rather than reporting a check that never ran as green. `detect-drift` runs in the `plan` GitHub environment, so it assumes the read-only plan role (the same trust ci.yml's plan job uses); if that environment requires reviewers, each scheduled run waits for an approval before planning.
+**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. `detect-drift` runs in the `plan` GitHub environment, so it assumes the read-only plan role (the same trust ci.yml's plan job uses); if that environment requires reviewers, each scheduled run waits for an approval before planning.
+
+**Configuration:** two repository variables, both required. With either unset, or with `TERRAGRUNT_ACCOUNT_IDS` not a JSON object, the `require-config` job fails the run before any leaf is planned, rather than reporting a check that never ran as green.
+
+| Variable | Value |
+|---|---|
+| `AWS_ROLE_ARN` | the OIDC plan role `detect-drift` assumes |
+| `TERRAGRUNT_ACCOUNT_IDS` | a JSON object mapping each account directory under `live/aws/` to its 12-digit account id, as a string: `{"workload-staging":"222222222222","workload-production":"333333333333","network":"444444444444","backup":"666666666666"}` |
+
+The production and staging leaves live in several account directories, and `root.hcl` names each leaf's state bucket after its account id. Each leaf looks up its own account directory in `TERRAGRUNT_ACCOUNT_IDS` and plans with that id as `TERRAGRUNT_ACCOUNT_ID`. `root.hcl` assumes no role, so a leaf can only be planned with a credential in its own account: before planning, each leaf compares the assumed credential's account with its own id, and a leaf in a different account, or in an account directory the map does not list, is reported as a plan error (a `drift-error` issue and a red job) without being planned. One `AWS_ROLE_ARN` therefore plans the leaves of one account, and a run over leaves in several accounts stays red until each account's leaves can be planned with a credential in that account.
 
 **Response:** See [RB-001: Drift Detected](runbooks.md#rb-001-drift-detected) in the runbooks.
 
