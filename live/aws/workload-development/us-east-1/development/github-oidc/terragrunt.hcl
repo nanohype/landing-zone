@@ -9,8 +9,8 @@ include "envcommon" {
 
 # Apply ONCE per account (the OIDC provider is account-global). Run locally with
 # admin/SSO creds when/if the GitHub Actions CI path is adopted. Outputs:
-#   - deploy_role_arn: on the `development` GitHub Environment, as the role
-#     variable deploy.yml/destroy.yml read, and as E2E_AWS_ROLE_ARN for e2e.yml.
+#   - deploy_role_arn: DEPLOY_ROLE_ARN on the `development` GitHub Environment
+#     (deploy.yml/destroy.yml), and E2E_AWS_ROLE_ARN for e2e.yml.
 #   - plan_role_arn: the repository-level AWS_ROLE_ARN (see THE PLAN ROLE below).
 #
 # Trust is narrowed from the component default (all four workload environments,

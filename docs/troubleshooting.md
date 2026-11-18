@@ -148,7 +148,7 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
    }
    ```
 
-3. **Verify `AWS_ROLE_ARN`** is set as a GitHub Actions variable (not a secret) for the target environment
+3. **Verify `AWS_ROLE_ARN`** is set as a GitHub Actions variable (not a secret) for the target environment. `deploy.yml` and `destroy.yml` read `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` instead, set on the `development`/`staging`/`production` GitHub Environment and on nothing broader; the job names whichever the environment does not set, refuses either one set at repository or organization level, or reports that the two name different accounts
 
 4. **Check the workflow** is using the correct `permissions` block:
    ```yaml

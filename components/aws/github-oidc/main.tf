@@ -54,9 +54,10 @@ locals {
 #
 # NOTE: the org currently runs `deploy` and the e2e as LOCAL execs with SSO
 # credentials — neither assumes this role. It exists for the OPTIONAL GitHub
-# Actions CI path; its ARN goes on the GitHub Environments deploy.yml/destroy.yml
-# declare and in E2E_AWS_ROLE_ARN for e2e.yml — never in the repository-level
-# AWS_ROLE_ARN, which holds plan_role_arn for ci.yml's plan job and drift.yml.
+# Actions CI path; its ARN goes in DEPLOY_ROLE_ARN on the GitHub Environment
+# deploy.yml/destroy.yml declare, and in E2E_AWS_ROLE_ARN for e2e.yml — never in
+# the repository-level AWS_ROLE_ARN, which holds plan_role_arn for ci.yml's plan
+# job and drift.yml.
 ################################################################################
 
 data "aws_iam_policy_document" "trust" {
