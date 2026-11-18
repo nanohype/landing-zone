@@ -375,7 +375,20 @@ drift.yml assumes each account's own plan role from the same environment, read
 from the `DRIFT_PLAN_ROLE_ARNS` map of account directory to `plan_role_arn` (see
 [operations.md](operations.md#driftyml----drift-detection)). The deploy role does
 not trust that environment, so a `deploy_role_arn` in either variable makes PR
-plans or drift detection fail at the credential step.
+plans or drift detection fail at the credential step; in drift.yml that failure
+files a `drift-error` issue for each of the account's leaves and turns the run
+red.
+
+Arming drift detection takes a plan role in every account directory that holds
+a `staging` or `production` leaf (`workload-staging`, `workload-production`,
+`network` and `backup`): the account's state backend created, one
+`github-oidc` leaf per account applied locally with that account's credentials,
+and its `plan_role_arn` recorded in the repository-level `DRIFT_PLAN_ROLE_ARNS`
+once that account's `staging` and `production` leaves have been applied. The per-account list is in
+[operations.md](operations.md#arming-drift-detection-one-plan-role-per-account).
+It is blocked on two prerequisites recorded there: a staging or production plan
+role must not trust `environment:plan` as the development one does, and
+`plan_allowed_subject_claims` must become an exact-environment allowlist first.
 
 ## End-to-end validation (`task e2e`)
 

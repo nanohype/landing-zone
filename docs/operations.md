@@ -118,7 +118,7 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 | **architecture-components** | Runs `scripts/check-architecture-components.sh` -- the architecture doc's component inventory must be the components that exist, both directions; CLAUDE.md's layer list is checked in the omission direction only. A documented component that is gone sends a reader to a missing directory; a component no table names is quieter and worse, because the doc reads as complete. |
 | **teardown-gates** | Runs `scripts/check-teardown-gates.py` -- in a component declaring `force_destroy_buckets`, every teardown-gate attribute must resolve permissively when the lever is set, and every protectable resource must carry one. A module without the lever declares why in the script's EXEMPT table. No tflint or checkov rule covers `force_destroy` or `deletion_protection`, and a `tofu test` assert cannot reach a grandchild module's attributes. |
 | **tenant-schema-readers** | Runs `scripts/check-tenant-schema-readers.py` -- every field a `tenants` object type declares must be read by a resource in that component. A field with no reader is a control an operator can set, sees accepted, and believes is in force. |
-| **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan` to show what would change (credential-gated -- skips green when `AWS_ROLE_ARN` is unset). |
+| **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan -lock=false` to show what would change (credential-gated -- skips green when `AWS_ROLE_ARN` is unset). The credential is the read-only plan role, which cannot write the `.tflock` object `root.hcl`'s `use_lockfile = true` takes, so the plan skips the lock. The PR plan writes nothing and nothing applies its result (it gates on whether the plan runs, not on what it would change), so it never contends with an apply. |
 
 ### deploy.yml -- Manual Deploy
 
@@ -171,7 +171,12 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 **Scope:** every `production` and `staging` live leaf whose account has a plan role, matrix auto-discovered from the tree with `git ls-files` (mirroring `ci.yml`) -- a new production/staging component starts being watched with no workflow edit once its account directory is in `DRIFT_PLAN_ROLE_ARNS`. Development is ephemeral and the `org`/`hub` control planes are covered by their own bring-up, so both are excluded.
 
-**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. `detect-drift` runs in the `plan` GitHub environment, so it assumes the read-only plan role (the same trust ci.yml's plan job uses); if that environment requires reviewers, each scheduled run waits for an approval before planning.
+**Behavior:** Runs `terragrunt plan -lock=false -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. `detect-drift` runs in the `plan` GitHub environment, so it assumes the read-only plan role (the same trust ci.yml's plan job uses); if that environment requires reviewers, each scheduled run waits for an approval before planning.
+
+- **A plan that cannot run is an error, not "no drift".** Exit code 1 opens or updates an issue labelled `drift-error` and fails the job. A plan role the job cannot assume takes the same path: the `Configure AWS credentials` step continues on error, and the plan step records exit code 1 with a message naming the account directory (never the role ARN), so the account's leaves each get a `drift-error` issue and the run ends red. Issue titles name the account directory and the leaf (`Drift detected: <account>/<env>/<component>`, `Drift check error: <account>/<env>/<component>`), as do the job names, because the same `<env>/<component>` can exist in several accounts; an open issue with the same title is commented on rather than duplicated, and the lookup pages through every open issue with the label. The usual causes are the account's `github-oidc` leaf not applied yet, a trust that does not admit the job's OIDC subject, or a `DRIFT_PLAN_ROLE_ARNS` entry naming the wrong role; the AWS error itself is in that step's log.
+- **No lock.** `root.hcl` sets `use_lockfile = true`, and a plan that locks writes a `.tflock` object beside the state. The plan role is read-only and cannot write it, so the drift plan runs with `-lock=false`. That is safe because the plan writes nothing and nothing applies its result: it reads state, and its output is a report rather than a saved plan, so it never contends with an apply. An apply at the same moment can only make one report stale, and the next run corrects it.
+- **Account ids are redacted.** The repository is public, and a leaf's plan output carries its account's real id (the state bucket `<account_id>-<region>-tfstate` in backend and lock errors, role ARNs in access errors). Before any step reads the plan output for an issue, `scripts/redact-account-ids.py` replaces every id found in `DRIFT_PLAN_ROLE_ARNS` (fixed-string, wherever it appears) and every other standalone run of twelve digits with `<account-id>`; the issue step runs the same two rules over the title and the whole body. The ids reach both through the environment, never through the script text. The redactor runs its self-test first and then requires a non-empty id list (`--require-ids`), and the issue step refuses an empty or unparseable list too, so a redaction that cannot run fails the job without filing anything; the same self-test runs on every pull request in ci.yml's `workflows` job. The run summary and the job's annotations name account directories and leaves, never role values, and every name printed there replaces any run of twelve or more digits.
+- **The job logs are not redacted, and they carry every account id.** The runner prints each step's env block, and repository variables are not masked. So `select-accounts`' log carries the whole `DRIFT_PLAN_ROLE_ARNS` value; every `Drift Check` job's log carries the full id list (`REDACT_ACCOUNT_IDS`, in the env block of its redaction and report steps), not only its own account's id; and each job's credential step inputs and raw plan output carry its own account's id. On this public repository, treat the account ids in `DRIFT_PLAN_ROLE_ARNS` as published to anyone who can read the Actions logs. What the redaction keeps them out of is the issues, which are indexed, notified and outlive the log retention.
 
 **Configuration:** one repository variable, `DRIFT_PLAN_ROLE_ARNS`: a JSON object mapping each account directory under `live/aws/` to the read-only plan role `github-oidc` creates in that account (its `plan_role_arn` output):
 
@@ -191,6 +196,50 @@ The `select-accounts` job reads the variable once, at repository or organization
 - An account directory with no entry is skipped: its leaves are not planned, the run summary names each of them, and a notice names the account. Drift detection can be armed one account at a time, as each account gets its `github-oidc` plan role.
 - An entry whose value is not an IAM role ARN, or whose key names no account directory holding a production or staging leaf (a misspelt key, or an account whose last such leaf was removed), is reported as an error and left out. The accounts mapped correctly are still planned, and the `report-config-errors` job then fails the run. When an account directory's last production or staging leaf is removed, remove its key too.
 - The run fails before any leaf is planned when the variable is unset, is not a JSON object, or maps no account directory to a valid plan role. A scheduled run that checked no account does not report "no drift".
+
+**The variable is repository-level.** Set it under Settings > Secrets and variables > Actions > Variables, on the **Repository variables** tab (an organization variable of the same name also works). Do not set it on the `plan` environment: `select-accounts` declares no environment and never reads an environment value, so a value set only there leaves the variable unset and the run fails.
+
+**What a skipped account looks like.** The run summary's "Drift accounts" section lists the planned account directories, then:
+
+```text
+Skipped, because DRIFT_PLAN_ROLE_ARNS has no valid plan role for the account. These leaves were not checked for drift:
+
+- `network`: `production/shared-dns`, `production/shared-network`, `staging/shared-dns`, `staging/shared-network`
+```
+
+and the run carries one notice per skipped account ("Drift not checked for network"). A skipped account does not fail the run, and its leaves get no `Drift Check` job at all, so no issue can be filed for them: an account missing from the variable is unwatched, and the summary is the only place that says so.
+
+#### Arming drift detection: one plan role per account
+
+Each account directory holding a `staging` or `production` leaf needs a read-only plan role of its own, because `root.hcl` assumes no role and a leaf can only be planned with a credential in its own account. Today only `workload-development` has a `github-oidc` leaf, so no account below has a plan role yet, and drift.yml fails at `select-accounts` until at least one entry exists.
+
+**Blocked:** do not create these leaves until both [required-before items](#required-before-any-staging-or-production-plan-role) below are resolved. The plan-role trust these leaves ship depends on that decision.
+
+The account directories that hold `staging` or `production` leaves today (from `live/aws/`; `reference-adopt` is never applied, and the other directories hold no `staging` or `production` leaf):
+
+| Account directory | Its `staging`/`production` leaves | Put the `github-oidc` leaf under | Deploy role in that leaf |
+|---|---|---|---|
+| `workload-staging` | every workload component, `staging` | `staging` | `allowed_subject_claims = ["environment:staging"]` (deploy.yml/destroy.yml) |
+| `workload-production` | every workload component, `production` | `production` | `allowed_subject_claims = ["environment:production"]` (deploy.yml) |
+| `network` | `shared-network`, `shared-dns` in both | `production` | `create_deploy_role = false`: no workflow deploys into this account |
+| `backup` | `shared-backup` in both | `production` | `create_deploy_role = false`: no workflow deploys into this account |
+
+The OIDC provider and both roles are account-global, so each account gets exactly **one** `github-oidc` leaf, whichever environment directory holds it. For each account directory above:
+
+0. **Create the account's state backend.** None of these accounts has one yet, and the local apply in step 3 cannot initialise without the `<account_id>-us-east-1-tfstate` bucket. Under that account's credentials, run `task init-backend REGION=us-east-1` (it takes the caller's account id, or `ACCOUNT_ID=<id>`), which runs `scripts/init-backend-aws.sh`.
+1. **Add the leaf** at `live/aws/<account>/us-east-1/<env>/github-oidc/terragrunt.hcl`, modelled on the `workload-development` one, with `github_repos = ["landing-zone"]`, the deploy-role setting from the table, and the plan role left on (`create_plan_role` defaults to true) with the trust the required-before items settle.
+2. **Create or reference the OIDC provider.** AWS allows one provider per issuer per account. If the account has none for `token.actions.githubusercontent.com` (check with `aws iam list-open-id-connect-providers` under that account's credentials), leave `create_oidc_provider` at its default `true`; if it already has one, set `create_oidc_provider = false` and the component references it.
+3. **Apply it locally with that account's credentials**, the same way as the `org` components: `TERRAGRUNT_ACCOUNT_ID=<that account's id> AWS_PROFILE=<that account's profile> task apply ACCOUNT=<account> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=github-oidc`. Neither deploy.yml nor drift.yml can apply it: the role it creates is the one they would need.
+4. **Record the plan role, once the account's leaves are applied.** Read it with `terragrunt output -raw plan_role_arn` in the leaf directory, and add it to `DRIFT_PLAN_ROLE_ARNS` under the account directory's name only after that account's `staging` and `production` leaves have been applied. An entry arms every one of the account's leaves at once: a leaf never applied plans as all creates and files a `Drift detected` issue (about twenty for a workload account), and one whose dependencies have no state yet fails and files a `drift-error` issue. The next run after the entry is added plans that account's leaves; until then they are listed as skipped.
+
+The leaf itself is a `staging` or `production` leaf, so once it exists drift.yml plans it too, with the plan role it created.
+
+#### Required before any staging or production plan role
+
+Two prerequisites block every `staging` or `production` plan-role leaf above. Neither is implemented yet; resolve both before such a leaf is created.
+
+1. **The plan-role pattern must not be copied as-is.** The plan role trusts `environment:plan` (the `plan_allowed_subject_claims` default), and ci.yml's PR plan job declares that environment from any branch, including a same-repository pull request's. The role carries account-wide `ReadOnlyAccess`, which reads every S3 object (state files included, with any value a provider does not mark sensitive) and every DynamoDB item in the account. The `workload-development` leaf ships that trust today; in `staging` and `production` it would hand staging and production data to any branch that can run ci.yml. So a staging or production plan role must not trust `environment:plan`. The recommended design, pending the owner's decision, is a separate exact `environment:drift` claim backed by a `drift` GitHub Environment whose deployment-branch policy admits `main` only, declared by drift.yml (which today declares `plan`); the alternative is a read policy narrowed below `ReadOnlyAccess`.
+2. **`plan_allowed_subject_claims` must be an exact-environment allowlist.** Its validation refuses only a bare `*` today, so a wildcard environment, a `pull_request` claim or a `ref:` claim would be accepted. Apply the same rule `allowed_subject_claims` carries (every entry matching `^environment:[^*?]+$`), with a `tofu test` case in `components/aws/github-oidc/tests/` proving each of those is refused, before any of these leaves exists.
 
 **Response:** See [RB-001: Drift Detected](runbooks.md#rb-001-drift-detected) in the runbooks.
 

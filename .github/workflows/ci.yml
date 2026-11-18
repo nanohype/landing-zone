@@ -898,6 +898,13 @@ jobs:
         run: zizmor --offline --persona=auditor .github/workflows/ || true
       - name: Gate (high severity)
         run: zizmor --offline --persona=auditor --min-severity=high .github/workflows/
+      # drift.yml publishes plan output into issues on this public repository
+      # only after scripts/redact-account-ids.py has removed every account id.
+      # Its self-test (synthetic ids only) holds both redaction passes and the
+      # fail-closed parsing here, so an edit that weakens them fails the pull
+      # request rather than the next scheduled drift run.
+      - name: Drift redaction self-test
+        run: python3 scripts/redact-account-ids.py --self-test
 
   # The gates above are the assertions no `tofu test` can reach, and they are regex
   # over HCL — a matcher that stops matching keeps exiting 0, and the summary line
@@ -1124,9 +1131,18 @@ jobs:
         # public template and fatal for a real plan, so the id is injected here as
         # the env var root.hcl already documents rather than written into a tracked
         # file — the same path scripts/e2e.sh uses.
+        #
+        # -lock=false: root.hcl sets use_lockfile = true, so a plan that locks
+        # writes a .tflock object beside the state. This job's credential is the
+        # read-only plan role (ReadOnlyAccess), which cannot write that object, so
+        # every plan would fail acquiring the lock. Skipping it is safe because the
+        # PR plan writes nothing and nothing applies its result: it gates on
+        # whether the plan runs, not on what it would change, so it never contends
+        # with an apply (it still fails the build if the plan itself errors). An
+        # apply running at the same moment can only make this plan's diff stale.
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
-        run: terragrunt plan -no-color
+        run: terragrunt plan -lock=false -no-color
 
   merge-gate:
     name: merge gate
