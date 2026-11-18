@@ -179,11 +179,16 @@ run "empty_allowed_subject_claims_rejected" {
   ]
 }
 
-# INVARIANT 3c (guardrail): allowed_subject_claims refuses every claim that matches
-# "environment:plan" under IAM StringLike semantics. ci.yml's PR plan job and
-# drift.yml declare that environment from any branch, so a deploy-role claim that
-# matches it — exactly, or through a wildcard — hands the deploy role to every
-# branch. Each run below is one way back in; the validation must reject them all.
+# INVARIANT 3c (guardrail): allowed_subject_claims is an ALLOWLIST — every entry
+# must be an exact "environment:<name>" claim with no StringLike wildcard. A
+# wildcard admits any environment name a branch's workflow declares, and GitHub
+# creates that environment, unprotected, the first time a workflow names it, so
+# "environment:prod*" is as open as "environment:*". A pull_request or ref: claim
+# is held by anyone who can open that pull request or push that ref. And
+# "environment:plan", which ci.yml's PR plan job and drift.yml declare from any
+# branch, is refused in every letter case (GitHub environment names are
+# case-insensitive). Each run below is one way back in; the validation must
+# reject them all — including when the bad claim sits beside a good one.
 run "plan_environment_claim_rejected" {
   command = plan
 
@@ -196,11 +201,35 @@ run "plan_environment_claim_rejected" {
   ]
 }
 
+run "plan_environment_claim_other_case_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:Plan"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
 run "environment_wildcard_claim_rejected" {
   command = plan
 
   variables {
     allowed_subject_claims = ["environment:*"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "environment_prefix_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:production", "environment:prod*"]
   }
 
   expect_failures = [
@@ -232,18 +261,84 @@ run "partial_wildcard_claim_covering_plan_rejected" {
   ]
 }
 
-# INVARIANT 3d (precision): the guard is a StringLike match, not a ban on wildcard
-# characters or a regex over the raw claim. A wildcard that cannot cover the plan
-# environment is accepted, and a regex metacharacter in a claim is literal — a
-# "." that a naive regex would read as any-character (and so as matching "plan")
-# does not trip it. Without this, the validation could reject everything and the
-# rejection runs above would still pass.
-run "claims_not_matching_plan_accepted" {
+run "pull_request_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["pull_request"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "tag_ref_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["ref:refs/tags/*"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "exact_branch_ref_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["ref:refs/heads/main"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+# INVARIANT 3d (guardrail): github_repos and github_org are literal names. Each
+# lands verbatim in the StringLike sub, so "landing-zone*" renders
+# repo:<org>/landing-zone*:<claim>, which matches
+# repo:<org>/landing-zone:environment:plan whatever allowed_subject_claims holds —
+# a bypass of every claim check above.
+run "wildcard_github_repo_rejected" {
+  command = plan
+
+  variables {
+    github_repos           = ["landing-zone*"]
+    allowed_subject_claims = ["environment:production"]
+  }
+
+  expect_failures = [
+    var.github_repos,
+  ]
+}
+
+run "wildcard_github_org_rejected" {
+  command = plan
+
+  variables {
+    github_org = "nano*"
+  }
+
+  expect_failures = [
+    var.github_org,
+  ]
+}
+
+# INVARIANT 3e (precision): the guard refuses wildcards, non-environment claims
+# and the plan environment — not every claim near them. An exact environment name
+# containing a regex metacharacter ("pl.n"), one that merely starts with "plan"
+# ("planning"), and an ordinary exact name are accepted and rendered as given.
+# Without this, the validation could reject everything and the rejection runs
+# above would still pass.
+run "exact_environment_claims_accepted" {
   command = plan
 
   variables {
     github_repos           = ["landing-zone"]
-    allowed_subject_claims = ["environment:prod*", "environment:pl.n"]
+    allowed_subject_claims = ["environment:prod", "environment:pl.n", "environment:planning"]
   }
 
   assert {
@@ -252,11 +347,12 @@ run "claims_not_matching_plan_accepted" {
       s if toset(flatten([
         try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
         ])) == toset([
-        "repo:nanohype/landing-zone:environment:prod*",
+        "repo:nanohype/landing-zone:environment:prod",
         "repo:nanohype/landing-zone:environment:pl.n",
+        "repo:nanohype/landing-zone:environment:planning",
       ])
     ]) == 1
-    error_message = "claims that cannot match environment:plan under StringLike must be accepted and rendered as given"
+    error_message = "exact environment claims other than plan must be accepted and rendered as given"
   }
 }
 

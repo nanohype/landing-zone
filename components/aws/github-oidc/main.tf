@@ -2,10 +2,11 @@ locals {
   # Subject claims the deploy role trusts: the cartesian product of the configured
   # repos and the allowed claim suffixes (repo:<org>/<repo>:<claim>). The default
   # claim set is the four GitHub Environments the deploy/destroy/e2e workflows
-  # declare — NOT environment:plan (reachable from any branch), NOT a tag ref, and
-  # NOT a bare :*, which would also trust pull_request and every branch context.
-  # Only Actions workflows in these repos, in one of these contexts, may assume the
-  # role.
+  # declare, each an exact name (validated: no wildcard, no pull_request or ref:
+  # claim, never environment:plan, which the PR plan job and drift declare and the
+  # read-only plan role trusts). Only Actions workflows in these repos that declare
+  # one of these environments may assume the role — from any ref, so each
+  # environment's own deployment-branch policy is part of this control.
   subjects = flatten([
     for r in var.github_repos : [
       for c in var.allowed_subject_claims : "repo:${var.github_org}/${r}:${c}"
@@ -53,7 +54,9 @@ locals {
 #
 # NOTE: the org currently runs `deploy` and the e2e as LOCAL execs with SSO
 # credentials — neither assumes this role. It exists for the OPTIONAL GitHub
-# Actions CI path; its ARN feeds the AWS_ROLE_ARN / E2E_AWS_ROLE_ARN repo vars.
+# Actions CI path; its ARN goes on the GitHub Environments deploy.yml/destroy.yml
+# declare and in E2E_AWS_ROLE_ARN for e2e.yml — never in the repository-level
+# AWS_ROLE_ARN, which holds plan_role_arn for ci.yml's plan job and drift.yml.
 ################################################################################
 
 data "aws_iam_policy_document" "trust" {

@@ -325,8 +325,9 @@ into the GitHub Actions repo *variables*:
 ```bash
 task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=github-oidc
 cd live/aws/workload-<env>/us-east-1/<env>/github-oidc && terragrunt output -raw deploy_role_arn
-# Set the printed ARN as the AWS_ROLE_ARN (deploy.yml) and E2E_AWS_ROLE_ARN
-# (e2e.yml) repo variables. Local exec does not need this.
+# Set the printed ARN on the <env> GitHub Environment, as the role variable
+# deploy.yml/destroy.yml read, and as E2E_AWS_ROLE_ARN (e2e.yml) — never as the
+# repository-level AWS_ROLE_ARN (see below). Local exec does not need this.
 ```
 
 The role ships with **no permissions** — its trust is scoped to the four GitHub
@@ -334,11 +335,26 @@ Environments the deploy, destroy and e2e workflows declare
 (`repo:nanohype/landing-zone:environment:development`,
 `repo:nanohype/landing-zone:environment:staging`,
 `repo:nanohype/landing-zone:environment:production` and
-`repo:nanohype/landing-zone:environment:e2e`), never the `plan` environment the
+`repo:nanohype/landing-zone:environment:e2e`; the `workload-development` leaf
+narrows that to `development` and `e2e`), never the `plan` environment the
 read-only plan role trusts — and you attach the policies CI needs via the
 component's `managed_policy_arns` (e.g. `AdministratorAccess` with a
 `permissions_boundary_arn`, or a scoped set). Skip this component entirely if you
 only run locally.
+
+Before attaching any policy, give every environment the role trusts a
+deployment-branch policy in the repository settings (main, or protected
+branches), and required reviewers on `staging`, `production` and `e2e`. The
+trust names environments, not refs: a job that declares `environment: production`
+presents the same `sub` from any branch, and `deploy.yml`, `destroy.yml` and
+`e2e.yml` can be dispatched from any branch. An environment that does not exist
+yet is created unprotected the first time a workflow names it.
+
+The repository-level `AWS_ROLE_ARN` variable is the **plan** role
+(`plan_role_arn`), which ci.yml's plan job and drift.yml assume from
+`environment: plan`. The deploy role does not trust that environment, so
+`AWS_ROLE_ARN` holding `deploy_role_arn` makes PR plans and drift detection fail
+at the credential step.
 
 ## End-to-end validation (`task e2e`)
 
