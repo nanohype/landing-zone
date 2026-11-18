@@ -169,9 +169,28 @@ The confirmation guard (`confirm == environment`) prevents accidental destroys. 
 
 **Trigger:** Cron schedule, 6 AM UTC Monday-Friday. Also supports manual dispatch.
 
-**Scope:** every `production` and `staging` live leaf, matrix auto-discovered from the tree with `git ls-files` (mirroring `ci.yml`) -- a new production/staging component starts being watched with no workflow edit. Development is ephemeral and the `org`/`hub` control planes are covered by their own bring-up, so both are excluded.
+**Scope:** every `production` and `staging` live leaf whose account has a plan role, matrix auto-discovered from the tree with `git ls-files` (mirroring `ci.yml`) -- a new production/staging component starts being watched with no workflow edit once its account directory is in `DRIFT_PLAN_ROLE_ARNS`. Development is ephemeral and the `org`/`hub` control planes are covered by their own bring-up, so both are excluded.
 
-**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. Credential-gated: with `AWS_ROLE_ARN` unset the run fails (the `require-role` job errors and no leaf is planned) rather than reporting a check that never ran as green. `detect-drift` runs in the `plan` GitHub environment, so it assumes the read-only plan role (the same trust ci.yml's plan job uses); if that environment requires reviewers, each scheduled run waits for an approval before planning.
+**Behavior:** Runs `terragrunt plan -detailed-exitcode` for each discovered leaf. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. `detect-drift` runs in the `plan` GitHub environment, so it assumes the read-only plan role (the same trust ci.yml's plan job uses); if that environment requires reviewers, each scheduled run waits for an approval before planning.
+
+**Configuration:** one repository variable, `DRIFT_PLAN_ROLE_ARNS`: a JSON object mapping each account directory under `live/aws/` to the read-only plan role `github-oidc` creates in that account (its `plan_role_arn` output):
+
+```json
+{
+  "workload-staging": "arn:aws:iam::222222222222:role/github-actions-plan",
+  "workload-production": "arn:aws:iam::333333333333:role/github-actions-plan",
+  "network": "arn:aws:iam::444444444444:role/github-actions-plan",
+  "backup": "arn:aws:iam::666666666666:role/github-actions-plan"
+}
+```
+
+The production and staging leaves live in several account directories, and `root.hcl` assumes no role: the backend and the provider both act as the job's credential, so a leaf can only be planned with a credential in its own account. Each leaf assumes its account's plan role and takes its account id from that role's ARN, passing it to terragrunt as `TERRAGRUNT_ACCOUNT_ID` so `root.hcl` names the state bucket `<account_id>-<region>-tfstate`. The credential and the bucket come from one value, so they cannot name different accounts. In an estate where several account directories are one AWS account, map each of them to that account's plan role.
+
+The `select-accounts` job reads the variable once, at repository or organization level, and passes each role to its leaves through the matrix, so a value set on the `plan` environment is not read.
+
+- An account directory with no entry is skipped: its leaves are not planned, the run summary names each of them, and a notice names the account. Drift detection can be armed one account at a time, as each account gets its `github-oidc` plan role.
+- An entry whose value is not an IAM role ARN, or whose key names no account directory holding a production or staging leaf (a misspelt key, or an account whose last such leaf was removed), is reported as an error and left out. The accounts mapped correctly are still planned, and the `report-config-errors` job then fails the run. When an account directory's last production or staging leaf is removed, remove its key too.
+- The run fails before any leaf is planned when the variable is unset, is not a JSON object, or maps no account directory to a valid plan role. A scheduled run that checked no account does not report "no drift".
 
 **Response:** See [RB-001: Drift Detected](runbooks.md#rb-001-drift-detected) in the runbooks.
 

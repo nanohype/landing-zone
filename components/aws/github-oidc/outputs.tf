@@ -9,7 +9,7 @@ output "oidc_provider_arn" {
 }
 
 output "plan_role_arn" {
-  description = "ARN of the read-only GitHub Actions plan role. Set as the AWS_ROLE_ARN repo variable so the CI plan matrix can assume it. Null when create_plan_role is false."
+  description = "ARN of the read-only GitHub Actions plan role. Set as the AWS_ROLE_ARN repo variable so the CI plan matrix can assume it, and as this account's entry in the DRIFT_PLAN_ROLE_ARNS repo variable so drift.yml can plan the account's production and staging leaves. Null when create_plan_role is false."
   value       = var.create_plan_role ? aws_iam_role.plan[0].arn : null
 }
 

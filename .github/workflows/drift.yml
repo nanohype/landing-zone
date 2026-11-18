@@ -15,7 +15,8 @@ permissions:
 jobs:
   # Auto-discovers the drift matrix from the working tree, mirroring ci.yml's
   # discover job, so a new production/staging live entry starts getting watched
-  # without a workflow edit. The matrix is every
+  # without a workflow edit once its account has a plan role (see
+  # select-accounts). The matrix is every
   # live/<cloud>/<account>/<region>/<env>/<component>/terragrunt.hcl whose env is
   # production or staging — the two long-lived deployed environments (development is
   # ephemeral, org/hub are management/fleet control planes covered by their own
@@ -51,33 +52,148 @@ jobs:
           )
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
-  # Credential guard. Unlike ci.yml's plan job, which skips green on a PR where
-  # no role is wired up, this workflow exists only to talk to AWS: a scheduled run
-  # with no role has detected nothing, and skipping to green reported every
-  # unattended run as "no drift" while it checked no account at all. So an unset
-  # AWS_ROLE_ARN fails the run here, and detect-drift (which needs this job) does
-  # not start. With the variable set this job passes and nothing else changes.
-  require-role:
-    name: Require AWS_ROLE_ARN
+  # Chooses the plan role for each leaf. The matrix spans every account directory
+  # under live/aws/ that holds a production or staging leaf, and root.hcl assumes
+  # no role: the backend and the provider both act as the credential detect-drift
+  # configures, so a leaf can only be planned with a credential in its own
+  # account. DRIFT_PLAN_ROLE_ARNS is a repository variable holding a JSON object
+  # that maps each account directory to the read-only plan role github-oidc
+  # creates in that account (its plan_role_arn output), for example
+  # {"workload-staging":"arn:aws:iam::222222222222:role/github-actions-plan"}.
+  #
+  # Each leaf takes its account id from its role's ARN, so the credential and the
+  # state bucket name (root.hcl names it after TERRAGRUNT_ACCOUNT_ID) come from one
+  # value and cannot name different accounts.
+  #
+  # A leaf whose account directory has no entry is not planned: it is skipped and
+  # named in the run summary, so drift detection can be armed one account at a
+  # time. An entry that is not an IAM role ARN, or whose key names no account
+  # directory the matrix plans (a misspelt key, or an account whose last
+  # production or staging leaf was removed), is reported and left out, and
+  # report-config-errors fails the run after the accounts mapped correctly have
+  # been planned. So a bad entry is never quiet and never stops the good ones.
+  # The run fails before planning anything only when the variable is unset, is
+  # not a JSON object, or leaves no account to plan: a scheduled run that checked
+  # no account must not report "no drift".
+  #
+  # The role ARNs reach detect-drift through the matrix. This job declares no
+  # environment, so it reads the repository (or organization) value. detect-drift
+  # declares `environment: plan`, where an environment-level value would win, so
+  # reading the variable once, here, keeps the two from disagreeing.
+  select-accounts:
+    name: Select accounts with a plan role
+    needs: discover
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions: {}
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      config_error: ${{ steps.select.outputs.config_error }}
     steps:
-      - name: Fail when the drift role is not configured
+      - name: Pair each leaf with its account's plan role
+        id: select
         env:
-          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          ROLE_ARNS: ${{ vars.DRIFT_PLAN_ROLE_ARNS }}
+          LEAVES: ${{ needs.discover.outputs.matrix }}
         run: |
-          if [ -z "$AWS_ROLE_ARN" ]; then
-            echo "::error title=AWS_ROLE_ARN is not set::Drift detection cannot run: the AWS_ROLE_ARN repository variable (Settings > Secrets and variables > Actions > Variables) is unset, so no account was planned and no drift was checked. Set it to the OIDC role drift.yml assumes (see docs/first-deploy-aws.md)."
+          if [ -z "$ROLE_ARNS" ]; then
+            echo "::error title=DRIFT_PLAN_ROLE_ARNS is not set::Drift detection cannot run: the DRIFT_PLAN_ROLE_ARNS repository variable (Settings > Secrets and variables > Actions > Variables) is unset, so no account has a plan role and no drift was checked. Set it to a JSON object mapping each account directory under live/aws/ to the plan role github-oidc creates in that account (see docs/operations.md)."
             exit 1
           fi
-          echo "AWS_ROLE_ARN is set; drift detection will assume it."
+          if ! printf '%s' "$ROLE_ARNS" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            echo "::error title=DRIFT_PLAN_ROLE_ARNS is not a JSON object::Drift detection cannot run: DRIFT_PLAN_ROLE_ARNS must be a JSON object mapping account directory to plan role ARN, for example {\"workload-staging\":\"arn:aws:iam::<account>:role/github-actions-plan\"}."
+            exit 1
+          fi
+
+          # Each query lists keys, never values. A failed jq is reported as its own
+          # error rather than read as an empty list, because an empty list is the
+          # passing answer.
+          if ! malformed=$(jq -n -r --argjson roles "$ROLE_ARNS" '
+              $roles | to_entries[]
+              | select((.value | type) != "string" or (.value | test("^arn:aws:iam::[0-9]{12}:role/.+$") | not))
+              | .key
+            '); then
+            echo "::error::DRIFT_PLAN_ROLE_ARNS could not be checked, so no leaf was planned."
+            exit 1
+          fi
+          if ! unknown=$(jq -n -r --argjson roles "$ROLE_ARNS" --argjson leaves "$LEAVES" '
+              [$leaves[].account] as $planned
+              | $roles | keys[] | select(IN($planned[]) | not)
+            '); then
+            echo "::error::DRIFT_PLAN_ROLE_ARNS could not be compared with the matrix, so no leaf was planned."
+            exit 1
+          fi
+
+          config_error=false
+          if [ -n "$malformed" ]; then
+            echo "::error title=DRIFT_PLAN_ROLE_ARNS holds a value that is not a role ARN::Each value must be an IAM role ARN (arn:aws:iam::<account>:role/<name>). Left out, so those accounts are skipped: $(printf '%s' "$malformed" | paste -sd ' ' -)."
+            config_error=true
+          fi
+          if [ -n "$unknown" ]; then
+            echo "::error title=DRIFT_PLAN_ROLE_ARNS names an account drift does not plan::Each key must be an account directory under live/aws/ that holds a production or staging leaf. Left out: $(printf '%s' "$unknown" | paste -sd ' ' -)."
+            config_error=true
+          fi
+
+          roles=$(jq -n -c --argjson roles "$ROLE_ARNS" --argjson leaves "$LEAVES" '
+              [$leaves[].account] as $planned
+              | $roles
+              | with_entries(select(
+                  (.value | type) == "string"
+                  and (.value | test("^arn:aws:iam::[0-9]{12}:role/.+$"))
+                  and (.key | IN($planned[]))
+                ))
+            ')
+          matrix=$(jq -n -c --argjson roles "$roles" --argjson leaves "$LEAVES" '
+              $leaves | map(select($roles[.account] != null) | . + {role_arn: $roles[.account]})
+            ')
+          skipped=$(jq -n -r --argjson roles "$roles" --argjson leaves "$LEAVES" '
+              [$leaves[] | select($roles[.account] == null) | .account] | unique | .[]
+            ')
+
+          if [ "$matrix" = "[]" ] || [ -z "$matrix" ]; then
+            echo "::error title=No leaf to plan::DRIFT_PLAN_ROLE_ARNS maps no account directory to a valid plan role, so no leaf would be planned and no drift checked."
+            exit 1
+          fi
+
+          {
+            echo "## Drift accounts"
+            echo
+            echo "Planned with the account's plan role:"
+            echo
+            printf '%s' "$LEAVES" | jq -r --argjson roles "$roles" '
+                [.[] | select($roles[.account] != null) | .account] | unique[] | "- `\(.)`"
+              '
+            if [ -n "$skipped" ]; then
+              echo
+              echo "Skipped, because DRIFT_PLAN_ROLE_ARNS has no valid plan role for the account. These leaves were not checked for drift:"
+              echo
+              printf '%s' "$LEAVES" | jq -r --argjson roles "$roles" '
+                  map(select($roles[.account] == null))
+                  | group_by(.account)[]
+                  | "- `\(.[0].account)`: " + (map("`\(.env)/\(.component)`") | join(", "))
+                '
+            fi
+            if [ "$config_error" = true ]; then
+              echo
+              echo "DRIFT_PLAN_ROLE_ARNS has entries that were left out (see the errors on this run). The run fails after the accounts above are planned."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$skipped" ]; then
+            while IFS= read -r account; do
+              echo "::notice title=Drift not checked for ${account}::DRIFT_PLAN_ROLE_ARNS has no valid plan role for account directory ${account}, so its leaves were skipped. They are listed in the run summary."
+            done <<< "$skipped"
+          fi
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "config_error=$config_error" >> "$GITHUB_OUTPUT"
 
   detect-drift:
     name: Drift Check (${{ matrix.env }}/${{ matrix.component }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [discover, require-role]
-    # The read-only plan role, the same one ci.yml's plan job assumes. Declaring
+    needs: select-accounts
+    # The read-only plan role of the leaf's own account. Declaring
     # `environment: plan` makes the OIDC token present
     # repo:<org>/<repo>:environment:plan — the only sub the plan role trusts —
     # instead of the bare branch claim (ref:refs/heads/main) a scheduled run would
@@ -99,7 +215,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
+        include: ${{ fromJSON(needs.select-accounts.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -119,7 +235,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.region }}
 
       # `terragrunt plan -detailed-exitcode` returns three distinct codes, and they
@@ -134,13 +250,27 @@ jobs:
       #       not a CI failure).
       # `set +e` keeps the step from aborting on code 1 before we can branch on it;
       # PIPESTATUS[0] captures terragrunt's code through the `tee` pipe.
+      #
+      # The leaf's account id is its plan role's account: the ARN's account
+      # segment, exported as the TERRAGRUNT_ACCOUNT_ID root.hcl reads to name the
+      # state bucket, the same injection ci.yml's plan job and scripts/e2e.sh use.
+      # The credential configured above came from the same ARN, so the bucket and
+      # the provider are in one account by construction.
       - name: Plan
         id: plan
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
+        env:
+          ROLE_ARN: ${{ matrix.role_arn }}
         run: |
+          if ! [[ "$ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/.+$ ]]; then
+            echo "::error::This leaf's plan role is not an IAM role ARN, so its account id is unknown."
+            exit 1
+          fi
+          export TERRAGRUNT_ACCOUNT_ID="${BASH_REMATCH[1]}"
+
           set +e
           terragrunt plan -detailed-exitcode -no-color 2>&1 | tee plan.txt
-          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Report drift
         if: steps.plan.outputs.exitcode == '2'
@@ -226,4 +356,20 @@ jobs:
         if: steps.plan.outputs.exitcode == '1'
         run: |
           echo "::error::Drift plan for ${{ matrix.env }}/${{ matrix.component }} errored (exit 1) — see the 'Drift check error' issue."
+          exit 1
+
+  # Fails the run when select-accounts left a DRIFT_PLAN_ROLE_ARNS entry out.
+  # It runs after detect-drift, whatever that job's result, so the accounts mapped
+  # correctly are planned first and a bad entry still turns the run red.
+  report-config-errors:
+    name: DRIFT_PLAN_ROLE_ARNS has entries that were left out
+    needs: [select-accounts, detect-drift]
+    if: always() && needs.select-accounts.outputs.config_error == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail the run
+        run: |
+          echo "::error::DRIFT_PLAN_ROLE_ARNS has entries that are not role ARNs or that name no account directory drift plans. select-accounts names them and left them out; fix or remove them (see docs/operations.md)."
           exit 1

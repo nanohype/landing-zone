@@ -370,10 +370,12 @@ presents the same `sub` from any branch, and `deploy.yml`, `destroy.yml` and
 yet is created unprotected the first time a workflow names it.
 
 The repository-level `AWS_ROLE_ARN` variable is the **plan** role
-(`plan_role_arn`), which ci.yml's plan job and drift.yml assume from
-`environment: plan`. The deploy role does not trust that environment, so
-`AWS_ROLE_ARN` holding `deploy_role_arn` makes PR plans and drift detection fail
-at the credential step.
+(`plan_role_arn`), which ci.yml's plan job assumes from `environment: plan`.
+drift.yml assumes each account's own plan role from the same environment, read
+from the `DRIFT_PLAN_ROLE_ARNS` map of account directory to `plan_role_arn` (see
+[operations.md](operations.md#driftyml----drift-detection)). The deploy role does
+not trust that environment, so a `deploy_role_arn` in either variable makes PR
+plans or drift detection fail at the credential step.
 
 ## End-to-end validation (`task e2e`)
 
