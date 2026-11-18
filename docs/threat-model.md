@@ -26,13 +26,19 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
 
 - **Spoofing** — a foreign workflow assuming the deploy role. Mitigated: the
   trust policy names each repo AND the contexts it trusts within that repo —
-  `repo:<org>/<repo>:environment:*` and `repo:<org>/<repo>:ref:refs/tags/*` by
-  default. Naming the repo alone, with a wildcard claim suffix, would satisfy
-  "repo-scoped" while also trusting `pull_request` and every branch — so a fork's
-  pull request against a public repo could assume the role. Both `github_repos` and
-  `allowed_subject_claims` are validated non-empty, because an empty list on
-  either drops the `sub` condition entirely and lets *any* Actions token assume
-  the role. No long-lived keys; OIDC federation only.
+  `repo:<org>/<repo>:environment:development`, `...:environment:staging`,
+  `...:environment:production` and `...:environment:e2e` by default — the
+  environments the deploy, destroy and e2e workflows declare. Naming the repo
+  alone, with a wildcard claim suffix, would satisfy "repo-scoped" while also
+  trusting `pull_request` and every branch — so a fork's pull request against a
+  public repo could assume the role. A wildcard environment claim is refused for
+  the same reason at one remove: it matches `environment:plan`, which the PR plan
+  job and the drift job declare from any branch, so `allowed_subject_claims` is
+  validated to reject any claim matching that environment. Tag refs are not
+  trusted: no workflow runs on a tag, and a tag claim would hand the role to
+  anyone able to push one. Both `github_repos` and `allowed_subject_claims` are
+  validated non-empty, because an empty list on either drops the `sub` condition
+  entirely and lets *any* Actions token assume the role. No long-lived keys; OIDC federation only.
 - **Elevation of privilege** — the deploy role is powerful. Residual: scope it
   per-environment; do not share one role across development and production.
 - **Spoofing** — a workflow assuming the ECR Public pull role. Accepted within a

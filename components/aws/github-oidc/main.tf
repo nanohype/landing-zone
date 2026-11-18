@@ -1,9 +1,11 @@
 locals {
   # Subject claims the deploy role trusts: the cartesian product of the configured
   # repos and the allowed claim suffixes (repo:<org>/<repo>:<claim>). The default
-  # claim set is environment-gated deploys + tag pushes — NOT a bare :*, which would
-  # also trust pull_request and every branch context. Only Actions workflows in
-  # these repos, in one of these contexts, may assume the role.
+  # claim set is the four GitHub Environments the deploy/destroy/e2e workflows
+  # declare — NOT environment:plan (reachable from any branch), NOT a tag ref, and
+  # NOT a bare :*, which would also trust pull_request and every branch context.
+  # Only Actions workflows in these repos, in one of these contexts, may assume the
+  # role.
   subjects = flatten([
     for r in var.github_repos : [
       for c in var.allowed_subject_claims : "repo:${var.github_org}/${r}:${c}"

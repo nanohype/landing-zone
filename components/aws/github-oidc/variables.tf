@@ -49,21 +49,35 @@ variable "github_repos" {
 variable "allowed_subject_claims" {
   description = <<-EOT
     GitHub OIDC `sub` claim suffixes the deploy role trusts, applied to every repo in
-    github_repos (final subject = repo:<org>/<repo>:<claim>). Default is
-    environment-gated deploys + tag pushes — "environment:*" (any GitHub Environment,
-    the recommended deploy-gating context) and "ref:refs/tags/*" (release tags). This
-    deliberately EXCLUDES a bare ":*", which would also trust pull_request and every
-    branch context — a fork's PR or an untrusted branch must never assume a deploy
-    role. Narrow further (e.g. "environment:production") or add contexts (e.g.
-    "ref:refs/heads/main") as the CI model requires. Setting an entry to "*" restores
-    the broad ":*" — an explicit, auditable opt-out.
+    github_repos (final subject = repo:<org>/<repo>:<claim>). Default is exactly the
+    GitHub Environments the workflows that need this role declare: "development",
+    "staging" and "production" (deploy.yml, and destroy.yml for the first two) and
+    "e2e" (e2e.yml). It deliberately EXCLUDES "environment:plan", which ci.yml's PR
+    plan job and drift.yml declare from any branch and which the separate read-only
+    plan role trusts, so no wildcard that matches it ("environment:*", a bare "*")
+    is accepted either. It also excludes a bare ":*" (pull_request and every branch
+    context) and tag refs: no workflow runs on a tag, and anyone able to push one
+    would otherwise hold this role. Add a context only for a workflow that declares
+    it, and gate that environment with required reviewers or a branch rule.
   EOT
   type        = list(string)
-  default     = ["environment:*", "ref:refs/tags/*"]
+  default     = ["environment:development", "environment:staging", "environment:production", "environment:e2e"]
 
   validation {
     condition     = length(var.allowed_subject_claims) > 0
     error_message = "allowed_subject_claims must contain at least one claim; an empty list would render an empty sub condition, which AWS drops — making the deploy role assumable by any GitHub Actions workflow."
+  }
+
+  validation {
+    # IAM evaluates the sub with StringLike, where `*` and `?` are wildcards. Each
+    # claim is translated to the equivalent anchored regex (regex metacharacters
+    # escaped first) and tested against the plan environment's claim, so an exact
+    # "environment:plan" and every wildcard covering it are refused alike.
+    condition = alltrue([
+      for c in var.allowed_subject_claims :
+      !can(regex("^${replace(replace(replace(c, "/[\\\\.+^$()|{}\\[\\]]/", "\\$0"), "*", ".*"), "?", ".")}$", "environment:plan"))
+    ])
+    error_message = "allowed_subject_claims must not match \"environment:plan\", exactly or through a wildcard such as \"environment:*\" or \"*\": ci.yml and drift.yml declare that environment from any branch, so trusting it hands the deploy role to every branch. The plan role (plan_allowed_subject_claims) is the one that trusts it."
   }
 }
 

@@ -11,14 +11,19 @@ include "envcommon" {
 # admin/SSO creds; outputs deploy_role_arn for the AWS_ROLE_ARN / E2E_AWS_ROLE_ARN
 # repo vars when/if the GitHub Actions CI path is adopted.
 #
-# Trust stays environment-gated deploys + tag pushes
-# (allowed_subject_claims = ["environment:*", "ref:refs/tags/*"]). The e2e job
-# declares `environment: e2e`, so its token presents
-# repo:nanohype/landing-zone:environment:e2e and matches the first claim. Any CI
-# job that needs this role from a NON-environment context on main — the scheduled
-# drift job, the ci-push plan — takes the same route: give it a GitHub Environment.
-# Adding "ref:refs/heads/main" here would work and is deliberately not done, because
-# it hands every workflow on main a role that can provision and destroy EKS and IAM.
+# Trust stays the component default: exactly the GitHub Environments the
+# workflows that need this role declare (allowed_subject_claims =
+# ["environment:development", "environment:staging", "environment:production",
+# "environment:e2e"]) — deploy.yml and destroy.yml declare the target environment,
+# and the e2e job declares `environment: e2e`, so its token presents
+# repo:nanohype/landing-zone:environment:e2e. NOT "environment:*": that also
+# matches `environment: plan`, which ci.yml's PR plan job and drift.yml declare from
+# any branch, and the component's validation refuses any claim that matches it. No
+# tag claim either — no workflow runs on a tag. A CI job that needs this role from
+# a NON-environment context on main takes the same route: give it its own GitHub
+# Environment and add that claim here. Adding "ref:refs/heads/main" would work and
+# is deliberately not done, because it hands every workflow on main a role that
+# can provision and destroy EKS and IAM.
 #
 # THE PLAN ROLE is separate and read-only. The CI plan matrix runs on
 # `pull_request`, which the deploy role above must never trust — so it gets its

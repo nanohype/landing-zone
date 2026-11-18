@@ -50,10 +50,12 @@ variables {
 # INVARIANT 1: the trust is scoped to the configured repos AND to the allowed
 # subject claims via a StringLike on the `sub` claim — exactly
 # repo:<org>/<repo>:<claim> for the cartesian product, and NOTHING else. This is THE
-# control. The default claim set is environment-gated deploys + tag pushes; a
-# widened sub (bare ":*", "*", or "repo:*/*") lets pull_request / any-branch / any
-# repo assume the role. Asserted structurally: find the AssumeRoleWithWebIdentity
-# statement and compare the whole sub set.
+# control. The default claim set is the four GitHub Environments deploy.yml,
+# destroy.yml and e2e.yml declare; a widened sub ("environment:*", which also
+# admits the any-branch plan environment, a tag ref, a bare ":*", "*", or
+# "repo:*/*") lets an untrusted branch / tag / pull_request / repo assume the role.
+# Asserted structurally: find the AssumeRoleWithWebIdentity statement and compare
+# the whole sub set.
 run "trust_sub_scoped_to_configured_repos_and_claims" {
   command = plan
 
@@ -63,18 +65,23 @@ run "trust_sub_scoped_to_configured_repos_and_claims" {
       s if toset(flatten([
         try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
         ])) == toset([
-        "repo:nanohype/landing-zone:environment:*",
-        "repo:nanohype/landing-zone:ref:refs/tags/*",
-        "repo:nanohype/rackctl:environment:*",
-        "repo:nanohype/rackctl:ref:refs/tags/*",
+        "repo:nanohype/landing-zone:environment:development",
+        "repo:nanohype/landing-zone:environment:staging",
+        "repo:nanohype/landing-zone:environment:production",
+        "repo:nanohype/landing-zone:environment:e2e",
+        "repo:nanohype/rackctl:environment:development",
+        "repo:nanohype/rackctl:environment:staging",
+        "repo:nanohype/rackctl:environment:production",
+        "repo:nanohype/rackctl:environment:e2e",
       ])
     ]) == 1
-    error_message = "trust sub must StringLike-pin exactly repo:nanohype/{landing-zone,rackctl}:{environment:*,ref:refs/tags/*}; any other set (dropped/added/widened repo or claim) is a CI-auth boundary change"
+    error_message = "trust sub must StringLike-pin exactly repo:nanohype/{landing-zone,rackctl}:environment:{development,staging,production,e2e}; any other set (dropped/added/widened repo or claim) is a CI-auth boundary change"
   }
 
   # Belt-and-suspenders on the escalation itself: no statement's sub may contain a
-  # bare "*", the cross-org/repo wildcard "repo:*/*", the broad per-repo ":*", or a
-  # pull_request context (an untrusted PR must never assume a deploy role).
+  # bare "*", the cross-org/repo wildcard "repo:*/*", the broad per-repo ":*", a
+  # pull_request context (an untrusted PR must never assume a deploy role), any
+  # wildcard at all in the default set, or a tag ref.
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
@@ -83,9 +90,11 @@ run "trust_sub_scoped_to_configured_repos_and_claims" {
         sub if sub == "*" || sub == "repo:*/*"
         || can(regex("^repo:[^:]+/[^:]+:\\*$", sub)) # bare per-repo :* (claim is a lone wildcard)
         || endswith(sub, ":pull_request")
+        || strcontains(sub, "*") || strcontains(sub, "?")
+        || strcontains(sub, ":ref:refs/tags/")
       ]) == 0
     ])
-    error_message = "trust sub must never contain \"*\", \"repo:*/*\", a bare per-repo \":*\", or a \":pull_request\" context — each re-opens the deploy role to untrusted workflows"
+    error_message = "the default trust sub must never contain \"*\", \"repo:*/*\", a bare per-repo \":*\", a \":pull_request\" context, any wildcard, or a tag ref — each re-opens the deploy role to workflows that are not the gated deploy/destroy/e2e jobs"
   }
 }
 
@@ -168,6 +177,87 @@ run "empty_allowed_subject_claims_rejected" {
   expect_failures = [
     var.allowed_subject_claims,
   ]
+}
+
+# INVARIANT 3c (guardrail): allowed_subject_claims refuses every claim that matches
+# "environment:plan" under IAM StringLike semantics. ci.yml's PR plan job and
+# drift.yml declare that environment from any branch, so a deploy-role claim that
+# matches it — exactly, or through a wildcard — hands the deploy role to every
+# branch. Each run below is one way back in; the validation must reject them all.
+run "plan_environment_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:production", "environment:plan"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "environment_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:*"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "bare_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["*"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "partial_wildcard_claim_covering_plan_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:pla?"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+# INVARIANT 3d (precision): the guard is a StringLike match, not a ban on wildcard
+# characters or a regex over the raw claim. A wildcard that cannot cover the plan
+# environment is accepted, and a regex metacharacter in a claim is literal — a
+# "." that a naive regex would read as any-character (and so as matching "plan")
+# does not trip it. Without this, the validation could reject everything and the
+# rejection runs above would still pass.
+run "claims_not_matching_plan_accepted" {
+  command = plan
+
+  variables {
+    github_repos           = ["landing-zone"]
+    allowed_subject_claims = ["environment:prod*", "environment:pl.n"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
+      s if toset(flatten([
+        try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
+        ])) == toset([
+        "repo:nanohype/landing-zone:environment:prod*",
+        "repo:nanohype/landing-zone:environment:pl.n",
+      ])
+    ]) == 1
+    error_message = "claims that cannot match environment:plan under StringLike must be accepted and rendered as given"
+  }
 }
 
 # ─────────────────────────── plan role ───────────────────────────

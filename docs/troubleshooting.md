@@ -138,8 +138,10 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
        },
        "StringLike": {
          "token.actions.githubusercontent.com:sub": [
-           "repo:<org>/<repo>:environment:*",
-           "repo:<org>/<repo>:ref:refs/tags/*"
+           "repo:<org>/<repo>:environment:development",
+           "repo:<org>/<repo>:environment:staging",
+           "repo:<org>/<repo>:environment:production",
+           "repo:<org>/<repo>:environment:e2e"
          ]
        }
      }

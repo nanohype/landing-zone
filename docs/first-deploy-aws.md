@@ -329,10 +329,13 @@ cd live/aws/workload-<env>/us-east-1/<env>/github-oidc && terragrunt output -raw
 # (e2e.yml) repo variables. Local exec does not need this.
 ```
 
-The role ships with **no permissions** — its trust is scoped to
-`repo:nanohype/landing-zone:environment:*` and
-`repo:nanohype/landing-zone:ref:refs/tags/*`, and you attach the policies CI
-needs via the
+The role ships with **no permissions** — its trust is scoped to the four GitHub
+Environments the deploy, destroy and e2e workflows declare
+(`repo:nanohype/landing-zone:environment:development`,
+`repo:nanohype/landing-zone:environment:staging`,
+`repo:nanohype/landing-zone:environment:production` and
+`repo:nanohype/landing-zone:environment:e2e`), never the `plan` environment the
+read-only plan role trusts — and you attach the policies CI needs via the
 component's `managed_policy_arns` (e.g. `AdministratorAccess` with a
 `permissions_boundary_arn`, or a scoped set). Skip this component entirely if you
 only run locally.
