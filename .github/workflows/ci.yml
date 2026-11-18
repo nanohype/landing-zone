@@ -1124,9 +1124,17 @@ jobs:
         # public template and fatal for a real plan, so the id is injected here as
         # the env var root.hcl already documents rather than written into a tracked
         # file — the same path scripts/e2e.sh uses.
+        #
+        # -lock=false: root.hcl sets use_lockfile = true, so a plan that locks
+        # writes a .tflock object beside the state. This job's credential is the
+        # read-only plan role (ReadOnlyAccess), which cannot write that object, so
+        # every plan would fail acquiring the lock. Skipping it is safe because a
+        # PR plan is advisory: it reads state and writes nothing, nothing applies
+        # its result, and so it never contends with an apply. An apply running at
+        # the same moment can only make this plan's diff stale.
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
-        run: terragrunt plan -no-color
+        run: terragrunt plan -lock=false -no-color
 
   merge-gate:
     name: merge gate

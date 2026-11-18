@@ -65,6 +65,30 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `workload-development` leaf trusts `environment:development` and
   `environment:e2e` only), so a job in a less-protected environment cannot reach
   another account's deploy role.
+- **Information disclosure** — the read-only plan role. It trusts
+  `environment:plan` (the `plan_allowed_subject_claims` default), which ci.yml's
+  PR plan job declares from any branch, including a same-repository pull
+  request's, and it carries account-wide `ReadOnlyAccess`: every S3 object,
+  state files included, and every DynamoDB item in the account. The
+  `workload-development` leaf ships that today. Residual, and **required before
+  any `staging` or `production` plan-role leaf exists** (drift.yml needs one per
+  account; see [operations.md](operations.md#required-before-any-staging-or-production-plan-role)):
+  (a) such a role must not trust `environment:plan` as-is. The recommended
+  design, pending the owner's decision, is a separate exact `environment:drift`
+  claim on a `drift` environment whose deployment-branch policy admits `main`
+  only, declared by drift.yml, or else a read policy narrower than
+  `ReadOnlyAccess`. (b) `plan_allowed_subject_claims` refuses only a bare `*`;
+  it must carry the exact-environment allowlist `allowed_subject_claims` has
+  (`^environment:[^*?]+$`), proven by a `tofu test` case, before those leaves
+  exist. Neither is implemented.
+- **Information disclosure** — account ids in drift issues. drift.yml files
+  plan output into issues on a public repository, and each leaf's output can
+  name its account (the state bucket, role ARNs). Mitigated:
+  `scripts/redact-account-ids.py` replaces every id in `DRIFT_PLAN_ROLE_ARNS`
+  and every other standalone twelve-digit run before an issue step reads the
+  output, and the issue step applies the same rules to the title and body.
+  Residual: the workflow's job logs, public on this repository, still carry the
+  account id in the credential step's inputs and the raw plan output.
 - **Spoofing** — a workflow assuming the ECR Public pull role. Accepted within a
   bound: this role alone trusts `pull_request`
   (`repo:<org>/<repo>:pull_request` and `repo:<org>/<repo>:ref:refs/heads/main`
