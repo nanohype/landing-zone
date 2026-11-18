@@ -30,6 +30,15 @@ variable "github_org" {
   description = "GitHub organization that owns the CI repos"
   type        = string
   default     = "nanohype"
+
+  validation {
+    # The org lands verbatim in every role's StringLike `sub` condition, where `*`
+    # and `?` are wildcards. A wildcard here would widen every trust this
+    # component renders to other organizations, so only a literal GitHub org name
+    # (letters, digits, hyphens) is accepted.
+    condition     = can(regex("^[A-Za-z0-9-]+$", var.github_org))
+    error_message = "github_org must be a literal GitHub organization name (letters, digits and hyphens only); a \"*\" or \"?\" would be a StringLike wildcard in every role's trust, admitting other organizations' workflows."
+  }
 }
 
 variable "github_repos" {
@@ -44,26 +53,71 @@ variable "github_repos" {
     condition     = length(var.github_repos) > 0
     error_message = "github_repos must contain at least one repo; an empty list would make the deploy role assumable by any GitHub Actions workflow."
   }
+
+  validation {
+    # Each repo lands verbatim in the deploy and plan roles' StringLike `sub`
+    # condition. "landing-zone*" would render repo:<org>/landing-zone*:<claim>,
+    # which also matches repo:<org>/landing-zone:environment:plan — a wildcard here
+    # gets past every check on allowed_subject_claims. Only literal GitHub repo
+    # names (letters, digits, ".", "_", "-") are accepted.
+    condition     = alltrue([for r in var.github_repos : can(regex("^[A-Za-z0-9._-]+$", r))])
+    error_message = "github_repos entries must be literal GitHub repository names (letters, digits, \".\", \"_\" and \"-\" only); a \"*\" or \"?\" is a StringLike wildcard in the trust policy and would widen the deploy role to other repos and contexts."
+  }
 }
 
 variable "allowed_subject_claims" {
   description = <<-EOT
     GitHub OIDC `sub` claim suffixes the deploy role trusts, applied to every repo in
-    github_repos (final subject = repo:<org>/<repo>:<claim>). Default is
-    environment-gated deploys + tag pushes — "environment:*" (any GitHub Environment,
-    the recommended deploy-gating context) and "ref:refs/tags/*" (release tags). This
-    deliberately EXCLUDES a bare ":*", which would also trust pull_request and every
-    branch context — a fork's PR or an untrusted branch must never assume a deploy
-    role. Narrow further (e.g. "environment:production") or add contexts (e.g.
-    "ref:refs/heads/main") as the CI model requires. Setting an entry to "*" restores
-    the broad ":*" — an explicit, auditable opt-out.
+    github_repos (final subject = repo:<org>/<repo>:<claim>). Every entry must be an
+    exact GitHub Environment claim, "environment:<name>", with no wildcard. Default
+    is the environments the workflows that need this role declare: "development",
+    "staging" and "production" (deploy.yml, and destroy.yml for the first two) and
+    "e2e" (e2e.yml). The default is the union across accounts; each account's leaf
+    should narrow it to the environments that deploy into that account, so the
+    least-protected environment never reaches another account's deploy role.
+
+    Validation refuses, rather than documents:
+      - any wildcard ("environment:*", "environment:prod*", "*"). GitHub creates an
+        environment, with no protection rules, the first time a workflow names it,
+        so a wildcard admits any environment name a branch's workflow invents.
+      - "environment:plan" in any letter case. ci.yml's PR plan job and drift.yml
+        declare it on purpose, and it belongs to the read-only plan role
+        (plan_allowed_subject_claims).
+      - any claim that is not an environment: "pull_request", "ref:..." (branch
+        or tag refs) and the like. A ref or pull_request claim is held by anyone
+        who can push that ref or open that pull request, with no environment rule
+        in between.
+
+    The trust names environments, not refs: the `sub` of a job that declares an
+    environment carries only the environment, so any branch can present it. Each
+    trusted environment must therefore exist in the repository settings with a
+    deployment-branch policy (main or protected branches), and the ones that reach
+    production data with required reviewers. To trust a new context, give the job
+    its own environment, protect that environment, and add its claim here.
   EOT
   type        = list(string)
-  default     = ["environment:*", "ref:refs/tags/*"]
+  default     = ["environment:development", "environment:staging", "environment:production", "environment:e2e"]
 
   validation {
     condition     = length(var.allowed_subject_claims) > 0
     error_message = "allowed_subject_claims must contain at least one claim; an empty list would render an empty sub condition, which AWS drops — making the deploy role assumable by any GitHub Actions workflow."
+  }
+
+  validation {
+    # An allowlist, not a denylist: IAM evaluates the sub with StringLike, where `*`
+    # and `?` are wildcards, and GitHub auto-creates an unprotected environment the
+    # first time a workflow names one. Only an exact environment name is a context
+    # whose protection rules can be checked in the repository settings.
+    condition     = alltrue([for c in var.allowed_subject_claims : can(regex("^environment:[^*?]+$", c))])
+    error_message = "allowed_subject_claims entries must each be an exact GitHub Environment claim, \"environment:<name>\", with no \"*\" or \"?\". A wildcard admits any environment name a branch's workflow declares, and GitHub creates that environment, unprotected, the first time a workflow names it. A pull_request or ref: claim is held by anyone who can open that pull request or push that ref. Give the job its own protected environment instead."
+  }
+
+  validation {
+    # GitHub environment names are case-insensitive: a job declaring
+    # `environment: Plan` runs under the plan environment's rules, which admit any
+    # branch. Refuse every casing.
+    condition     = alltrue([for c in var.allowed_subject_claims : lower(c) != "environment:plan"])
+    error_message = "allowed_subject_claims must not contain \"environment:plan\" in any letter case: ci.yml and drift.yml declare that environment from any branch, so trusting it hands the deploy role to every branch. The plan role (plan_allowed_subject_claims) is the one that trusts it."
   }
 }
 
