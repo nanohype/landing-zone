@@ -55,12 +55,16 @@ zones. See each component's `route53-tags.tf`.
 | `GITHUB_SHA` | short commit → the `Revision` tag; `"local"` off-CI |
 | `AWS_ROLE_ARN` | the OIDC deploy role CI assumes (repo Variable; unset ⇒ PR Plan jobs skip green; scheduled drift detection fails) |
 
-`deploy.yml` and `destroy.yml` read `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` from the
-GitHub Environment they declare (`development`, `staging`, `production`), where a variable
-overrides the repository variable of the same name, so each environment names its own
-`workload-<environment>` account. Both jobs fail when either is unset rather than falling
-back to the `account.hcl` placeholder, and fail when the assumed credential's account is not
-`TERRAGRUNT_ACCOUNT_ID` (see [operations.md](operations.md#deployyml----manual-deploy)).
+`deploy.yml` and `destroy.yml` do not read the repository Variables `AWS_ROLE_ARN` and
+`TERRAGRUNT_ACCOUNT_ID`. They read `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` from the GitHub Environment they declare (`development`, `staging`,
+`production`) and pass the id to terragrunt as `TERRAGRUNT_ACCOUNT_ID`, so each environment
+names its own `workload-<environment>` account. A variable an environment does not set
+inherits the repository's (then the organization's) value, so the names differ from the
+repository-level pair on purpose, and both workflows refuse to run while either `DEPLOY_*`
+name is set at repository or organization level. Both jobs fail when the environment leaves
+either one unset rather than falling back to the `account.hcl` placeholder, and fail when
+the assumed credential's account is not `DEPLOY_ACCOUNT_ID` (see
+[operations.md](operations.md#deployyml----manual-deploy)).
 
 ## Input precedence
 

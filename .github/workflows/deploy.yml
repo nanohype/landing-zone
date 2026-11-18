@@ -48,6 +48,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # vars.X resolves from the job's environment first, then the repository, then
+  # the organization. This job declares no environment, so it sees only the
+  # repository and organization values. DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID
+  # must exist on GitHub Environments alone: set at either broader level, an
+  # environment that never got its own values would inherit them and deploy with
+  # another environment's role and account id. Failing here also costs no
+  # environment approval.
+  refuse-inherited-config:
+    name: Refuse repository-level DEPLOY_* variables
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID to be environment-only
+        env:
+          INHERITED_ROLE_ARN: ${{ vars.DEPLOY_ROLE_ARN }}
+          INHERITED_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
+        run: |
+          failed=0
+          if [ -n "$INHERITED_ROLE_ARN" ]; then
+            echo "::error title=DEPLOY_ROLE_ARN is set outside an environment::DEPLOY_ROLE_ARN is set as a repository or organization variable, so every GitHub Environment without its own would inherit it. Remove it there and set it on each of the development, staging and production environments instead (see docs/operations.md)."
+            failed=1
+          fi
+          if [ -n "$INHERITED_ACCOUNT_ID" ]; then
+            echo "::error title=DEPLOY_ACCOUNT_ID is set outside an environment::DEPLOY_ACCOUNT_ID is set as a repository or organization variable, so every GitHub Environment without its own would inherit it. Remove it there and set it on each of the development, staging and production environments instead (see docs/operations.md)."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID are not set at repository or organization level."
+
   deploy:
     permissions:
       # Scoped to this job rather than the workflow: a job added here later
@@ -56,6 +88,7 @@ jobs:
       id-token: write
       contents: read
     name: ${{ inputs.action }} ${{ inputs.environment }}/${{ inputs.component }}
+    needs: refuse-inherited-config
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
@@ -69,39 +102,51 @@ jobs:
       # for a local checkout and never right here: a run against the placeholder
       # bucket dies at backend init, after the environment approval was spent.
       #
-      # Both variables are read from the GitHub Environment this job declares. An
-      # environment-level variable overrides a repository-level one of the same
-      # name, so each of development, staging and production carries the role and
-      # account id of its own account. A run with either unset fails here, before
-      # any credential is issued, rather than reaching AWS with half a
-      # configuration.
+      # The role and account id come from DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID on
+      # the GitHub Environment this job declares, so each of development, staging and production
+      # names its own account. They are deliberately not AWS_ROLE_ARN and
+      # TERRAGRUNT_ACCOUNT_ID: those exist as repository variables for ci.yml's plan
+      # job, and an environment without its own value would silently inherit the
+      # plan role and the repository's account id. refuse-inherited-config keeps
+      # the DEPLOY_* names off the repository and organization, so here an empty
+      # value really means this environment is not configured, and the run stops
+      # before any credential is issued.
       #
       # One environment therefore names one account: the workload-<environment>
       # account. Other account directories also hold development/staging/production
       # leaves (backup/, network/), and running one of those with this
       # environment's role and id would build that account's stack inside the
-      # workload account. So the account input must be workload-<environment>; the
-      # other accounts' leaves run locally, like the management account's org leaves.
+      # workload account. So the account input must be workload-<environment>, and
+      # the component input must be a single directory name (or all) with a leaf
+      # under it, so no ../ path reaches another account's leaf. The other
+      # accounts' leaves run locally, like the management account's org leaves.
       #
       # Dispatch inputs reach the shell through env, not ${{ }} in the script.
-      - name: Require AWS_ROLE_ARN, TERRAGRUNT_ACCOUNT_ID and a matching leaf
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
         env:
-          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
-          TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
+          DEPLOY_ROLE_ARN: ${{ vars.DEPLOY_ROLE_ARN }}
+          DEPLOY_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
           TARGET_ENV: ${{ inputs.environment }}
           ACCOUNT: ${{ inputs.account }}
           REGION: ${{ inputs.region }}
+          COMPONENT: ${{ inputs.component }}
         run: |
           failed=0
-          if [ -z "$AWS_ROLE_ARN" ]; then
-            echo "::error title=AWS_ROLE_ARN is not set::The ${TARGET_ENV} environment has no AWS_ROLE_ARN variable (Settings > Environments > ${TARGET_ENV} > Environment variables). Set it to the OIDC deploy role in the workload-${TARGET_ENV} account (see docs/operations.md)."
+          if [ -z "$DEPLOY_ACCOUNT_ID" ]; then
+            echo "::error title=DEPLOY_ACCOUNT_ID is not set::The ${TARGET_ENV} environment has no DEPLOY_ACCOUNT_ID variable (Settings > Environments > ${TARGET_ENV} > Environment variables), so root.hcl would name the state bucket after the tracked account.hcl placeholder. Set it to the 12-digit id of the workload-${TARGET_ENV} account (see docs/operations.md)."
+            failed=1
+          elif ! [[ "$DEPLOY_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error title=DEPLOY_ACCOUNT_ID is not an account id::The ${TARGET_ENV} environment's DEPLOY_ACCOUNT_ID is not a 12-digit AWS account id."
             failed=1
           fi
-          if [ -z "$TERRAGRUNT_ACCOUNT_ID" ]; then
-            echo "::error title=TERRAGRUNT_ACCOUNT_ID is not set::The ${TARGET_ENV} environment has no TERRAGRUNT_ACCOUNT_ID variable, so root.hcl would name the state bucket after the tracked account.hcl placeholder. Set it to the 12-digit id of the workload-${TARGET_ENV} account (see docs/operations.md)."
+          if [ -z "$DEPLOY_ROLE_ARN" ]; then
+            echo "::error title=DEPLOY_ROLE_ARN is not set::The ${TARGET_ENV} environment has no DEPLOY_ROLE_ARN variable (Settings > Environments > ${TARGET_ENV} > Environment variables). Set it to the github-oidc deploy role in the workload-${TARGET_ENV} account (see docs/operations.md)."
             failed=1
-          elif ! [[ "$TERRAGRUNT_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
-            echo "::error title=TERRAGRUNT_ACCOUNT_ID is not an account id::The ${TARGET_ENV} environment's TERRAGRUNT_ACCOUNT_ID is not a 12-digit AWS account id."
+          elif ! [[ "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/.+$ ]]; then
+            echo "::error title=DEPLOY_ROLE_ARN is not a role ARN::The ${TARGET_ENV} environment's DEPLOY_ROLE_ARN is not an IAM role ARN (arn:aws:iam::<account>:role/<name>)."
+            failed=1
+          elif [ -n "$DEPLOY_ACCOUNT_ID" ] && [ "${BASH_REMATCH[1]}" != "$DEPLOY_ACCOUNT_ID" ]; then
+            echo "::error title=DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID name different accounts::The ${TARGET_ENV} environment's DEPLOY_ROLE_ARN is a role in a different account from its DEPLOY_ACCOUNT_ID. Set both to the workload-${TARGET_ENV} account."
             failed=1
           fi
           if [ "$ACCOUNT" != "workload-${TARGET_ENV}" ]; then
@@ -110,11 +155,14 @@ jobs:
           elif ! [[ "$REGION" =~ ^[a-z0-9-]+$ ]] || [ ! -f "live/aws/${ACCOUNT}/${REGION}/${TARGET_ENV}/env.hcl" ]; then
             echo "::error title=No such live environment::live/aws/${ACCOUNT}/<region>/${TARGET_ENV} has no env.hcl for the region input. Check it against the region directories under live/aws/${ACCOUNT}/."
             failed=1
+          elif [ "$COMPONENT" != "all" ] && { ! [[ "$COMPONENT" =~ ^[a-z0-9-]+$ ]] || [ ! -f "live/aws/${ACCOUNT}/${REGION}/${TARGET_ENV}/${COMPONENT}/terragrunt.hcl" ]; }; then
+            echo "::error title=No such component::The component input must be all or the name of a directory holding a terragrunt.hcl under live/aws/${ACCOUNT}/${REGION}/${TARGET_ENV}/."
+            failed=1
           fi
           if [ "$failed" -ne 0 ]; then
             exit 1
           fi
-          echo "AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID are set for ${TARGET_ENV}."
+          echo "DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID are set for ${TARGET_ENV}, and the leaf exists."
 
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
@@ -122,36 +170,45 @@ jobs:
       - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
           tg_version: "1.2.2"
+          # terragrunt-action@v3 manages its tool versions through mise, and with
+          # no mise.toml in the repo it requires tofu_version explicitly (as in
+          # ci.yml), even though setup-opentofu already put tofu on PATH.
+          tofu_version: "1.13.9"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
 
-      # TERRAGRUNT_ACCOUNT_ID names the state bucket and the role decides where
-      # the provider acts; root.hcl assumes no further role, so both have to be the
-      # same account. Two variables typed into an environment's settings can
-      # disagree. Usually the role is then denied the other account's bucket and
-      # init fails, but where a bucket policy admits it, a plan reads one
-      # account's state against the other account's resources, and an apply builds
-      # a second copy of the stack in the role's account. So the credential's
-      # account is compared with TERRAGRUNT_ACCOUNT_ID before terragrunt runs.
-      # Neither id is printed: the run log is public.
-      - name: Verify the credential is in TERRAGRUNT_ACCOUNT_ID's account
+      # DEPLOY_ACCOUNT_ID, passed to terragrunt as TERRAGRUNT_ACCOUNT_ID, names the
+      # state bucket and the role decides where the provider acts; root.hcl
+      # assumes no further role, so both have to be the same account. The guard
+      # compared the ARN's account segment with DEPLOY_ACCOUNT_ID; this asks STS
+      # which account the credential actually landed in. Were they to differ,
+      # usually the role would be denied the other account's bucket and
+      # init would fail, but where a bucket policy admits it, a plan reads one
+      # account's state against the other account's resources, and an apply
+      # builds a second copy of the stack in the role's account.
+      #
+      # The error text names no account id, but the log does not keep ids private:
+      # the runner prints each step's env block, Variables are not masked, and
+      # configure-aws-credentials echoes the role ARN. AWS does not treat an
+      # account id as a secret.
+      - name: Verify the credential is in DEPLOY_ACCOUNT_ID's account
         env:
-          TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
+          DEPLOY_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
           TARGET_ENV: ${{ inputs.environment }}
         run: |
           if ! caller_account=$(aws sts get-caller-identity --query Account --output text); then
-            echo "::error title=Could not read the credential's account::sts get-caller-identity failed for the assumed AWS_ROLE_ARN, so the target account could not be confirmed."
+            echo "::error title=Could not read the credential's account::sts get-caller-identity failed for the assumed DEPLOY_ROLE_ARN, so the target account could not be confirmed."
             exit 1
           fi
-          if [ "$caller_account" != "$TERRAGRUNT_ACCOUNT_ID" ]; then
-            echo "::error title=AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID name different accounts::The role the ${TARGET_ENV} environment's AWS_ROLE_ARN names is not in the account its TERRAGRUNT_ACCOUNT_ID names. Set both to the workload-${TARGET_ENV} account."
+          if [ "$caller_account" != "$DEPLOY_ACCOUNT_ID" ]; then
+            echo "::error title=The credential is not in DEPLOY_ACCOUNT_ID's account::The role the ${TARGET_ENV} environment's DEPLOY_ROLE_ARN names did not issue a credential in the account its DEPLOY_ACCOUNT_ID names. Set both to the workload-${TARGET_ENV} account."
             exit 1
           fi
-          echo "The assumed credential is in TERRAGRUNT_ACCOUNT_ID's account."
+          echo "The assumed credential is in DEPLOY_ACCOUNT_ID's account."
 
       - name: Run Terragrunt
         working-directory: live/aws/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
@@ -162,7 +219,7 @@ jobs:
         # under the deploy role's AWS credentials. An env var is a value bash reads,
         # not text bash parses.
         env:
-          TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
+          TERRAGRUNT_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
           ACTION: ${{ inputs.action }}
         run: |

@@ -326,17 +326,27 @@ output into GitHub Actions *variables*:
 task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=github-oidc
 cd live/aws/workload-<env>/us-east-1/<env>/github-oidc && terragrunt output -raw deploy_role_arn
 # deploy.yml / destroy.yml: on the <env> GitHub Environment (Settings >
-# Environments > <env> > Environment variables) set AWS_ROLE_ARN to the printed
-# ARN and TERRAGRUNT_ACCOUNT_ID to the workload-<env> account's 12-digit id.
+# Environments > <env> > Environment variables) set DEPLOY_ROLE_ARN to the
+# printed ARN and DEPLOY_ACCOUNT_ID to the workload-<env> account's 12-digit id.
 # e2e.yml: set E2E_AWS_ROLE_ARN. Local exec does not need any of this.
 ```
 
-`deploy.yml` and `destroy.yml` declare `environment: <env>`, and a variable set
-on a GitHub Environment overrides a repository variable of the same name, so
-each of `development`, `staging` and `production` carries its own account's role
-and id. Both jobs fail before assuming anything when either variable is unset,
-and fail after assuming the role when its account is not `TERRAGRUNT_ACCOUNT_ID`.
-They run only the `workload-<env>` leaves; see
+Only `workload-development` has a `github-oidc` leaf today. For staging and
+production, create the `live/aws/workload-<env>/us-east-1/<env>/github-oidc/`
+leaf first; the `task apply` above has nothing to run until it exists.
+
+`deploy.yml` and `destroy.yml` declare `environment: <env>` and read
+`DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID`, which are set on GitHub Environments
+only, so each of `development`, `staging` and `production` carries its own
+account's role and id. A GitHub variable an environment does not set falls back
+to the repository's and then the organization's, which is why these are not
+`AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` (the repository-level plan-role
+pair): with those names, an environment that forgot its own would silently use
+the plan role and the repository's account id. Both workflows refuse to run while
+either `DEPLOY_*` name is set at repository or organization level, fail before
+assuming anything when the environment does not set either one, and fail after
+assuming the role when its account is not `DEPLOY_ACCOUNT_ID`. They run only the
+`workload-<env>` leaves; see
 [operations.md](operations.md#deployyml----manual-deploy).
 
 The role ships with **no permissions** — its trust is scoped to

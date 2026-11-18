@@ -135,14 +135,18 @@ Uses GitHub environment protection rules -- production requires approval. When `
 
 The `environment` choice covers only the three workload environments. The management-account `org` components (the [Organization Components](#organization-components) above) are **local-CLI-only** — deploy them with `task apply ACCOUNT=management ENVIRONMENT=org COMPONENT=<component>` under your own admin/SSO credentials. `org` is intentionally not a workflow choice because the management account is applied rarely and by hand.
 
-**Configuration:** two variables on each GitHub Environment (Settings > Environments > `<environment>` > Environment variables). The job declares `environment: <environment>`, and an environment-level variable overrides a repository-level variable of the same name, so each environment carries its own account's values:
+**Configuration:** two variables on each GitHub Environment (Settings > Environments > `<environment>` > Environment variables), and on nothing broader. The job declares `environment: <environment>`, so each environment carries its own account's values:
 
 | Variable | Value |
 |---|---|
-| `AWS_ROLE_ARN` | the OIDC deploy role in the `workload-<environment>` account (the `github-oidc` component's `deploy_role_arn` output in that account) |
-| `TERRAGRUNT_ACCOUNT_ID` | the 12-digit id of the `workload-<environment>` account. `root.hcl` names the state bucket `<account_id>-<region>-tfstate` from it; without it the bucket would be named after the tracked `account.hcl` placeholder |
+| `DEPLOY_ROLE_ARN` | the OIDC deploy role in the `workload-<environment>` account (the `github-oidc` component's `deploy_role_arn` output in that account) |
+| `DEPLOY_ACCOUNT_ID` | the 12-digit id of the `workload-<environment>` account. The job passes it to terragrunt as `TERRAGRUNT_ACCOUNT_ID`, and `root.hcl` names the state bucket `<account_id>-<region>-tfstate` from it; without it the bucket would be named after the tracked `account.hcl` placeholder |
 
-Before any credential is issued, the job fails when either variable is unset, when `TERRAGRUNT_ACCOUNT_ID` is not 12 digits, when the `account` input is not `workload-<environment>`, or when the `region` input names no directory under that account. After assuming the role it compares the credential's account (`aws sts get-caller-identity`) with `TERRAGRUNT_ACCOUNT_ID` and fails on a mismatch, so a role and an id typed into one environment's settings for two different accounts never reach terragrunt.
+A GitHub variable that an environment does not set resolves to the repository's value, then the organization's. That is why these are not `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID`: those are repository variables (the read-only plan role and the account id for `ci.yml`'s plan job), and an environment that forgot its own would silently inherit them. For the same reason a first job, which declares no environment and so sees only repository and organization values, fails the run when either `DEPLOY_*` name is set at one of those levels. Never set them there.
+
+Before any credential is issued, the job fails when the environment sets neither or only one of the two, when `DEPLOY_ACCOUNT_ID` is not 12 digits, when `DEPLOY_ROLE_ARN` is not a role ARN in `DEPLOY_ACCOUNT_ID`'s account, when the `account` input is not `workload-<environment>`, when the `region` input names no directory under that account, or when the `component` input is neither `all` nor a single directory name holding a `terragrunt.hcl` under that environment. After assuming the role it compares the credential's account (`aws sts get-caller-identity`) with `DEPLOY_ACCOUNT_ID` and fails on a mismatch, so a role and an id for two different accounts never reach terragrunt.
+
+The account ids are visible in the run log: the runner prints each step's environment and Variables are not masked. AWS does not treat an account id as a secret; the error messages simply avoid repeating them.
 
 One environment names one account, so the workflow deploys only `live/aws/workload-<environment>/` leaves. The `backup/` and `network/` account directories also hold `development`/`staging`/`production` leaves; run with the workload account's role and id, they would build that account's stack inside the workload account. Deploy them locally under that account's own credentials, the same way as the `org` components: `task apply ACCOUNT=<account> REGION=us-east-1 ENVIRONMENT=<environment> COMPONENT=<component>` with `TERRAGRUNT_ACCOUNT_ID` exported as that account's id.
 
@@ -159,7 +163,7 @@ One environment names one account, so the workflow deploys only `live/aws/worklo
 
 The confirmation guard (`confirm == environment`) prevents accidental destroys. Runs `terragrunt destroy` or `terragrunt run --all -- destroy`.
 
-**Configuration:** the same per-environment `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` variables as `deploy.yml`, on the `development` and `staging` GitHub Environments, with the same checks: both set, the `account` input equal to `workload-<environment>`, and the assumed credential's account equal to `TERRAGRUNT_ACCOUNT_ID`. The last matters most here: a destroy run with the state of one account and the credential of another sends the state's resource ids to the wrong account, where most of them are simply not found and dropped from state, leaving the real resources running untracked.
+**Configuration:** the same environment-only `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` variables as `deploy.yml`, on the `development` and `staging` GitHub Environments, with the same checks: neither set at repository or organization level, both set on the environment and naming one account, the `account` input equal to `workload-<environment>`, the `component` input `all` or a leaf directory under it, and the assumed credential's account equal to `DEPLOY_ACCOUNT_ID`. The last matters most here: a destroy run with the state of one account and the credential of another sends the state's resource ids to the wrong account, where most of them are simply not found and dropped from state, leaving the real resources running untracked.
 
 ### drift.yml -- Drift Detection
 
