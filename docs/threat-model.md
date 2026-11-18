@@ -87,8 +87,14 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `scripts/redact-account-ids.py` replaces every id in `DRIFT_PLAN_ROLE_ARNS`
   and every other standalone twelve-digit run before an issue step reads the
   output, and the issue step applies the same rules to the title and body.
-  Residual: the workflow's job logs, public on this repository, still carry the
-  account id in the credential step's inputs and the raw plan output.
+  Residual, accepted: the workflow's job logs, public on this repository, are
+  not redacted. Repository variables are not masked and the runner prints each
+  step's env block, so `select-accounts`' log carries the whole
+  `DRIFT_PLAN_ROLE_ARNS` value, every `Drift Check` job's log carries the full
+  id list it redacts with, and each job's credential step inputs and raw plan
+  output carry its own account's id. Every id in the variable is therefore
+  readable by anyone who can read the Actions logs; the redaction keeps it out
+  of the issues.
 - **Spoofing** — a workflow assuming the ECR Public pull role. Accepted within a
   bound: this role alone trusts `pull_request`
   (`repo:<org>/<repo>:pull_request` and `repo:<org>/<repo>:ref:refs/heads/main`

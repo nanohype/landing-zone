@@ -381,9 +381,10 @@ red.
 
 Arming drift detection takes a plan role in every account directory that holds
 a `staging` or `production` leaf (`workload-staging`, `workload-production`,
-`network` and `backup`): one `github-oidc` leaf per account, applied locally
-with that account's credentials, its `plan_role_arn` recorded in the
-repository-level `DRIFT_PLAN_ROLE_ARNS`. The per-account list is in
+`network` and `backup`): the account's state backend created, one
+`github-oidc` leaf per account applied locally with that account's credentials,
+and its `plan_role_arn` recorded in the repository-level `DRIFT_PLAN_ROLE_ARNS`
+once that account's `staging` and `production` leaves have been applied. The per-account list is in
 [operations.md](operations.md#arming-drift-detection-one-plan-role-per-account).
 It is blocked on two prerequisites recorded there: a staging or production plan
 role must not trust `environment:plan` as the development one does, and

@@ -238,8 +238,10 @@ Leave them unset for a private endpoint.
    For a `staging` or `production` env in a new account directory, add that
    directory and the account's `github-oidc` plan role to the
    `DRIFT_PLAN_ROLE_ARNS` repo Variable once the directory's leaves are on the
-   default branch. Until then drift.yml skips its leaves; a key added before
-   them names no planned account, and the run ends red. The account's plan role
+   default branch and have been applied. Until then drift.yml skips its leaves;
+   a key added before they are on the default branch names no planned account,
+   and the run ends red, and one added before they are applied files a drift
+   issue for every leaf that plans as creates. The account's plan role
    comes from its own `github-oidc` leaf, applied locally with that account's
    credentials, and is blocked on the prerequisites in
    [operations.md](operations.md#required-before-any-staging-or-production-plan-role).

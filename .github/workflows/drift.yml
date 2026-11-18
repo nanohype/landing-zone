@@ -84,8 +84,11 @@ jobs:
   # The repository is public, and the role ARNs carry real account ids. Nothing
   # this job writes to an annotation or the run summary carries one: it names
   # account directories, never values, and every name it prints goes through jq's
-  # `redact`, which replaces a standalone run of twelve digits with
-  # <account-id>, so even a key that is an account id is not echoed. It also
+  # `redact`, which replaces any run of twelve or more digits with <account-id>,
+  # so even a key that is an account id, or holds one run together with other
+  # digits, is not echoed (an account directory name has no such run). This
+  # job's own log is not redacted: the runner prints the step's env block, and a
+  # repository variable is not masked, so the whole variable is in it. It also
   # hands detect-drift every twelve-digit run in the variable as `account_ids`,
   # the list detect-drift redacts from plan output before filing an issue.
   select-accounts:
@@ -115,7 +118,7 @@ jobs:
           fi
 
           # Prepended to every jq program below whose output is printed.
-          redact_def='def redact: gsub("(?<![0-9])[0-9]{12}(?![0-9])"; "<account-id>");'
+          redact_def='def redact: gsub("[0-9]{12,}"; "<account-id>");'
 
           # Each query lists keys, never values, and redacts them. A failed jq is
           # reported as its own error rather than read as an empty list, because an
@@ -214,7 +217,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   detect-drift:
-    name: Drift Check (${{ matrix.env }}/${{ matrix.component }})
+    # The account directory is in the name, as it is in the issue titles below:
+    # network, backup and workload-production can each hold a production leaf of
+    # the same component (github-oidc), and without it they would share a name.
+    name: Drift Check (${{ matrix.account }}/${{ matrix.env }}/${{ matrix.component }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: select-accounts
@@ -301,10 +307,11 @@ jobs:
       # a .tflock object beside the state. The plan role is read-only
       # (ReadOnlyAccess), so it cannot write that object, and every plan would
       # fail acquiring the lock. Skipping the lock is safe here because this plan
-      # is advisory: it reads state and writes nothing, its result is a report
-      # rather than a saved plan anything applies, and so it never contends with
-      # an apply. An apply running at the same moment can only make one report
-      # stale, which the next scheduled run corrects.
+      # writes nothing and nothing applies its result: it reads state, and its
+      # output is a report rather than a saved plan, so it never contends with an
+      # apply. An apply running at the same moment can only make one report
+      # stale, which the next scheduled run corrects. A plan that errors still
+      # fails the job (see "Fail on plan error").
       - name: Plan
         id: plan
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
@@ -348,21 +355,37 @@ jobs:
       # below reads plan.redacted.txt, which scripts/redact-account-ids.py writes
       # here with every id select-accounts found in DRIFT_PLAN_ROLE_ARNS, and any
       # other standalone run of twelve digits, replaced by <account-id>. The ids
-      # arrive through the environment, never expanded into a script. If
-      # redaction fails, this step fails, the report is skipped, and the job ends
-      # red without publishing anything.
+      # arrive through the environment, never expanded into a script.
+      #
+      # The redactor runs its self-test first, then redacts with --require-ids:
+      # select-accounts only plans a leaf when the variable holds a valid role
+      # ARN, so the list always names at least one id, and an empty one means it
+      # did not arrive. If either fails, this step fails, the report is skipped,
+      # and the job ends red without publishing anything.
+      #
+      # The runner prints each step's env block, and a repository variable is not
+      # masked, so this step's and the report step's logs carry the whole id
+      # list. That is the same data select-accounts' log already carries (its env
+      # block holds the variable itself); the issue is what this redacts.
       - name: Redact account ids from the plan output
         if: steps.plan.outputs.exitcode == '1' || steps.plan.outputs.exitcode == '2'
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
         env:
           REDACT_ACCOUNT_IDS: ${{ needs.select-accounts.outputs.account_ids }}
-        run: python3 "$GITHUB_WORKSPACE/scripts/redact-account-ids.py" < plan.txt > plan.redacted.txt
+        run: |
+          python3 "$GITHUB_WORKSPACE/scripts/redact-account-ids.py" --self-test
+          python3 "$GITHUB_WORKSPACE/scripts/redact-account-ids.py" --require-ids < plan.txt > plan.redacted.txt
 
       # Drift (exit 2) opens or updates an issue labelled `drift`. A plan ERROR
       # (exit 1) is its own alert, with a distinct title and the `drift-error`
       # label, so it never reads as "no drift". Both reuse an open issue with the
       # same title, so a persistently drifting or broken component does not spawn
-      # an issue per run.
+      # an issue per run. The title names the account directory as well as the
+      # leaf, because the same env/component pair can exist in several accounts.
+      # The lookup pages through every open issue with the label: one trust
+      # misconfiguration across a few accounts files a drift-error issue per
+      # leaf, more than the 30 a single page returns, and a lookup that missed
+      # one would file a duplicate every run.
       #
       # Every value reaches the script through the environment. The title and the
       # whole body, not only the plan text, go through a second redaction pass
@@ -384,11 +407,13 @@ jobs:
             const fs = require('fs');
             const env = process.env;
 
-            // An unreadable id list fails the step rather than publishing with
-            // only the pattern pass, matching the redaction step's fail-closed exit.
-            const parsed = JSON.parse(env.REDACT_ACCOUNT_IDS || '[]');
+            // A missing, unparseable or empty id list fails the step rather than
+            // publishing with only the pattern pass, matching the redaction
+            // step's --require-ids.
+            const parsed = JSON.parse(env.REDACT_ACCOUNT_IDS || 'null');
             if (!Array.isArray(parsed)) throw new Error('REDACT_ACCOUNT_IDS is not a JSON array');
             const knownIds = parsed.filter((id) => typeof id === 'string' && /^[0-9]{12}$/.test(id));
+            if (knownIds.length === 0) throw new Error('REDACT_ACCOUNT_IDS names no account id');
             const redact = (text) => {
               for (const id of knownIds) text = text.split(id).join('<account-id>');
               return text.replace(/(?<![0-9])[0-9]{12}(?![0-9])/g, '<account-id>');
@@ -399,21 +424,22 @@ jobs:
 
             const drift = env.EXITCODE === '2';
             const label = drift ? 'drift' : 'drift-error';
-            const leaf = `${env.ENVIRONMENT}/${env.COMPONENT}`;
+            const leaf = `${env.ACCOUNT_DIR}/${env.ENVIRONMENT}/${env.COMPONENT}`;
             const details = `**Account:** ${env.ACCOUNT_DIR}\n**Region:** ${env.REGION}\n**Environment:** ${env.ENVIRONMENT}\n**Component:** ${env.COMPONENT}\n**Detected:** ${new Date().toISOString()}`;
             const title = redact(drift ? `Drift detected: ${leaf}` : `Drift check error: ${leaf}`);
             const body = redact(drift
               ? `## Drift Detection Report\n\n${details}\n\n<details><summary>Plan output</summary>\n\n\`\`\`\n${truncated}\n\`\`\`\n\n</details>`
               : `## Drift Check ERROR\n\nThe drift plan for this component failed to run — this is **not** "no drift", it means the check could not determine drift (a plan role that could not be assumed, expired auth, a broken provider, an unresolvable dependency). Resolve this before trusting the drift status of this component.\n\n${details}\n\n<details><summary>Plan error output</summary>\n\n\`\`\`\n${truncated}\n\`\`\`\n\n</details>`);
 
-            const issues = await github.rest.issues.listForRepo({
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
               labels: label,
+              per_page: 100,
             });
 
-            const existing = issues.data.find(i => i.title === title);
+            const existing = issues.find(i => i.title === title);
             if (existing) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
@@ -436,10 +462,11 @@ jobs:
       - name: Fail on plan error
         if: steps.plan.outputs.exitcode == '1'
         env:
+          ACCOUNT_DIR: ${{ matrix.account }}
           ENVIRONMENT: ${{ matrix.env }}
           COMPONENT: ${{ matrix.component }}
         run: |
-          echo "::error::Drift plan for ${ENVIRONMENT}/${COMPONENT} errored (exit 1) — see the 'Drift check error' issue."
+          echo "::error::Drift plan for ${ACCOUNT_DIR}/${ENVIRONMENT}/${COMPONENT} errored (exit 1) — see the 'Drift check error' issue."
           exit 1
 
   # Fails the run when select-accounts left a DRIFT_PLAN_ROLE_ARNS entry out.
