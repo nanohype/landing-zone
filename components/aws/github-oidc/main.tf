@@ -3,8 +3,9 @@ locals {
   # repos and the allowed claim suffixes (repo:<org>/<repo>:<claim>). The default
   # claim set is the four GitHub Environments the deploy/destroy/e2e workflows
   # declare, each an exact name (validated: no wildcard, no pull_request or ref:
-  # claim, never environment:plan, which the PR plan job and drift declare and the
-  # read-only plan role trusts). Only Actions workflows in these repos that declare
+  # claim, never environment:plan or environment:drift, which the PR plan job and
+  # drift.yml declare and the read-only plan role trusts). Only Actions workflows
+  # in these repos that declare
   # one of these environments may assume the role — from any ref, so each
   # environment's own deployment-branch policy is part of this control.
   subjects = flatten([
@@ -57,8 +58,8 @@ locals {
 # Actions CI path; its ARN goes in DEPLOY_ROLE_ARN on the GitHub Environment
 # deploy.yml/destroy.yml declare, and in E2E_AWS_ROLE_ARN for e2e.yml — never in
 # the repository-level AWS_ROLE_ARN, which holds plan_role_arn for ci.yml's plan
-# job, or in DRIFT_PLAN_ROLE_ARNS, which maps each account directory to that
-# account's plan_role_arn for drift.yml.
+# job, or in DRIFT_PLAN_ROLE_ARNS, the secret on the `drift` GitHub Environment
+# that maps each account directory to that account's plan_role_arn for drift.yml.
 ################################################################################
 
 data "aws_iam_policy_document" "trust" {
@@ -116,6 +117,14 @@ resource "aws_iam_role_policy_attachment" "deploy" {
 # `plan` environment mean a PR from an untrusted branch waits for approval
 # before any AWS credential is issued. The sub becomes
 # repo:<org>/<repo>:environment:plan, never a bare branch or pull_request claim.
+#
+# That holds for the development account only. ci.yml's PR plan job declares
+# `plan` from any branch, so in staging and production the plan role trusts
+# exactly environment:drift instead: drift.yml declares it, and its
+# deployment-branch policy admits main only, so no pull request reaches a
+# staging or production account's state. plan_allowed_subject_claims' validation
+# ties the claim to var.environment, so a staging or production leaf cannot ship
+# the development trust.
 #
 # READ SCOPE, stated rather than discovered: ReadOnlyAccess is account-wide read,
 # and that includes the Terraform state bucket. State holds plaintext values for

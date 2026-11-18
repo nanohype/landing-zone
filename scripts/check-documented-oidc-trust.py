@@ -31,6 +31,15 @@ actually emit — never a bare `*`. The permitted suffixes are read from
 own `variables.tf`, so widening the component widens what may be documented, and
 the two cannot drift apart in the direction that matters.
 
+A claim reaches the permitted set two ways: as a variable's default, or as the
+exact list a validation REQUIRES. The second is how `environment:drift` gets
+there: `plan_allowed_subject_claims` defaults to the development account's
+`environment:plan`, and its validation requires a staging or production leaf to
+set exactly `tolist(["environment:drift"])`. That claim is emitted by every
+staging or production plan role, so the documentation of drift.yml may show it,
+and it is read from the validation rather than listed here, so removing the
+requirement removes the permission.
+
 A bare `:*` is rejected even if someone adds it to the defaults, because the
 documentation claim this protects is that the estate does not trust one.
 
@@ -62,6 +71,11 @@ DEFAULT_LIST = re.compile(
     r'variable\s+"(?:allowed_subject_claims|plan_allowed_subject_claims|ecr_public_pull_subject_claims)".*?default\s*=\s*\[(?P<body>[^\]]*)\]',
     re.S,
 )
+# The exact list a plan_allowed_subject_claims validation requires, written
+# `var.plan_allowed_subject_claims == tolist([...])`.
+REQUIRED_LIST = re.compile(
+    r"var\.plan_allowed_subject_claims\s*==\s*tolist\(\[(?P<body>[^\]]*)\]\)",
+)
 QUOTED = re.compile(r'"([^"]+)"')
 
 
@@ -70,6 +84,8 @@ def permitted_claims() -> set[str]:
     text = COMPONENT_VARS.read_text()
     claims: set[str] = set()
     for m in DEFAULT_LIST.finditer(text):
+        claims |= set(QUOTED.findall(m.group("body")))
+    for m in REQUIRED_LIST.finditer(text):
         claims |= set(QUOTED.findall(m.group("body")))
     return claims
 

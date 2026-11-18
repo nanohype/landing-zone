@@ -13,6 +13,49 @@ permissions:
   contents: read
 
 jobs:
+  # secrets.X and vars.X resolve from the job's environment first, then the
+  # repository, then the organization. This job declares no environment, so it
+  # sees only the repository and organization values. DRIFT_PLAN_ROLE_ARNS must
+  # exist on the `drift` GitHub Environment alone, as a secret:
+  #   - a repository or organization SECRET of that name is what select-accounts
+  #     and detect-drift would read if the environment ever lost its own, and it
+  #     is readable by every workflow in the repository, not only by jobs the
+  #     environment's main-only branch policy admits;
+  #   - a repository or organization VARIABLE of that name is how this map used
+  #     to be stored, and a variable is not masked: any job that printed it would
+  #     publish every account id it holds.
+  # Only whether each is set reaches the step, as `true` or `false`, so this job
+  # prints neither value even when one is set. It needs no environment, so it
+  # costs no approval and runs from any branch.
+  refuse-inherited-config:
+    name: Refuse repository-level DRIFT_PLAN_ROLE_ARNS
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require DRIFT_PLAN_ROLE_ARNS to be a drift-environment secret only
+        # secrets-outside-env is this job's purpose, not a leak: reading the
+        # secret with no environment is the only way to see whether a
+        # repository- or organization-level one exists (listing secrets needs
+        # an admin token), and only the comparison's true/false reaches the step.
+        env:
+          INHERITED_SECRET: ${{ secrets.DRIFT_PLAN_ROLE_ARNS != '' }} # zizmor: ignore[secrets-outside-env]
+          INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}
+        run: |
+          failed=0
+          if [ "$INHERITED_SECRET" != "false" ]; then
+            echo "::error title=DRIFT_PLAN_ROLE_ARNS is a repository or organization secret::DRIFT_PLAN_ROLE_ARNS is set as a repository or organization secret, which every workflow in the repository can read and which the drift jobs would fall back to. Delete it there (gh secret delete DRIFT_PLAN_ROLE_ARNS --repo <owner>/<repo>) and keep it only on the drift GitHub Environment (see docs/operations.md)."
+            failed=1
+          fi
+          if [ "$INHERITED_VARIABLE" != "false" ]; then
+            echo "::error title=DRIFT_PLAN_ROLE_ARNS is a repository or organization variable::DRIFT_PLAN_ROLE_ARNS is set as a repository or organization variable. Variables are not masked, so its account ids could reach the public Actions logs. Delete it (gh variable delete DRIFT_PLAN_ROLE_ARNS --repo <owner>/<repo>) and store the map as a secret on the drift GitHub Environment instead (see docs/operations.md)."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "DRIFT_PLAN_ROLE_ARNS is set at neither repository nor organization level, as a secret or as a variable."
+
   # Auto-discovers the drift matrix from the working tree, mirroring ci.yml's
   # discover job, so a new production/staging live entry starts getting watched
   # without a workflow edit once its account has a plan role (see
@@ -52,18 +95,15 @@ jobs:
           )
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
-  # Chooses the plan role for each leaf. The matrix spans every account directory
-  # under live/aws/ that holds a production or staging leaf, and root.hcl assumes
-  # no role: the backend and the provider both act as the credential detect-drift
+  # Chooses the leaves to plan. The matrix spans every account directory under
+  # live/aws/ that holds a production or staging leaf, and root.hcl assumes no
+  # role: the backend and the provider both act as the credential detect-drift
   # configures, so a leaf can only be planned with a credential in its own
-  # account. DRIFT_PLAN_ROLE_ARNS is a repository variable holding a JSON object
-  # that maps each account directory to the read-only plan role github-oidc
-  # creates in that account (its plan_role_arn output), for example
+  # account. DRIFT_PLAN_ROLE_ARNS is a secret on the `drift` GitHub Environment
+  # holding a single-line JSON object that maps each account directory to the
+  # read-only plan role github-oidc creates in that account (its plan_role_arn
+  # output), for example
   # {"workload-staging":"arn:aws:iam::222222222222:role/github-actions-plan"}.
-  #
-  # Each leaf takes its account id from its role's ARN, so the credential and the
-  # state bucket name (root.hcl names it after TERRAGRUNT_ACCOUNT_ID) come from one
-  # value and cannot name different accounts.
   #
   # A leaf whose account directory has no entry is not planned: it is skipped and
   # named in the run summary, so drift detection can be armed one account at a
@@ -72,66 +112,75 @@ jobs:
   # production or staging leaf was removed), is reported and left out, and
   # report-config-errors fails the run after the accounts mapped correctly have
   # been planned. So a bad entry is never quiet and never stops the good ones.
-  # The run fails before planning anything only when the variable is unset, is
-  # not a JSON object, or leaves no account to plan: a scheduled run that checked
-  # no account must not report "no drift".
+  # The run fails before planning anything only when the secret is unset, spans
+  # several lines, is not a JSON object, or leaves no account to plan: a
+  # scheduled run that checked no account must not report "no drift".
   #
-  # The role ARNs reach detect-drift through the matrix. This job declares no
-  # environment, so it reads the repository (or organization) value. detect-drift
-  # declares `environment: plan`, where an environment-level value would win, so
-  # reading the variable once, here, keeps the two from disagreeing.
+  # `environment: drift` is what makes the secret readable here, and the
+  # environment's deployment-branch policy admits main only, so a dispatch from
+  # any other branch stops at this job. refuse-inherited-config runs first, so
+  # the value read here can only be the environment's own.
   #
-  # The repository is public, and the role ARNs carry real account ids. Nothing
-  # this job writes to an annotation or the run summary carries one: it names
-  # account directories, never values, and every name it prints goes through jq's
-  # `redact`, which replaces any run of twelve or more digits with <account-id>,
-  # so even a key that is an account id, or holds one run together with other
-  # digits, is not echoed (an account directory name has no such run). This
-  # job's own log is not redacted: the runner prints the step's env block, and a
-  # repository variable is not masked, so the whole variable is in it. It also
-  # hands detect-drift every twelve-digit run in the variable as `account_ids`,
-  # the list detect-drift redacts from plan output before filing an issue.
+  # The repository is public, and the role ARNs carry real account ids. The
+  # secret reaches this step through its env block, which the runner prints as
+  # `***` (a secret is masked whole). The step's first command,
+  # scripts/mask-drift-role-map.sh, registers every account id and every role
+  # ARN in it with ::add-mask::, so nothing this step prints afterwards can
+  # carry one either. The matrix this job hands on carries account directory
+  # names and no role value: the runner drops any job output containing a
+  # masked value ("Skip output ... since it may contain secret"), so detect-drift
+  # reads its role from the secret itself. Everything this job writes to an
+  # annotation or the run summary names account directories, never values, and
+  # goes through jq's `redact`, which replaces any run of twelve or more digits
+  # with <account-id>, so even a key that is an account id is not echoed in the
+  # summary, which the masker does not reach.
   select-accounts:
     name: Select accounts with a plan role
-    needs: discover
+    needs: [refuse-inherited-config, discover]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    environment: drift
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       config_error: ${{ steps.select.outputs.config_error }}
-      account_ids: ${{ steps.select.outputs.account_ids }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Pair each leaf with its account's plan role
         id: select
         env:
-          ROLE_ARNS: ${{ vars.DRIFT_PLAN_ROLE_ARNS }}
+          DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}
           LEAVES: ${{ needs.discover.outputs.matrix }}
         run: |
-          if [ -z "$ROLE_ARNS" ]; then
-            echo "::error title=DRIFT_PLAN_ROLE_ARNS is not set::Drift detection cannot run: the DRIFT_PLAN_ROLE_ARNS repository variable (Settings > Secrets and variables > Actions > Variables) is unset, so no account has a plan role and no drift was checked. Set it to a JSON object mapping each account directory under live/aws/ to the plan role github-oidc creates in that account (see docs/operations.md)."
-            exit 1
-          fi
+          # First: mask every id and role ARN, and refuse an unset or multi-line
+          # value, before anything else can print.
+          bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"
+          ROLE_ARNS="$DRIFT_PLAN_ROLE_ARNS"
+
           if ! printf '%s' "$ROLE_ARNS" | jq -e 'type == "object"' >/dev/null 2>&1; then
             echo "::error title=DRIFT_PLAN_ROLE_ARNS is not a JSON object::Drift detection cannot run: DRIFT_PLAN_ROLE_ARNS must be a JSON object mapping account directory to plan role ARN, for example {\"workload-staging\":\"arn:aws:iam::<account>:role/github-actions-plan\"}."
             exit 1
           fi
 
-          # Prepended to every jq program below whose output is printed.
-          redact_def='def redact: gsub("[0-9]{12,}"; "<account-id>");'
+          # Prepended to every jq program below. `redact` is for what is printed;
+          # `is_role_arn` is the one role-ARN shape every job accepts, anchored at
+          # both ends of the string so a value carrying a line break is not one.
+          defs='def redact: gsub("[0-9]{12,}"; "<account-id>");
+                def is_role_arn: type == "string" and test("\\Aarn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+\\z");'
 
           # Each query lists keys, never values, and redacts them. A failed jq is
           # reported as its own error rather than read as an empty list, because an
           # empty list is the passing answer.
-          if ! malformed=$(jq -n -r --argjson roles "$ROLE_ARNS" "$redact_def"'
-              $roles | to_entries[]
-              | select((.value | type) != "string" or (.value | test("^arn:aws:iam::[0-9]{12}:role/.+$") | not))
-              | .key | redact
+          if ! malformed=$(jq -n -r --argjson roles "$ROLE_ARNS" "$defs"'
+              $roles | to_entries[] | select(.value | is_role_arn | not) | .key | redact
             '); then
             echo "::error::DRIFT_PLAN_ROLE_ARNS could not be checked, so no leaf was planned."
             exit 1
           fi
-          if ! unknown=$(jq -n -r --argjson roles "$ROLE_ARNS" --argjson leaves "$LEAVES" "$redact_def"'
+          if ! unknown=$(jq -n -r --argjson roles "$ROLE_ARNS" --argjson leaves "$LEAVES" "$defs"'
               [$leaves[].account] as $planned
               | $roles | keys[] | select(IN($planned[]) | not) | redact
             '); then
@@ -149,31 +198,21 @@ jobs:
             config_error=true
           fi
 
-          roles=$(jq -n -c --argjson roles "$ROLE_ARNS" --argjson leaves "$LEAVES" '
+          # The account directories with a valid role, as names only. No role
+          # value leaves this step.
+          if ! accounts=$(jq -n -c --argjson roles "$ROLE_ARNS" --argjson leaves "$LEAVES" "$defs"'
               [$leaves[].account] as $planned
-              | $roles
-              | with_entries(select(
-                  (.value | type) == "string"
-                  and (.value | test("^arn:aws:iam::[0-9]{12}:role/.+$"))
-                  and (.key | IN($planned[]))
-                ))
-            ')
-          matrix=$(jq -n -c --argjson roles "$roles" --argjson leaves "$LEAVES" '
-              $leaves | map(select($roles[.account] != null) | . + {role_arn: $roles[.account]})
-            ')
-          skipped=$(jq -n -r --argjson roles "$roles" --argjson leaves "$LEAVES" "$redact_def"'
-              [$leaves[] | select($roles[.account] == null) | .account] | unique | .[] | redact
-            ')
-          # Every twelve-digit run in the variable, keys and values alike, for
-          # detect-drift to redact from plan output. Taken from the raw variable
-          # rather than from the valid entries, so an id in an entry that was left
-          # out is still redacted wherever it turns up.
-          if ! account_ids=$(jq -n -c --argjson roles "$ROLE_ARNS" '
-              [($roles | keys[]), ($roles[] | strings) | scan("[0-9]{12}")] | unique
+              | [$roles | to_entries[] | select((.value | is_role_arn) and (.key | IN($planned[]))) | .key]
             '); then
-            echo "::error::DRIFT_PLAN_ROLE_ARNS could not be scanned for account ids, so no leaf was planned."
+            echo "::error::DRIFT_PLAN_ROLE_ARNS could not be paired with the matrix, so no leaf was planned."
             exit 1
           fi
+          matrix=$(jq -n -c --argjson accounts "$accounts" --argjson leaves "$LEAVES" '
+              $leaves | map(select(.account | IN($accounts[])))
+            ')
+          skipped=$(jq -n -r --argjson accounts "$accounts" --argjson leaves "$LEAVES" "$defs"'
+              [$leaves[] | select(.account | IN($accounts[]) | not) | .account] | unique | .[] | redact
+            ')
 
           if [ "$matrix" = "[]" ] || [ -z "$matrix" ]; then
             echo "::error title=No leaf to plan::DRIFT_PLAN_ROLE_ARNS maps no account directory to a valid plan role, so no leaf would be planned and no drift checked."
@@ -185,15 +224,13 @@ jobs:
             echo
             echo "Planned with the account's plan role:"
             echo
-            printf '%s' "$LEAVES" | jq -r --argjson roles "$roles" "$redact_def"'
-                [.[] | select($roles[.account] != null) | .account] | unique[] | "- `\(.)`" | redact
-              '
+            jq -n -r --argjson accounts "$accounts" "$defs"'$accounts | unique[] | "- `\(.)`" | redact'
             if [ -n "$skipped" ]; then
               echo
               echo "Skipped, because DRIFT_PLAN_ROLE_ARNS has no valid plan role for the account. These leaves were not checked for drift:"
               echo
-              printf '%s' "$LEAVES" | jq -r --argjson roles "$roles" "$redact_def"'
-                  map(select($roles[.account] == null))
+              printf '%s' "$LEAVES" | jq -r --argjson accounts "$accounts" "$defs"'
+                  map(select(.account | IN($accounts[]) | not))
                   | group_by(.account)[]
                   | "- `\(.[0].account)`: " + (map("`\(.env)/\(.component)`") | join(", ")) | redact
                 '
@@ -213,7 +250,6 @@ jobs:
           {
             echo "matrix=$matrix"
             echo "config_error=$config_error"
-            echo "account_ids=$account_ids"
           } >> "$GITHUB_OUTPUT"
 
   detect-drift:
@@ -225,13 +261,17 @@ jobs:
     timeout-minutes: 30
     needs: select-accounts
     # The read-only plan role of the leaf's own account. Declaring
-    # `environment: plan` makes the OIDC token present
-    # repo:<org>/<repo>:environment:plan — the only sub the plan role trusts —
-    # instead of the bare branch claim (ref:refs/heads/main) a scheduled run would
-    # otherwise carry, which neither the plan role nor the deploy role trusts. If
-    # the `plan` environment requires reviewers, every scheduled run waits for an
-    # approval before any leaf is planned.
-    environment: plan
+    # `environment: drift` makes the OIDC token present
+    # repo:<org>/<repo>:environment:drift — the only sub a staging or production
+    # plan role trusts (github-oidc's plan_allowed_subject_claims validation
+    # requires exactly that claim in those environments) — instead of the bare
+    # branch claim (ref:refs/heads/main) a scheduled run would otherwise carry,
+    # which no role trusts. It is also what makes the DRIFT_PLAN_ROLE_ARNS secret
+    # readable. The environment admits main only, so neither the token nor the
+    # secret reaches another branch. It is deliberately not `plan`: ci.yml's PR
+    # plan job declares that environment from any branch, and its role is the
+    # development account's.
+    environment: drift
     # Grant the OIDC token permission at the JOB level, mirroring ci.yml's plan
     # job. aws-actions/configure-aws-credentials needs id-token:write to mint the
     # web-identity token; without it the step fails with "Could not load
@@ -251,6 +291,45 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      # The first step that receives the secret. Its first command masks every
+      # account id and role ARN in it (all accounts', not only this leaf's), so
+      # from there on this job's log carries none of them: not this step's
+      # output, not the role-to-assume input the credentials step prints, not
+      # the env blocks of the steps below, and not the plan output, which names
+      # the state bucket and role ARNs. Masks are per job, so select-accounts'
+      # masking does not cover this one.
+      #
+      # The role comes from the secret here rather than through the matrix,
+      # because the runner drops a job output that contains a masked value. The
+      # role and account id leave this step as step outputs, which stay inside
+      # the job and print as `***`.
+      - name: Read this account's plan role
+        id: role
+        env:
+          DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}
+          ACCOUNT_DIR: ${{ matrix.account }}
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"
+
+          # The same role-ARN shape select-accounts accepted. select-accounts only
+          # put this leaf in the matrix because its entry had one, so a miss here
+          # means the secret changed between the two jobs.
+          if ! role_arn=$(printf '%s' "$DRIFT_PLAN_ROLE_ARNS" | jq -r --arg account "$ACCOUNT_DIR" '
+              .[$account]
+              | select(type == "string" and test("\\Aarn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+\\z"))
+            ') || [ -z "$role_arn" ]; then
+            echo "::error title=No plan role for ${ACCOUNT_DIR}::DRIFT_PLAN_ROLE_ARNS has no valid plan role for account directory ${ACCOUNT_DIR}, although select-accounts found one; the secret changed during the run. Re-run the workflow."
+            exit 1
+          fi
+          # The leaf's account id is its plan role's account: the ARN's account
+          # segment, which the Plan step exports as TERRAGRUNT_ACCOUNT_ID.
+          account_id=$(printf '%s' "$role_arn" | cut -d: -f5)
+          {
+            echo "role_arn=$role_arn"
+            echo "account_id=$account_id"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.13.9"
@@ -266,9 +345,9 @@ jobs:
       # continue-on-error, so that a role this job cannot assume reaches the Plan
       # step and is reported as a drift check error. The likely causes are the
       # account's github-oidc leaf not applied yet (the role does not exist), a
-      # trust that does not admit this job's OIDC subject, or a
-      # DRIFT_PLAN_ROLE_ARNS entry naming the wrong role. Without continue-on-error
-      # the job would stop here. It would be red, but it would file no
+      # trust that does not admit this job's OIDC subject, which is
+      # repo:<org>/<repo>:environment:drift, or a DRIFT_PLAN_ROLE_ARNS entry
+      # naming the wrong role. Without continue-on-error the job would stop here. It would be red, but it would file no
       # drift-error issue, which is the alert docs/operations.md promises for a
       # leaf that could not be checked. The Plan step records the failure as exit
       # code 1, so the run still ends red (see "Fail on plan error").
@@ -277,8 +356,11 @@ jobs:
         continue-on-error: true
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
-          role-to-assume: ${{ matrix.role_arn }}
+          role-to-assume: ${{ steps.role.outputs.role_arn }}
           aws-region: ${{ matrix.region }}
+          # Already masked by the "Read this account's plan role" step; stated
+          # so the action's own handling cannot be the one place it is not.
+          mask-aws-account-id: true
 
       # `terragrunt plan -detailed-exitcode` returns three distinct codes, and they
       # mean three different things — conflating them is how drift detection goes
@@ -298,10 +380,13 @@ jobs:
       # (never the role ARN), and the error report and the red run follow.
       #
       # The leaf's account id is its plan role's account: the ARN's account
-      # segment, exported as the TERRAGRUNT_ACCOUNT_ID root.hcl reads to name the
-      # state bucket, the same injection ci.yml's plan job and scripts/e2e.sh use.
-      # The credential configured above came from the same ARN, so the bucket and
-      # the provider are in one account by construction.
+      # segment, read by the "Read this account's plan role" step and exported
+      # here as the TERRAGRUNT_ACCOUNT_ID root.hcl reads to name the state
+      # bucket, the same injection ci.yml's plan job and scripts/e2e.sh use. The
+      # credential configured above came from the same ARN, so the bucket and the
+      # provider are in one account by construction. The plan output this step
+      # tees into the log names that bucket and, in an access error, role ARNs;
+      # both print as `***`, because the role step masked them.
       #
       # -lock=false: root.hcl sets use_lockfile = true, so a plan that locks writes
       # a .tflock object beside the state. The plan role is read-only
@@ -316,7 +401,7 @@ jobs:
         id: plan
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
         env:
-          ROLE_ARN: ${{ matrix.role_arn }}
+          ACCOUNT_ID: ${{ steps.role.outputs.account_id }}
           CREDS_OUTCOME: ${{ steps.creds.outcome }}
           ACCOUNT_DIR: ${{ matrix.account }}
         run: |
@@ -326,7 +411,7 @@ jobs:
               echo
               echo "Check, in order:"
               echo "- the account's github-oidc leaf has been applied, so its plan role exists;"
-              echo "- the plan role's trust admits this job's OIDC subject (detect-drift declares the \"plan\" environment);"
+              echo "- the plan role's trust admits this job's OIDC subject (detect-drift declares the \"drift\" environment, so plan_allowed_subject_claims must be [\"environment:drift\"]);"
               echo "- the DRIFT_PLAN_ROLE_ARNS entry for ${ACCOUNT_DIR} is that account's plan_role_arn output."
               echo
               echo "The AWS error is in the \"Configure AWS credentials\" step of this job. See docs/operations.md, drift.yml."
@@ -338,11 +423,11 @@ jobs:
             exit 0
           fi
 
-          if ! [[ "$ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/.+$ ]]; then
-            echo "::error::This leaf's plan role is not an IAM role ARN, so its account id is unknown."
+          if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error::This leaf's plan role carried no account id, so its state bucket is unknown."
             exit 1
           fi
-          export TERRAGRUNT_ACCOUNT_ID="${BASH_REMATCH[1]}"
+          export TERRAGRUNT_ACCOUNT_ID="$ACCOUNT_ID"
 
           set +e
           terragrunt plan -lock=false -detailed-exitcode -no-color 2>&1 | tee plan.txt
@@ -351,27 +436,24 @@ jobs:
       # The plan output carries real account ids (the state bucket
       # <account_id>-<region>-tfstate in backend and lock errors, role ARNs in
       # access errors), and an issue on this public repository is published the
-      # moment it is filed. So nothing reads plan.txt for an issue: the report
+      # moment it is filed. The log masking above does not reach an issue: it
+      # rewrites what the runner prints, not what a step writes to a file or
+      # sends to the API. So nothing reads plan.txt for an issue: the report
       # below reads plan.redacted.txt, which scripts/redact-account-ids.py writes
-      # here with every id select-accounts found in DRIFT_PLAN_ROLE_ARNS, and any
-      # other standalone run of twelve digits, replaced by <account-id>. The ids
-      # arrive through the environment, never expanded into a script.
+      # here with every id in DRIFT_PLAN_ROLE_ARNS, and any other standalone run
+      # of twelve digits, replaced by <account-id>. The secret arrives through the
+      # environment (its env block prints as `***`), never expanded into a script.
       #
-      # The redactor runs its self-test first, then redacts with --require-ids:
-      # select-accounts only plans a leaf when the variable holds a valid role
-      # ARN, so the list always names at least one id, and an empty one means it
-      # did not arrive. If either fails, this step fails, the report is skipped,
-      # and the job ends red without publishing anything.
-      #
-      # The runner prints each step's env block, and a repository variable is not
-      # masked, so this step's and the report step's logs carry the whole id
-      # list. That is the same data select-accounts' log already carries (its env
-      # block holds the variable itself); the issue is what this redacts.
+      # The redactor runs its self-test first, then redacts with --require-ids: a
+      # leaf is only planned with a role ARN from the secret, so it always holds
+      # an id, and none means it did not arrive. If either fails, this step
+      # fails, the report is skipped, and the job ends red without publishing
+      # anything.
       - name: Redact account ids from the plan output
         if: steps.plan.outputs.exitcode == '1' || steps.plan.outputs.exitcode == '2'
         working-directory: live/${{ matrix.cloud }}/${{ matrix.account }}/${{ matrix.region }}/${{ matrix.env }}/${{ matrix.component }}
         env:
-          REDACT_ACCOUNT_IDS: ${{ needs.select-accounts.outputs.account_ids }}
+          DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}
         run: |
           python3 "$GITHUB_WORKSPACE/scripts/redact-account-ids.py" --self-test
           python3 "$GITHUB_WORKSPACE/scripts/redact-account-ids.py" --require-ids < plan.txt > plan.redacted.txt
@@ -401,19 +483,18 @@ jobs:
           REGION: ${{ matrix.region }}
           ENVIRONMENT: ${{ matrix.env }}
           COMPONENT: ${{ matrix.component }}
-          REDACT_ACCOUNT_IDS: ${{ needs.select-accounts.outputs.account_ids }}
+          DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}
         with:
           script: |
             const fs = require('fs');
             const env = process.env;
 
-            // A missing, unparseable or empty id list fails the step rather than
-            // publishing with only the pattern pass, matching the redaction
-            // step's --require-ids.
-            const parsed = JSON.parse(env.REDACT_ACCOUNT_IDS || 'null');
-            if (!Array.isArray(parsed)) throw new Error('REDACT_ACCOUNT_IDS is not a JSON array');
-            const knownIds = parsed.filter((id) => typeof id === 'string' && /^[0-9]{12}$/.test(id));
-            if (knownIds.length === 0) throw new Error('REDACT_ACCOUNT_IDS names no account id');
+            // Every twelve-digit run in the secret's raw text, as the redaction
+            // step reads it. A secret holding no id fails the step rather than
+            // publishing with only the pattern pass, matching that step's
+            // --require-ids.
+            const knownIds = [...new Set((env.DRIFT_PLAN_ROLE_ARNS || '').match(/[0-9]{12}/g) || [])];
+            if (knownIds.length === 0) throw new Error('DRIFT_PLAN_ROLE_ARNS holds no account id');
             const redact = (text) => {
               for (const id of knownIds) text = text.split(id).join('<account-id>');
               return text.replace(/(?<![0-9])[0-9]{12}(?![0-9])/g, '<account-id>');

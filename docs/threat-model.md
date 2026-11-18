@@ -38,8 +38,9 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   protection rules, the first time a workflow names it, so `environment:prod*`
   admits whatever `prodx` a branch's workflow invents. `pull_request` and `ref:`
   claims are refused because anyone able to open that pull request or push that
-  ref holds them. `environment:plan` is refused in every letter case: the PR plan
-  job and the drift job declare it, and it belongs to the read-only plan role.
+  ref holds them. `environment:plan` and `environment:drift` are refused in every
+  letter case: the PR plan job declares the first and the drift jobs the second,
+  and both belong to the read-only plan role.
   `github_org` and `github_repos` must be literal names, because a wildcard there
   (`landing-zone*`) would match `...:environment:plan` past every claim check.
   `github_repos` and `allowed_subject_claims` are both validated non-empty,
@@ -65,36 +66,53 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `workload-development` leaf trusts `environment:development` and
   `environment:e2e` only), so a job in a less-protected environment cannot reach
   another account's deploy role.
-- **Information disclosure** — the read-only plan role. It trusts
-  `environment:plan` (the `plan_allowed_subject_claims` default), which ci.yml's
-  PR plan job declares from any branch, including a same-repository pull
-  request's, and it carries account-wide `ReadOnlyAccess`: every S3 object,
-  state files included, and every DynamoDB item in the account. The
-  `workload-development` leaf ships that today. Residual, and **required before
-  any `staging` or `production` plan-role leaf exists** (drift.yml needs one per
-  account; see [operations.md](operations.md#required-before-any-staging-or-production-plan-role)):
-  (a) such a role must not trust `environment:plan` as-is. The recommended
-  design, pending the owner's decision, is a separate exact `environment:drift`
-  claim on a `drift` environment whose deployment-branch policy admits `main`
-  only, declared by drift.yml, or else a read policy narrower than
-  `ReadOnlyAccess`. (b) `plan_allowed_subject_claims` refuses only a bare `*`;
-  it must carry the exact-environment allowlist `allowed_subject_claims` has
-  (`^environment:[^*?]+$`), proven by a `tofu test` case, before those leaves
-  exist. Neither is implemented.
-- **Information disclosure** — account ids in drift issues. drift.yml files
-  plan output into issues on a public repository, and each leaf's output can
-  name its account (the state bucket, role ARNs). Mitigated:
+- **Information disclosure** — the read-only plan role. It carries account-wide
+  `ReadOnlyAccess`: every S3 object, state files included, and every DynamoDB
+  item in the account. Mitigated by tying its trust to the account's
+  environment. In `development` it trusts `environment:plan` (the
+  `plan_allowed_subject_claims` default), which ci.yml's PR plan job declares
+  from any branch, including a same-repository pull request's; that is accepted
+  for the development account alone. In `staging` and `production` it trusts
+  exactly `environment:drift`: drift.yml declares that environment, and its
+  deployment-branch policy admits `main` only, so no pull request and no other
+  branch reaches a staging or production account's data. The component enforces
+  this rather than documenting it: `plan_allowed_subject_claims` is an
+  exact-environment allowlist (every entry matching `^environment:[^*?]+$`, so
+  no wildcard, `pull_request` or `ref:` claim), and its validation reads the
+  leaf's `environment`, requiring exactly `["environment:drift"]` in `staging`
+  and `production`, refusing `environment:plan` (in any letter case) outside
+  `development`, and refusing `environment:drift` outside `staging` and
+  `production`. `tofu test` cases in `components/aws/github-oidc/tests/` prove
+  each arm. Residual: the control is the `drift` environment's branch policy,
+  which lives in repository settings. It must exist, admit `main` only, before
+  drift.yml names it, because a workflow naming a missing environment creates it
+  unprotected (see
+  [operations.md](operations.md#required-before-any-staging-or-production-plan-role)).
+- **Information disclosure** — account ids in drift logs and issues. drift.yml
+  holds one plan role ARN per account, each carrying a real account id, and the
+  plan output it publishes can name its account (the state bucket, role ARNs).
+  Mitigated in the logs: the role map is `DRIFT_PLAN_ROLE_ARNS`, a secret on the
+  `drift` environment, so the runner prints it as `***` wherever it appears
+  whole, and every job that reads it runs `scripts/mask-drift-role-map.sh` as
+  the first command of the first step that receives it, registering every
+  twelve-digit run and every role ARN in it with `::add-mask::`. From that line
+  on nothing the job prints carries one: not the role step's output, not the
+  credential step's `role-to-assume` input, not any later step's env block, and
+  not the raw plan output. No job output carries a role value (the runner drops
+  a job output containing a masked value, so each `Drift Check` job reads its
+  role from the secret itself). `refuse-inherited-config` fails the run if
+  `DRIFT_PLAN_ROLE_ARNS` exists as a repository or organization secret or
+  variable: a variable is not masked, and a broader secret is readable by every
+  workflow and is what the drift jobs would fall back to. Mitigated in the
+  issues, which the runner's masking never reaches:
   `scripts/redact-account-ids.py` replaces every id in `DRIFT_PLAN_ROLE_ARNS`
   and every other standalone twelve-digit run before an issue step reads the
   output, and the issue step applies the same rules to the title and body.
-  Residual, accepted: the workflow's job logs, public on this repository, are
-  not redacted. Repository variables are not masked and the runner prints each
-  step's env block, so `select-accounts`' log carries the whole
-  `DRIFT_PLAN_ROLE_ARNS` value, every `Drift Check` job's log carries the full
-  id list it redacts with, and each job's credential step inputs and raw plan
-  output carry its own account's id. Every id in the variable is therefore
-  readable by anyone who can read the Actions logs; the redaction keeps it out
-  of the issues.
+  Residual: masking is by value. An account id that is not in the secret (a
+  cross-account reference in plan output) prints in the job log; the issue
+  redaction's standalone-twelve-digit pass still removes it from the issue. A
+  secret stored across several lines would have each line masked separately,
+  so the masking script refuses one and the docs require single-line JSON.
 - **Spoofing** — a workflow assuming the ECR Public pull role. Accepted within a
   bound: this role alone trusts `pull_request`
   (`repo:<org>/<repo>:pull_request` and `repo:<org>/<repo>:ref:refs/heads/main`

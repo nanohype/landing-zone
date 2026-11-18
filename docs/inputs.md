@@ -54,7 +54,7 @@ zones. See each component's `route53-tags.tf`.
 | `TERRAGRUNT_ACCOUNT_ID` | real AWS account id (overrides the `account.hcl` placeholder) |
 | `GITHUB_SHA` | short commit → the `Revision` tag; `"local"` off-CI |
 | `AWS_ROLE_ARN` | the read-only OIDC plan role (`github-oidc`'s `plan_role_arn`, not `deploy_role_arn`) that ci.yml's plan job assumes from `environment: plan` (repo Variable; unset ⇒ PR Plan jobs skip green) |
-| `DRIFT_PLAN_ROLE_ARNS` | drift.yml only: a JSON object mapping each account directory to the plan role (`plan_role_arn`) in that account; each drift leaf assumes its account's role and passes the ARN's account id as `TERRAGRUNT_ACCOUNT_ID`, and every account id in it is redacted from drift issues (repository-level Variable, never read from the `plan` environment; unset ⇒ scheduled drift detection fails; an account directory with no entry is skipped and listed in the run summary; see [operations.md](operations.md#driftyml----drift-detection) and its per-account bring-up list) |
+| `DRIFT_PLAN_ROLE_ARNS` | drift.yml only: a single-line JSON object mapping each account directory to the plan role (`plan_role_arn`) in that account; each drift leaf assumes its account's role and passes the ARN's account id as `TERRAGRUNT_ACCOUNT_ID`. A **secret on the `drift` GitHub Environment** (main-only branch policy, no reviewers) and nowhere else: a repository- or organization-level secret or variable of that name fails the run (`refuse-inherited-config`). Every account id and role ARN in it is masked in the job logs and redacted from drift issues. Unset ⇒ scheduled drift detection fails; an account directory with no entry is skipped and listed in the run summary; see [operations.md](operations.md#driftyml----drift-detection) and its per-account bring-up list |
 
 `deploy.yml` and `destroy.yml` do not read the repository Variables `AWS_ROLE_ARN` and
 `TERRAGRUNT_ACCOUNT_ID`. They read `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` from the GitHub Environment they declare (`development`, `staging`,
@@ -237,13 +237,15 @@ Leave them unset for a private endpoint.
 3. Set `AWS_ROLE_ARN` (repo Variable) and the OIDC trust for the new repo/env.
    For a `staging` or `production` env in a new account directory, add that
    directory and the account's `github-oidc` plan role to the
-   `DRIFT_PLAN_ROLE_ARNS` repo Variable once the directory's leaves are on the
-   default branch and have been applied. Until then drift.yml skips its leaves;
-   a key added before they are on the default branch names no planned account,
-   and the run ends red, and one added before they are applied files a drift
-   issue for every leaf that plans as creates. The account's plan role
-   comes from its own `github-oidc` leaf, applied locally with that account's
-   credentials, and is blocked on the prerequisites in
+   `DRIFT_PLAN_ROLE_ARNS` secret on the `drift` GitHub Environment once the
+   directory's leaves are on the default branch and have been applied. Until
+   then drift.yml skips its leaves; a key added before they are on the default
+   branch names no planned account, and the run ends red, and one added before
+   they are applied files a drift issue for every leaf that plans as creates.
+   The account's plan role comes from its own `github-oidc` leaf, with
+   `plan_allowed_subject_claims = ["environment:drift"]` (the component refuses
+   any other trust in `staging` or `production`), applied locally with that
+   account's credentials, after the setup in
    [operations.md](operations.md#required-before-any-staging-or-production-plan-role).
 4. `terragrunt run --all -- plan` from the env dir; deploy components in dependency
    order (see [architecture.md](architecture.md) Dependency Graph).

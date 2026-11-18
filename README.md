@@ -129,7 +129,7 @@ task help             Show all targets
 
 ## CI/CD
 
-Five GitHub Actions workflows, all authenticating via AWS OIDC with no long-lived credentials. ci.yml's plan job assumes the `AWS_ROLE_ARN` repo variable, drift.yml one plan role per account from `DRIFT_PLAN_ROLE_ARNS`, deploy.yml and destroy.yml `DEPLOY_ROLE_ARN` from the GitHub Environment they declare, and e2e.yml `E2E_AWS_ROLE_ARN`.
+Five GitHub Actions workflows, all authenticating via AWS OIDC with no long-lived credentials. ci.yml's plan job assumes the `AWS_ROLE_ARN` repo variable, drift.yml one plan role per account from `DRIFT_PLAN_ROLE_ARNS`, a secret on the main-only `drift` GitHub Environment, deploy.yml and destroy.yml `DEPLOY_ROLE_ARN` from the GitHub Environment they declare, and e2e.yml `E2E_AWS_ROLE_ARN`.
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
