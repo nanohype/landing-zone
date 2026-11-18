@@ -316,18 +316,28 @@ the `aws sso login --profile workload-<env>` + `AWS_PROFILE` setup above is all
 you need. There is no GitHub Actions runner in the default model; `task apply`
 and `task e2e` execute on your machine against the target account.
 
-The repo also ships GitHub Actions workflows (`deploy.yml`, `e2e.yml`) for an
-**optional** CI path. Those assume a GitHub→AWS OIDC role, which the
-`github-oidc` component provisions (the OIDC provider + a repo-scoped deploy
-role). Apply it once per account with your admin/SSO creds, then wire its output
-into the GitHub Actions repo *variables*:
+The repo also ships GitHub Actions workflows (`deploy.yml`, `destroy.yml`,
+`e2e.yml`) for an **optional** CI path. Those assume a GitHub→AWS OIDC role,
+which the `github-oidc` component provisions (the OIDC provider + a repo-scoped
+deploy role). Apply it once per account with your admin/SSO creds, then wire its
+output into GitHub Actions *variables*:
 
 ```bash
 task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=github-oidc
 cd live/aws/workload-<env>/us-east-1/<env>/github-oidc && terragrunt output -raw deploy_role_arn
-# Set the printed ARN as the AWS_ROLE_ARN (deploy.yml) and E2E_AWS_ROLE_ARN
-# (e2e.yml) repo variables. Local exec does not need this.
+# deploy.yml / destroy.yml: on the <env> GitHub Environment (Settings >
+# Environments > <env> > Environment variables) set AWS_ROLE_ARN to the printed
+# ARN and TERRAGRUNT_ACCOUNT_ID to the workload-<env> account's 12-digit id.
+# e2e.yml: set E2E_AWS_ROLE_ARN. Local exec does not need any of this.
 ```
+
+`deploy.yml` and `destroy.yml` declare `environment: <env>`, and a variable set
+on a GitHub Environment overrides a repository variable of the same name, so
+each of `development`, `staging` and `production` carries its own account's role
+and id. Both jobs fail before assuming anything when either variable is unset,
+and fail after assuming the role when its account is not `TERRAGRUNT_ACCOUNT_ID`.
+They run only the `workload-<env>` leaves; see
+[operations.md](operations.md#deployyml----manual-deploy).
 
 The role ships with **no permissions** — its trust is scoped to
 `repo:nanohype/landing-zone:environment:*` and

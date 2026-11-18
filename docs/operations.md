@@ -125,7 +125,7 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 **Trigger:** Workflow dispatch (manual).
 
 **Inputs:**
-- `account` -- target account alias
+- `account` -- target account directory; must be `workload-<environment>` (see Configuration below)
 - `region` -- target region
 - `environment` -- development, staging, or production (the `environment` input is a fixed choice)
 - `component` -- specific component name or "all"
@@ -135,16 +135,31 @@ Uses GitHub environment protection rules -- production requires approval. When `
 
 The `environment` choice covers only the three workload environments. The management-account `org` components (the [Organization Components](#organization-components) above) are **local-CLI-only** — deploy them with `task apply ACCOUNT=management ENVIRONMENT=org COMPONENT=<component>` under your own admin/SSO credentials. `org` is intentionally not a workflow choice because the management account is applied rarely and by hand.
 
+**Configuration:** two variables on each GitHub Environment (Settings > Environments > `<environment>` > Environment variables). The job declares `environment: <environment>`, and an environment-level variable overrides a repository-level variable of the same name, so each environment carries its own account's values:
+
+| Variable | Value |
+|---|---|
+| `AWS_ROLE_ARN` | the OIDC deploy role in the `workload-<environment>` account (the `github-oidc` component's `deploy_role_arn` output in that account) |
+| `TERRAGRUNT_ACCOUNT_ID` | the 12-digit id of the `workload-<environment>` account. `root.hcl` names the state bucket `<account_id>-<region>-tfstate` from it; without it the bucket would be named after the tracked `account.hcl` placeholder |
+
+Before any credential is issued, the job fails when either variable is unset, when `TERRAGRUNT_ACCOUNT_ID` is not 12 digits, when the `account` input is not `workload-<environment>`, or when the `region` input names no directory under that account. After assuming the role it compares the credential's account (`aws sts get-caller-identity`) with `TERRAGRUNT_ACCOUNT_ID` and fails on a mismatch, so a role and an id typed into one environment's settings for two different accounts never reach terragrunt.
+
+One environment names one account, so the workflow deploys only `live/aws/workload-<environment>/` leaves. The `backup/` and `network/` account directories also hold `development`/`staging`/`production` leaves; run with the workload account's role and id, they would build that account's stack inside the workload account. Deploy them locally under that account's own credentials, the same way as the `org` components: `task apply ACCOUNT=<account> REGION=us-east-1 ENVIRONMENT=<environment> COMPONENT=<component>` with `TERRAGRUNT_ACCOUNT_ID` exported as that account's id.
+
 ### destroy.yml -- Manual Destroy
 
 **Trigger:** Workflow dispatch (manual).
 
 **Inputs:**
+- `account` -- must be `workload-<environment>` (see Configuration below)
+- `region` -- target region
 - `environment` -- development or staging only (production excluded)
 - `component` -- specific component name or "all"
 - `confirm` -- must exactly match the environment name
 
 The confirmation guard (`confirm == environment`) prevents accidental destroys. Runs `terragrunt destroy` or `terragrunt run --all -- destroy`.
+
+**Configuration:** the same per-environment `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` variables as `deploy.yml`, on the `development` and `staging` GitHub Environments, with the same checks: both set, the `account` input equal to `workload-<environment>`, and the assumed credential's account equal to `TERRAGRUNT_ACCOUNT_ID`. The last matters most here: a destroy run with the state of one account and the credential of another sends the state's resource ids to the wrong account, where most of them are simply not found and dropped from state, leaving the real resources running untracked.
 
 ### drift.yml -- Drift Detection
 

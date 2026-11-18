@@ -55,6 +55,13 @@ zones. See each component's `route53-tags.tf`.
 | `GITHUB_SHA` | short commit → the `Revision` tag; `"local"` off-CI |
 | `AWS_ROLE_ARN` | the OIDC deploy role CI assumes (repo Variable; unset ⇒ PR Plan jobs skip green; scheduled drift detection fails) |
 
+`deploy.yml` and `destroy.yml` read `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` from the
+GitHub Environment they declare (`development`, `staging`, `production`), where a variable
+overrides the repository variable of the same name, so each environment names its own
+`workload-<environment>` account. Both jobs fail when either is unset rather than falling
+back to the `account.hcl` placeholder, and fail when the assumed credential's account is not
+`TERRAGRUNT_ACCOUNT_ID` (see [operations.md](operations.md#deployyml----manual-deploy)).
+
 ## Input precedence
 
 **An ambient `TF_VAR_*` environment variable beats a leaf's `inputs` value for the same

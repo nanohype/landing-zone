@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       account:
-        description: "Target account (e.g., workload-development, workload-staging)"
+        description: "Target account directory under live/aws/: must be workload-<environment> (other accounts are destroyed locally; see docs/operations.md)"
         required: true
         type: string
         default: "workload-development"
@@ -59,6 +59,58 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      # Configuration guard. root.hcl names the state bucket
+      # {account_id}-{region}-tfstate from TERRAGRUNT_ACCOUNT_ID and falls back to
+      # the tracked account.hcl placeholder when it is unset. That fallback is right
+      # for a local checkout and never right here: a run against the placeholder
+      # bucket dies at backend init, after the environment approval was spent.
+      #
+      # Both variables are read from the GitHub Environment this job declares. An
+      # environment-level variable overrides a repository-level one of the same
+      # name, so each of development and staging carries the role and account id
+      # of its own account. A run with either unset fails here, before any
+      # credential is issued, rather than reaching AWS with half a configuration.
+      #
+      # One environment therefore names one account: the workload-<environment>
+      # account. Other account directories also hold development/staging/production
+      # leaves (backup/, network/), and running one of those with this
+      # environment's role and id would build that account's stack inside the
+      # workload account. So the account input must be workload-<environment>; the
+      # other accounts' leaves run locally, like the management account's org leaves.
+      #
+      # Dispatch inputs reach the shell through env, not ${{ }} in the script.
+      - name: Require AWS_ROLE_ARN, TERRAGRUNT_ACCOUNT_ID and a matching leaf
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+          ACCOUNT: ${{ inputs.account }}
+          REGION: ${{ inputs.region }}
+        run: |
+          failed=0
+          if [ -z "$AWS_ROLE_ARN" ]; then
+            echo "::error title=AWS_ROLE_ARN is not set::The ${TARGET_ENV} environment has no AWS_ROLE_ARN variable (Settings > Environments > ${TARGET_ENV} > Environment variables). Set it to the OIDC deploy role in the workload-${TARGET_ENV} account (see docs/operations.md)."
+            failed=1
+          fi
+          if [ -z "$TERRAGRUNT_ACCOUNT_ID" ]; then
+            echo "::error title=TERRAGRUNT_ACCOUNT_ID is not set::The ${TARGET_ENV} environment has no TERRAGRUNT_ACCOUNT_ID variable, so root.hcl would name the state bucket after the tracked account.hcl placeholder. Set it to the 12-digit id of the workload-${TARGET_ENV} account (see docs/operations.md)."
+            failed=1
+          elif ! [[ "$TERRAGRUNT_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error title=TERRAGRUNT_ACCOUNT_ID is not an account id::The ${TARGET_ENV} environment's TERRAGRUNT_ACCOUNT_ID is not a 12-digit AWS account id."
+            failed=1
+          fi
+          if [ "$ACCOUNT" != "workload-${TARGET_ENV}" ]; then
+            echo "::error title=Account does not match the environment::The ${TARGET_ENV} environment carries the role and account id of the workload-${TARGET_ENV} account, so it can only destroy leaves under live/aws/workload-${TARGET_ENV}/. Run leaves in other account directories locally (see docs/operations.md)."
+            failed=1
+          elif ! [[ "$REGION" =~ ^[a-z0-9-]+$ ]] || [ ! -f "live/aws/${ACCOUNT}/${REGION}/${TARGET_ENV}/env.hcl" ]; then
+            echo "::error title=No such live environment::live/aws/${ACCOUNT}/<region>/${TARGET_ENV} has no env.hcl for the region input. Check it against the region directories under live/aws/${ACCOUNT}/."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID are set for ${TARGET_ENV}."
+
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.13.9"
@@ -72,6 +124,31 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
 
+      # TERRAGRUNT_ACCOUNT_ID names the state bucket and the role decides where
+      # the provider acts; root.hcl assumes no further role, so both have to be the
+      # same account. Two variables typed into an environment's settings can
+      # disagree. Usually the role is then denied the other account's bucket and
+      # init fails, but where a bucket policy admits it, destroy sends the
+      # state's resource ids to the wrong account, where most are not found and
+      # are dropped from state, leaving the real resources running with no state
+      # that tracks them.
+      # So the credential's account is compared with TERRAGRUNT_ACCOUNT_ID before
+      # terragrunt runs. Neither id is printed: the run log is public.
+      - name: Verify the credential is in TERRAGRUNT_ACCOUNT_ID's account
+        env:
+          TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account=$(aws sts get-caller-identity --query Account --output text); then
+            echo "::error title=Could not read the credential's account::sts get-caller-identity failed for the assumed AWS_ROLE_ARN, so the target account could not be confirmed."
+            exit 1
+          fi
+          if [ "$caller_account" != "$TERRAGRUNT_ACCOUNT_ID" ]; then
+            echo "::error title=AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID name different accounts::The role the ${TARGET_ENV} environment's AWS_ROLE_ARN names is not in the account its TERRAGRUNT_ACCOUNT_ID names. Set both to the workload-${TARGET_ENV} account."
+            exit 1
+          fi
+          echo "The assumed credential is in TERRAGRUNT_ACCOUNT_ID's account."
+
       - name: Destroy
         working-directory: live/aws/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
         # The dispatch input reaches the shell through env, never through ${{ }}
@@ -80,6 +157,7 @@ jobs:
         # most here: this job already holds credentials whose whole purpose is
         # deleting infrastructure.
         env:
+          TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
         run: |
           if [ "$COMPONENT" = "all" ]; then
