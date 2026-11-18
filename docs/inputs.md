@@ -53,7 +53,7 @@ zones. See each component's `route53-tags.tf`.
 |-----|---------|
 | `TERRAGRUNT_ACCOUNT_ID` | real AWS account id (overrides the `account.hcl` placeholder) |
 | `GITHUB_SHA` | short commit → the `Revision` tag; `"local"` off-CI |
-| `AWS_ROLE_ARN` | the OIDC deploy role CI assumes (repo Variable; unset ⇒ PR Plan jobs skip green; scheduled drift detection fails) |
+| `AWS_ROLE_ARN` | the read-only OIDC plan role (`github-oidc`'s `plan_role_arn`, not `deploy_role_arn`) that ci.yml's plan job and drift.yml assume from `environment: plan` (repo Variable; unset ⇒ PR Plan jobs skip green; scheduled drift detection fails) |
 
 `deploy.yml` and `destroy.yml` do not read the repository Variables `AWS_ROLE_ARN` and
 `TERRAGRUNT_ACCOUNT_ID`. They read `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` from the GitHub Environment they declare (`development`, `staging`,

@@ -50,10 +50,12 @@ variables {
 # INVARIANT 1: the trust is scoped to the configured repos AND to the allowed
 # subject claims via a StringLike on the `sub` claim — exactly
 # repo:<org>/<repo>:<claim> for the cartesian product, and NOTHING else. This is THE
-# control. The default claim set is environment-gated deploys + tag pushes; a
-# widened sub (bare ":*", "*", or "repo:*/*") lets pull_request / any-branch / any
-# repo assume the role. Asserted structurally: find the AssumeRoleWithWebIdentity
-# statement and compare the whole sub set.
+# control. The default claim set is the four GitHub Environments deploy.yml,
+# destroy.yml and e2e.yml declare; a widened sub ("environment:*", which also
+# admits the any-branch plan environment, a tag ref, a bare ":*", "*", or
+# "repo:*/*") lets an untrusted branch / tag / pull_request / repo assume the role.
+# Asserted structurally: find the AssumeRoleWithWebIdentity statement and compare
+# the whole sub set.
 run "trust_sub_scoped_to_configured_repos_and_claims" {
   command = plan
 
@@ -63,18 +65,23 @@ run "trust_sub_scoped_to_configured_repos_and_claims" {
       s if toset(flatten([
         try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
         ])) == toset([
-        "repo:nanohype/landing-zone:environment:*",
-        "repo:nanohype/landing-zone:ref:refs/tags/*",
-        "repo:nanohype/rackctl:environment:*",
-        "repo:nanohype/rackctl:ref:refs/tags/*",
+        "repo:nanohype/landing-zone:environment:development",
+        "repo:nanohype/landing-zone:environment:staging",
+        "repo:nanohype/landing-zone:environment:production",
+        "repo:nanohype/landing-zone:environment:e2e",
+        "repo:nanohype/rackctl:environment:development",
+        "repo:nanohype/rackctl:environment:staging",
+        "repo:nanohype/rackctl:environment:production",
+        "repo:nanohype/rackctl:environment:e2e",
       ])
     ]) == 1
-    error_message = "trust sub must StringLike-pin exactly repo:nanohype/{landing-zone,rackctl}:{environment:*,ref:refs/tags/*}; any other set (dropped/added/widened repo or claim) is a CI-auth boundary change"
+    error_message = "trust sub must StringLike-pin exactly repo:nanohype/{landing-zone,rackctl}:environment:{development,staging,production,e2e}; any other set (dropped/added/widened repo or claim) is a CI-auth boundary change"
   }
 
   # Belt-and-suspenders on the escalation itself: no statement's sub may contain a
-  # bare "*", the cross-org/repo wildcard "repo:*/*", the broad per-repo ":*", or a
-  # pull_request context (an untrusted PR must never assume a deploy role).
+  # bare "*", the cross-org/repo wildcard "repo:*/*", the broad per-repo ":*", a
+  # pull_request context (an untrusted PR must never assume a deploy role), any
+  # wildcard at all in the default set, or a tag ref.
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
@@ -83,9 +90,11 @@ run "trust_sub_scoped_to_configured_repos_and_claims" {
         sub if sub == "*" || sub == "repo:*/*"
         || can(regex("^repo:[^:]+/[^:]+:\\*$", sub)) # bare per-repo :* (claim is a lone wildcard)
         || endswith(sub, ":pull_request")
+        || strcontains(sub, "*") || strcontains(sub, "?")
+        || strcontains(sub, ":ref:refs/tags/")
       ]) == 0
     ])
-    error_message = "trust sub must never contain \"*\", \"repo:*/*\", a bare per-repo \":*\", or a \":pull_request\" context — each re-opens the deploy role to untrusted workflows"
+    error_message = "the default trust sub must never contain \"*\", \"repo:*/*\", a bare per-repo \":*\", a \":pull_request\" context, any wildcard, or a tag ref — each re-opens the deploy role to workflows that are not the gated deploy/destroy/e2e jobs"
   }
 }
 
@@ -168,6 +177,183 @@ run "empty_allowed_subject_claims_rejected" {
   expect_failures = [
     var.allowed_subject_claims,
   ]
+}
+
+# INVARIANT 3c (guardrail): allowed_subject_claims is an ALLOWLIST — every entry
+# must be an exact "environment:<name>" claim with no StringLike wildcard. A
+# wildcard admits any environment name a branch's workflow declares, and GitHub
+# creates that environment, unprotected, the first time a workflow names it, so
+# "environment:prod*" is as open as "environment:*". A pull_request or ref: claim
+# is held by anyone who can open that pull request or push that ref. And
+# "environment:plan", which ci.yml's PR plan job and drift.yml declare from any
+# branch, is refused in every letter case (GitHub environment names are
+# case-insensitive). Each run below is one way back in; the validation must
+# reject them all — including when the bad claim sits beside a good one.
+run "plan_environment_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:production", "environment:plan"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "plan_environment_claim_other_case_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:Plan"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "environment_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:*"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "environment_prefix_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:production", "environment:prod*"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "bare_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["*"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "partial_wildcard_claim_covering_plan_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:pla?"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "pull_request_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["pull_request"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "tag_ref_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["ref:refs/tags/*"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "exact_branch_ref_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["ref:refs/heads/main"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+# INVARIANT 3d (guardrail): github_repos and github_org are literal names. Each
+# lands verbatim in the StringLike sub, so "landing-zone*" renders
+# repo:<org>/landing-zone*:<claim>, which matches
+# repo:<org>/landing-zone:environment:plan whatever allowed_subject_claims holds —
+# a bypass of every claim check above.
+run "wildcard_github_repo_rejected" {
+  command = plan
+
+  variables {
+    github_repos           = ["landing-zone*"]
+    allowed_subject_claims = ["environment:production"]
+  }
+
+  expect_failures = [
+    var.github_repos,
+  ]
+}
+
+run "wildcard_github_org_rejected" {
+  command = plan
+
+  variables {
+    github_org = "nano*"
+  }
+
+  expect_failures = [
+    var.github_org,
+  ]
+}
+
+# INVARIANT 3e (precision): the guard refuses wildcards, non-environment claims
+# and the plan environment — not every claim near them. An exact environment name
+# containing a regex metacharacter ("pl.n"), one that merely starts with "plan"
+# ("planning"), and an ordinary exact name are accepted and rendered as given.
+# Without this, the validation could reject everything and the rejection runs
+# above would still pass.
+run "exact_environment_claims_accepted" {
+  command = plan
+
+  variables {
+    github_repos           = ["landing-zone"]
+    allowed_subject_claims = ["environment:prod", "environment:pl.n", "environment:planning"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
+      s if toset(flatten([
+        try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
+        ])) == toset([
+        "repo:nanohype/landing-zone:environment:prod",
+        "repo:nanohype/landing-zone:environment:pl.n",
+        "repo:nanohype/landing-zone:environment:planning",
+      ])
+    ]) == 1
+    error_message = "exact environment claims other than plan must be accepted and rendered as given"
+  }
 }
 
 # ─────────────────────────── plan role ───────────────────────────

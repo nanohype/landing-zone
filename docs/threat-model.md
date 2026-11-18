@@ -26,15 +26,45 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
 
 - **Spoofing** — a foreign workflow assuming the deploy role. Mitigated: the
   trust policy names each repo AND the contexts it trusts within that repo —
-  `repo:<org>/<repo>:environment:*` and `repo:<org>/<repo>:ref:refs/tags/*` by
-  default. Naming the repo alone, with a wildcard claim suffix, would satisfy
-  "repo-scoped" while also trusting `pull_request` and every branch — so a fork's
-  pull request against a public repo could assume the role. Both `github_repos` and
-  `allowed_subject_claims` are validated non-empty, because an empty list on
-  either drops the `sub` condition entirely and lets *any* Actions token assume
-  the role. No long-lived keys; OIDC federation only.
+  `repo:<org>/<repo>:environment:development`, `...:environment:staging`,
+  `...:environment:production` and `...:environment:e2e` by default, the
+  environments the deploy, destroy and e2e workflows declare, and each account's
+  leaf narrows that to the environments deploying into it. Naming the repo
+  alone, with a wildcard claim suffix, would satisfy "repo-scoped" while also
+  trusting `pull_request` and every branch — so a fork's pull request against a
+  public repo could assume the role. `allowed_subject_claims` is therefore an
+  allowlist: every entry must be an exact `environment:<name>` claim. A wildcard
+  environment claim is refused because GitHub creates an environment, with no
+  protection rules, the first time a workflow names it, so `environment:prod*`
+  admits whatever `prodx` a branch's workflow invents. `pull_request` and `ref:`
+  claims are refused because anyone able to open that pull request or push that
+  ref holds them. `environment:plan` is refused in every letter case: the PR plan
+  job and the drift job declare it, and it belongs to the read-only plan role.
+  `github_org` and `github_repos` must be literal names, because a wildcard there
+  (`landing-zone*`) would match `...:environment:plan` past every claim check.
+  `github_repos` and `allowed_subject_claims` are both validated non-empty,
+  because an empty list on either drops the `sub` condition entirely and lets
+  *any* Actions token assume the role. No long-lived keys; OIDC federation only.
+  Residual: the trust names environments, not refs. A job that declares an
+  environment presents only `environment:<name>` in its `sub`, whatever branch,
+  tag or same-repo pull request it runs from, and `deploy.yml`, `destroy.yml` and
+  `e2e.yml` run on `workflow_dispatch`, which anyone with write access can start
+  from any branch. So every trusted environment is only as narrow as its own
+  settings: each of `development`, `staging`, `production` and `e2e` must exist in
+  the repository settings with a deployment-branch policy (main, or protected
+  branches), and `staging`, `production` and `e2e` should also require reviewers.
+  An environment that does not exist yet is created unprotected the first time a
+  workflow names it. Confirm those rules before attaching any
+  `managed_policy_arns` to the role. The trust also assumes GitHub's default OIDC
+  subject template; a customized template changes the `sub` and the role stops
+  matching (it fails closed).
 - **Elevation of privilege** — the deploy role is powerful. Residual: scope it
-  per-environment; do not share one role across development and production.
+  per-environment; do not share one role across development and production. The
+  component default lists all four environments as the union across accounts;
+  each account's leaf sets `allowed_subject_claims` to its own (the
+  `workload-development` leaf trusts `environment:development` and
+  `environment:e2e` only), so a job in a less-protected environment cannot reach
+  another account's deploy role.
 - **Spoofing** — a workflow assuming the ECR Public pull role. Accepted within a
   bound: this role alone trusts `pull_request`
   (`repo:<org>/<repo>:pull_request` and `repo:<org>/<repo>:ref:refs/heads/main`

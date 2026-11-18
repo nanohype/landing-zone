@@ -1,5 +1,5 @@
 output "deploy_role_arn" {
-  description = "ARN of the GitHub Actions deploy role. Set as the AWS_ROLE_ARN / E2E_AWS_ROLE_ARN GitHub Actions variable when using the CI path. Null when create_deploy_role is false."
+  description = "ARN of the GitHub Actions deploy role. Set it as DEPLOY_ROLE_ARN on the GitHub Environment deploy.yml and destroy.yml declare (see docs/operations.md) and as E2E_AWS_ROLE_ARN for e2e.yml when using the CI path. Never the repository-level AWS_ROLE_ARN: that holds plan_role_arn, and this role does not trust the plan environment ci.yml's plan job and drift.yml run in. Null when create_deploy_role is false."
   value       = var.create_deploy_role ? aws_iam_role.deploy[0].arn : null
 }
 

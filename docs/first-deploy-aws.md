@@ -349,13 +349,31 @@ assuming the role when its account is not `DEPLOY_ACCOUNT_ID`. They run only the
 `workload-<env>` leaves; see
 [operations.md](operations.md#deployyml----manual-deploy).
 
-The role ships with **no permissions** — its trust is scoped to
-`repo:nanohype/landing-zone:environment:*` and
-`repo:nanohype/landing-zone:ref:refs/tags/*`, and you attach the policies CI
-needs via the
+The role ships with **no permissions** — its trust is scoped to the four GitHub
+Environments the deploy, destroy and e2e workflows declare
+(`repo:nanohype/landing-zone:environment:development`,
+`repo:nanohype/landing-zone:environment:staging`,
+`repo:nanohype/landing-zone:environment:production` and
+`repo:nanohype/landing-zone:environment:e2e`; the `workload-development` leaf
+narrows that to `development` and `e2e`), never the `plan` environment the
+read-only plan role trusts — and you attach the policies CI needs via the
 component's `managed_policy_arns` (e.g. `AdministratorAccess` with a
 `permissions_boundary_arn`, or a scoped set). Skip this component entirely if you
 only run locally.
+
+Before attaching any policy, give every environment the role trusts a
+deployment-branch policy in the repository settings (main, or protected
+branches), and required reviewers on `staging`, `production` and `e2e`. The
+trust names environments, not refs: a job that declares `environment: production`
+presents the same `sub` from any branch, and `deploy.yml`, `destroy.yml` and
+`e2e.yml` can be dispatched from any branch. An environment that does not exist
+yet is created unprotected the first time a workflow names it.
+
+The repository-level `AWS_ROLE_ARN` variable is the **plan** role
+(`plan_role_arn`), which ci.yml's plan job and drift.yml assume from
+`environment: plan`. The deploy role does not trust that environment, so
+`AWS_ROLE_ARN` holding `deploy_role_arn` makes PR plans and drift detection fail
+at the credential step.
 
 ## End-to-end validation (`task e2e`)
 
