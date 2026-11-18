@@ -52,9 +52,9 @@ zones. See each component's `route53-tags.tf`.
 | Var | Purpose |
 |-----|---------|
 | `TERRAGRUNT_ACCOUNT_ID` | real AWS account id (overrides the `account.hcl` placeholder) |
-| `TERRAGRUNT_ACCOUNT_IDS` | drift.yml only: a JSON object mapping each account directory to its real account id; each drift leaf exports its own entry as `TERRAGRUNT_ACCOUNT_ID` (repo Variable; see [operations.md](operations.md#driftyml----drift-detection)) |
 | `GITHUB_SHA` | short commit → the `Revision` tag; `"local"` off-CI |
-| `AWS_ROLE_ARN` | the read-only OIDC plan role (`github-oidc`'s `plan_role_arn`, not `deploy_role_arn`) that ci.yml's plan job and drift.yml assume from `environment: plan` (repo Variable; unset ⇒ PR Plan jobs skip green; scheduled drift detection fails) |
+| `AWS_ROLE_ARN` | the read-only OIDC plan role (`github-oidc`'s `plan_role_arn`, not `deploy_role_arn`) that ci.yml's plan job assumes from `environment: plan` (repo Variable; unset ⇒ PR Plan jobs skip green) |
+| `DRIFT_PLAN_ROLE_ARNS` | drift.yml only: a JSON object mapping each account directory to the plan role (`plan_role_arn`) in that account; each drift leaf assumes its account's role and passes the ARN's account id as `TERRAGRUNT_ACCOUNT_ID` (repo Variable; unset ⇒ scheduled drift detection fails; see [operations.md](operations.md#driftyml----drift-detection)) |
 
 `deploy.yml` and `destroy.yml` do not read the repository Variables `AWS_ROLE_ARN` and
 `TERRAGRUNT_ACCOUNT_ID`. They read `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` from the GitHub Environment they declare (`development`, `staging`,
@@ -236,7 +236,9 @@ Leave them unset for a private endpoint.
 2. Fill the six required `env.hcl` locals above.
 3. Set `AWS_ROLE_ARN` (repo Variable) and the OIDC trust for the new repo/env.
    For a `staging` or `production` env in a new account directory, add that
-   directory and its account id to the `TERRAGRUNT_ACCOUNT_IDS` repo Variable,
-   or every drift.yml leaf in it reports a plan error.
+   directory and the account's `github-oidc` plan role to the
+   `DRIFT_PLAN_ROLE_ARNS` repo Variable once the directory's leaves are on the
+   default branch. Until then drift.yml skips its leaves; a key added before
+   them names no planned account, and the run ends red.
 4. `terragrunt run --all -- plan` from the env dir; deploy components in dependency
    order (see [architecture.md](architecture.md) Dependency Graph).
