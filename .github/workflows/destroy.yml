@@ -278,7 +278,8 @@ jobs:
         # prompts (the terragrunt 1.x spelling; TG_NON_INTERACTIVE as an env
         # var). It does not answer tofu's, and tofu destroy has two: the "Enter
         # a value:" prompt for a required variable nothing set, and the destroy
-        # confirmation. With stdin closed either fails ("error asking for
+        # confirmation. With stdin closed the variable prompt fails ("No value
+        # for required variable") and the confirmation fails ("error asking for
         # approval: EOF"); with stdin held open either waits out the job
         # timeout. `run --all` appends -auto-approve to destroy on its own but,
         # unlike for plan and apply, not -input=false, and a single unit passes

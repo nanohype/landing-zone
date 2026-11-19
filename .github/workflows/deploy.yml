@@ -283,9 +283,11 @@ jobs:
         # prompts (the terragrunt 1.x spelling; TG_NON_INTERACTIVE as an env
         # var). It does not answer tofu's, and tofu has two: the "Enter a value:"
         # prompt for a required variable nothing set, and apply's confirmation.
-        # With stdin closed either fails ("error asking for approval: EOF"); with
-        # stdin held open either waits out the job timeout. `run --all` appends
-        # -input=false to plan and apply, and -auto-approve to apply, on its own.
+        # With stdin closed the variable prompt fails ("No value for required
+        # variable") and the confirmation fails ("error asking for approval:
+        # EOF"); with stdin held open either waits out the job timeout.
+        # `run --all` appends -input=false to plan and apply, and -auto-approve
+        # to apply, on its own.
         # A single unit passes the tofu command through as written, so the
         # single-component path spells the same flags out: -input=false on both
         # commands, -auto-approve on apply only (plan has nothing to confirm).
