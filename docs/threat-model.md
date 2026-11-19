@@ -105,6 +105,69 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   fork's pull request, so forks pull anonymously.
 - **Repudiation** — CloudTrail records the assumed-role session; the `Revision`
   default tag (GITHUB_SHA) ties every mutation to a commit.
+- **Information disclosure** — account ids and role ARNs in the Actions logs.
+  The repository is public, and so are its workflow logs. A GitHub variable is
+  never masked: the runner prints it in the env block of every step that
+  receives it, and configure-aws-credentials prints `role-to-assume`, before
+  any step can register a mask, so the workflows that read ids from variables
+  published every workload account's id. Mitigated: every account id and role
+  ARN a workflow reads is a secret on the GitHub Environment its job declares
+  (`DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` on `development`, `staging` and
+  `production`; `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` on `plan`;
+  `E2E_AWS_ROLE_ARN` on `e2e`), which the runner masks whole from the job's
+  first line; and the first step in each job that receives one runs
+  `scripts/mask-aws-ids.sh` as its first command, registering every
+  twelve-digit window of every digit run and every IAM ARN in it, so the
+  derived pieces (the id inside an ARN, the id in the state bucket name a
+  terragrunt error prints) are masked before anything prints. A secret
+  reaches a step only whole: a value computed from it (`fromJSON`, `format`)
+  is not masked and would print in that step's env block before its mask
+  ran, so pieces are cut out in shell after the mask. e2e.yml no longer takes
+  the account id as a dispatch input, which no step can mask before it is
+  printed. Each workflow fails while a name it reads is still a variable at
+  any level, and its first job, which declares no environment, refuses the
+  name as a repository- or organization-level secret, which every workflow in
+  the repository could read and the job would fall back to. Held by
+  `scripts/check-workflow-id-masking.py` (which tokenises expressions, so a
+  read in another case or index spelling, a whole-context read or a computed
+  name is caught; and which recognises an id by its name, by the keys it is
+  fed into and, in a job holding AWS credentials, refuses every variable) and
+  the mask script's self-test (synthetic ids only) on every pull request.
+  Residual: (a) with step debug
+  logging on, the runner traces the value it reads for a variable before the
+  comparison that guards against it, unmasked, so a debug run while an old
+  variable still exists prints it; delete the variables, and never run with
+  debug logging while one exists. (b) Only ids in the secrets a job reads are
+  masked: an id of another account that an API response carries into a plan
+  (an AWS-owned account in a managed ARN, another of your accounts reached
+  through a lookup) prints as returned. (c) The mask script runs from the
+  checkout, so in ci.yml's plan job it is the pull request's copy; a
+  same-repository branch can edit it as freely as it can edit the workflow,
+  which is why the `plan` environment's reviewers, not the script, are the
+  control on what a pull request does with the plan role. Fork pull requests
+  receive no secrets. (d) drift.yml reads `DRIFT_PLAN_ROLE_ARNS` from a
+  repository variable until the drift-environment change moves it to a secret
+  on a main-only `drift` environment, masked by a drift-specific mask script;
+  the id-masking gate exempts drift.yml only while it is byte-identical to the
+  file that change replaces. Once it lands, drift is folded onto the shared
+  script (`mask-aws-ids.sh DRIFT_PLAN_ROLE_ARNS` is the drop-in replacement),
+  the drift-specific script and the exemption are deleted, and the mask-first
+  rule for the role map moves from that change's drift-workflow gate to the
+  id-masking gate alone. (e) e2e.yml's target is whatever account its role
+  lives in: the account id is the role ARN's own account segment, so nothing
+  independent ties the run to the `account_dir` input, and e2e.sh's
+  `sts get-caller-identity` comparison only confirms the credential is the
+  role's (it is a real cross-check on a local `task e2e`, where the operator
+  states the id). The binding is who may set the `e2e` environment's secret
+  and its required reviewers. (f) The gate recognises an id by name and by
+  use; a value carrying an id under a name outside the naming rule, read only
+  in a job that holds no AWS credentials and fed into no id-named key, is
+  caught at review, not by the gate. (g) The `ecr-public-pull` role in
+  `workload-development` is consumed by eks-gitops, another public
+  repository, whose workflows read its ARN (and so that account's id) from a
+  repository variable today. The leaf now documents it as a secret masked
+  before use; until eks-gitops makes that change, the development account's
+  id is published through that repository's logs.
 
 ## 2. Terraform state  (`scripts/init-backend-aws.sh`, S3 backend)
 

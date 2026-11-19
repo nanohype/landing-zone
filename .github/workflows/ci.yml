@@ -1029,9 +1029,98 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-e2e-covers-leaves.py
 
+  # The repository is public, and so are these workflows' logs. A GitHub
+  # variable is never masked, and the runner prints it in the env block of
+  # every step that receives it before any step can mask it; a secret is masked
+  # only whole, so the account id inside a role ARN, or in the state bucket a
+  # terragrunt error names, prints unless the job registers it. So every AWS
+  # account id and role ARN a workflow reads is a secret on the environment its
+  # job declares, and the first step that receives one runs
+  # scripts/mask-aws-ids.sh as its first command. Nothing else notices an edit
+  # that reads one from `vars.` again, receives it a step early, or prints
+  # something ahead of the mask: the run stays green and an id lands in a log.
+  # The gate's self-test mutates the workflows each way it forbids and requires
+  # every mutation rejected at the mutated line; the mask script's self-test
+  # (synthetic ids only) holds what it masks and that it never echoes a value,
+  # and shellcheck reads it, since actionlint only reads inline run: blocks.
+  workflow-id-masking:
+    name: Workflows Mask Account Ids
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.3
+      - run: python3 scripts/check-workflow-id-masking.py
+      - run: python3 scripts/check-workflow-id-masking.py --self-test
+      - name: Mask script self-test
+        run: |
+          shellcheck scripts/mask-aws-ids.sh
+          bash scripts/mask-aws-ids.sh --self-test
+
+  # secrets.X and vars.X resolve from the job's environment first, then the
+  # repository, then the organization. This job declares no environment, so it
+  # sees only the repository and organization values. AWS_ROLE_ARN and
+  # TERRAGRUNT_ACCOUNT_ID must exist on the `plan` GitHub Environment alone, as
+  # secrets:
+  #   - a repository or organization SECRET of either name is what the plan job
+  #     would read if the environment had none of its own (the likeliest
+  #     migration slip is `gh secret set` without `--env plan`), and it is
+  #     readable by every workflow in the repository, including pull_request
+  #     jobs that never pass the plan environment's gate, any of which can print
+  #     a piece of it.
+  #   - a repository or organization VARIABLE of either name is how these used
+  #     to be stored, and a variable is never masked.
+  # Only whether each is set reaches the step, as `true` or `false`. The
+  # debug-logging residual is the one deploy.yml's refuse-inherited-config
+  # documents: with step debug logging on, the runner traces the value it reads
+  # for each variable before the comparison, unmasked. A pull request from a fork
+  # receives no secrets and its comparisons are `false`, so it passes here. The
+  # plan job needs this one, so a failure costs no environment approval.
+  refuse-inherited-config:
+    name: Refuse repository-level plan secrets and any plan variable
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID to be plan-environment secrets only
+        # secrets-outside-env is this job's purpose, not a leak: reading the
+        # secrets with no environment is the only way to see whether a
+        # repository- or organization-level one exists (listing secrets needs an
+        # admin token), and only each comparison's true/false reaches the step.
+        env:
+          INHERITED_ROLE_ARN_SECRET: ${{ secrets.AWS_ROLE_ARN != '' }} # zizmor: ignore[secrets-outside-env]
+          INHERITED_ACCOUNT_ID_SECRET: ${{ secrets.TERRAGRUNT_ACCOUNT_ID != '' }} # zizmor: ignore[secrets-outside-env]
+          ROLE_ARN_VARIABLE: ${{ vars.AWS_ROLE_ARN != '' }}
+          ACCOUNT_ID_VARIABLE: ${{ vars.TERRAGRUNT_ACCOUNT_ID != '' }}
+        run: |
+          failed=0
+          for name in AWS_ROLE_ARN TERRAGRUNT_ACCOUNT_ID; do
+            case "$name" in
+              AWS_ROLE_ARN) secret="$INHERITED_ROLE_ARN_SECRET" variable="$ROLE_ARN_VARIABLE" ;;
+              TERRAGRUNT_ACCOUNT_ID) secret="$INHERITED_ACCOUNT_ID_SECRET" variable="$ACCOUNT_ID_VARIABLE" ;;
+            esac
+            if [ "$secret" != "false" ]; then
+              echo "::error title=${name} is a repository or organization secret::${name} is set as a repository or organization secret, which every workflow in the repository can read and which the plan job would fall back to. Delete a repository secret (gh secret delete ${name} --repo <owner>/<repo>); for an organization secret, narrow its repository access so this repository no longer sees it, or delete it (gh secret delete ${name} --org <org>) if nothing else uses it. Keep it only on the plan environment (see docs/operations.md)."
+              failed=1
+            fi
+            if [ "$variable" != "false" ]; then
+              echo "::error title=${name} is a repository or organization variable::${name} is set as a repository or organization variable. Variables are never masked, so its value would reach the public Actions logs. Delete a repository variable (gh variable delete ${name} --repo <owner>/<repo>); for an organization variable, narrow its repository access so this repository no longer sees it, or delete it (gh variable delete ${name} --org <org>) if nothing else uses it. It is a secret on the plan environment now (see docs/operations.md)."
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID are set at neither repository nor organization level, as a secret or as a variable."
+
   plan:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
-    needs: [discover, validate]
+    needs: [discover, validate, refuse-inherited-config]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # The credential this job assumes is the READ-ONLY plan role, and the
@@ -1045,16 +1134,26 @@ jobs:
     # issued; approval is per-environment-per-run, so one approval releases the
     # whole matrix.
     environment: plan
-    # The plan jobs need AWS credentials (vars.AWS_ROLE_ARN). continue-on-error is
-    # tied to whether that variable is set:
-    #   - unset (e.g. a fork without cloud creds): continue-on-error is true and the
-    #     Plan step below skips entirely, so the matrix entry comes back green-skipped
-    #     rather than forcing a fork to fail on a plan it can't run.
-    #   - set: continue-on-error is false, so a real `terragrunt plan` failure blocks
-    #     the build — an honest gate, not an advisory that swallows regressions.
+    # The plan jobs need AWS credentials: the AWS_ROLE_ARN and
+    # TERRAGRUNT_ACCOUNT_ID secrets on the `plan` environment this job declares.
+    # refuse-inherited-config, which this job needs, refuses either name at
+    # repository or organization level, so what is read here can only be the
+    # environment's own.
+    # The first step after checkout decides whether they are there:
+    #   - neither or only one set (a fork, whose pull requests receive no
+    #     secrets, or a repository that never armed plans): every later step
+    #     skips, so the matrix entry comes back green-skipped with a notice
+    #     rather than failing a plan it cannot run. Nothing but checkout and that
+    #     step runs, so nothing else can fail it either.
+    #   - both set: credentials, then a real `terragrunt plan`, whose failure
+    #     blocks the build — an honest gate, not an advisory that swallows
+    #     regressions.
+    # This used to be a job-level `continue-on-error` reading the two names as
+    # repository variables. The `secrets` context is not available to a job's
+    # `continue-on-error` or `if`, and a variable is never masked: the runner
+    # printed both in the env block of every step that read them.
     # The always-hard gates are the placeholder check, fmt, validate, tflint, checkov,
     # the tofu test suites, terragrunt evaluate, and the two output cross-checks.
-    continue-on-error: ${{ vars.AWS_ROLE_ARN == '' || vars.TERRAGRUNT_ACCOUNT_ID == '' }}
     if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
@@ -1068,47 +1167,61 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
-        with:
-          tofu_version: "1.13.9"
-      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
-        with:
-          tg_version: "1.2.2"
-          # gruntwork-io/terragrunt-action@v3 manages its own tool versions
-          # via mise. Without a mise.toml in the repo it requires tofu_version
-          # to be passed explicitly — even though the previous opentofu/setup
-          # step put tofu on PATH already.
-          tofu_version: "1.13.9"
 
-      # Credential guard. The auth step runs only when the AWS_ROLE_ARN repo
-      # variable is set. When unset, the auth step skips and the Plan step
-      # below skips with it, so the matrix entry comes back green-skipped
-      # rather than red-fail. Set AWS_ROLE_ARN in repo settings
-      # (Actions → Variables) to enable real plans.
-      - name: Configure AWS credentials
-        if: vars.AWS_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ matrix.region }}
-
+      # The first step that receives either secret, and its first command masks
+      # them. The runner masks a secret's value whole (the env block below
+      # prints `***`), but not the account id inside the role ARN, nor the id in
+      # the state bucket <account_id>-<region>-tfstate that a backend or lock
+      # error prints. scripts/mask-aws-ids.sh registers every id and ARN in both
+      # with ::add-mask:: before anything else in this job can print, so the
+      # credentials step's role-to-assume input, the env blocks below and the
+      # plan output show `***` in their place. Masks are per job, so each matrix
+      # entry runs it. --optional: an unset pair is this job's skip, not an
+      # error.
+      #
+      # BOTH are required to plan. A role without an account id resolves the
+      # backend through root.hcl's placeholder fallback (111111111111-<region>-tfstate),
+      # a bucket in an account that does not exist — so every leaf dies at
+      # backend init with NoSuchBucket before any plan runs. Half-arming the
+      # matrix is strictly worse than leaving it off: it reds every PR without
+      # evaluating a single line of config.
+      #
+      # A name still set as a VARIABLE, at any level this environment resolves
+      # (the plan environment, the repository, the organization), fails the job
+      # whether or not the secrets exist: a value left over from before this
+      # moved to a secret would otherwise sit in settings unread and unnoticed,
+      # and printed by the first edit that reads it again. Only `true` or `false`
+      # reaches the step. With step debug logging on, the runner traces the
+      # value it reads for each variable before the comparison, unmasked, so
+      # never re-run this job with debug logging while one exists.
       - name: Detect credential availability
         id: creds
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
+          ROLE_ARN_VARIABLE: ${{ vars.AWS_ROLE_ARN != '' }}
+          ACCOUNT_ID_VARIABLE: ${{ vars.TERRAGRUNT_ACCOUNT_ID != '' }}
         run: |
-          # BOTH are required. A role without an account id resolves the backend
-          # through root.hcl's placeholder fallback (111111111111-<region>-tfstate),
-          # a bucket in an account that does not exist — so every leaf dies at
-          # backend init with NoSuchBucket before any plan runs. Half-arming the
-          # matrix is strictly worse than leaving it off: it reds every PR without
-          # evaluating a single line of config.
-          if [ -n "${VARS_AWS_ROLE_ARN}" ] && [ -n "${VARS_TERRAGRUNT_ACCOUNT_ID}" ]; then
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional AWS_ROLE_ARN TERRAGRUNT_ACCOUNT_ID
+          failed=0
+          for name in AWS_ROLE_ARN TERRAGRUNT_ACCOUNT_ID; do
+            case "$name" in
+              AWS_ROLE_ARN) variable="$ROLE_ARN_VARIABLE" ;;
+              TERRAGRUNT_ACCOUNT_ID) variable="$ACCOUNT_ID_VARIABLE" ;;
+            esac
+            if [ "$variable" != "false" ]; then
+              echo "::error title=${name} is still a variable::${name} is set as a variable on the plan environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it: gh variable delete ${name} --env plan --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable; for an organization variable, narrow its repository access so this repository no longer sees it, or gh variable delete ${name} --org <org> if nothing else uses it. It is a secret on the plan environment now (see docs/operations.md)."
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          if [ -n "${AWS_ROLE_ARN}" ] && [ -n "${TERRAGRUNT_ACCOUNT_ID}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
-        env:
-          VARS_AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
-          VARS_TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
 
       - name: Skip notice (no cloud credentials configured)
         if: steps.creds.outputs.available != 'true'
@@ -1121,7 +1234,32 @@ jobs:
           ENV: ${{ matrix.env }}
           COMPONENT: ${{ matrix.component }}
         run: |
-          echo "::notice::Skipping plan for ${CLOUD}/${ENV}/${COMPONENT} — needs BOTH AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID in repo Variables."
+          echo "::notice::Skipping plan for ${CLOUD}/${ENV}/${COMPONENT} — needs BOTH the AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID secrets on the plan environment."
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+        if: steps.creds.outputs.available == 'true'
+        with:
+          tofu_version: "1.13.9"
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
+        if: steps.creds.outputs.available == 'true'
+        with:
+          tg_version: "1.2.2"
+          # gruntwork-io/terragrunt-action@v3 manages its own tool versions
+          # via mise. Without a mise.toml in the repo it requires tofu_version
+          # to be passed explicitly — even though the previous opentofu/setup
+          # step put tofu on PATH already.
+          tofu_version: "1.13.9"
+
+      - name: Configure AWS credentials
+        if: steps.creds.outputs.available == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ matrix.region }}
+          # Already masked by the detection step; stated so the action's own
+          # handling of the account id it reads back cannot be the one place it
+          # is not.
+          mask-aws-account-id: true
 
       - name: Plan
         if: steps.creds.outputs.available == 'true'
@@ -1130,7 +1268,8 @@ jobs:
         # account.hcl placeholder when it is unset. That fallback is correct for a
         # public template and fatal for a real plan, so the id is injected here as
         # the env var root.hcl already documents rather than written into a tracked
-        # file — the same path scripts/e2e.sh uses.
+        # file — the same path scripts/e2e.sh uses. It is read from the secrets
+        # context, already masked by the detection step.
         #
         # -lock=false: root.hcl sets use_lockfile = true, so a plan that locks
         # writes a .tflock object beside the state. This job's credential is the
@@ -1141,7 +1280,7 @@ jobs:
         # with an apply (it still fails the build if the plan itself errors). An
         # apply running at the same moment can only make this plan's diff stale.
         env:
-          TERRAGRUNT_ACCOUNT_ID: ${{ vars.TERRAGRUNT_ACCOUNT_ID }}
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
         run: terragrunt plan -lock=false -no-color
 
   merge-gate:
@@ -1185,6 +1324,8 @@ jobs:
         teardown-gates,
         tenant-schema-readers,
         e2e-covers-leaves,
+        workflow-id-masking,
+        refuse-inherited-config,
         plan,
       ]
     # always() is load-bearing: without it a failed dependency SKIPS this job,

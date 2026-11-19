@@ -17,8 +17,15 @@ include "envcommon" {
 #
 # Apply once per account, with admin/SSO creds, like github-oidc: IAM is
 # account-global. The ecr_public_pull_role_arn output goes in the
-# ECR_PUBLIC_PULL_ROLE_ARN repo variable of each trusted repo; a workflow reads
-# it to decide whether to log in, and pulls anonymously while it is unset.
+# ECR_PUBLIC_PULL_ROLE_ARN SECRET of each trusted repo, never a variable: the
+# trusted repos are public, and a variable is printed unmasked, with this
+# account's id inside it, in the env block and the action inputs of every step
+# that reads it. A repository secret (not an environment one) keeps the token
+# subjects below; the first step that receives it masks its account id and
+# ARN before anything prints, as this repo's scripts/mask-aws-ids.sh does, and
+# configure-aws-credentials runs with mask-aws-account-id: true. A workflow
+# reads it to decide whether to log in, and pulls anonymously while it is unset
+# (as on a fork's pull request, which receives no secrets).
 #
 # The subjects are the component default, repo:nanohype/eks-gitops:pull_request
 # and repo:nanohype/eks-gitops:ref:refs/heads/main: the contexts eks-gitops'

@@ -538,6 +538,27 @@ def mutations() -> list[Mutation]:
             marker='"qldb:PartiQLSelect",',
         ),
         Mutation(
+            "check-workflow-id-masking.py",
+            "a workflow reads an account id from an unmasked variable",
+            # An account id read from vars., which the runner prints in the
+            # step's env block before any step can mask it, under a key whose
+            # own name says nothing: only the expression reader sees it. (The
+            # role-to-assume shape this repo shipped is also refused by that
+            # rule's shape check, so a control on it would pass with the reader
+            # blind.)
+            lambda t: _edit(
+                t,
+                ".github/workflows/deploy.yml",
+                "          TARGET_ENV: ${{ inputs.environment }}\n        run: |\n"
+                "          if ! caller_account",
+                "          TARGET_ENV: ${{ inputs.environment }}\n"
+                "          EXTRA: ${{ vars.DEPLOY_ACCOUNT_ID }} # "
+                + token("check-workflow-id-masking.py") + "\n        run: |\n"
+                "          if ! caller_account",
+            ),
+            marker=token("check-workflow-id-masking.py"),
+        ),
+        Mutation(
             "no-placeholders.sh",
             "a placeholder sentinel survives into deploy config",
             lambda t: _append(
