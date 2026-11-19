@@ -148,7 +148,7 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
    }
    ```
 
-3. **Verify `AWS_ROLE_ARN`** is set as a secret (not a variable) on the `plan` GitHub Environment, beside `TERRAGRUNT_ACCOUNT_ID`. `deploy.yml` and `destroy.yml` read the `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` secrets instead, set on the `development`/`staging`/`production` GitHub Environment and on nothing broader; the job names whichever the environment does not set, refuses either one set at repository or organization level or left as a variable anywhere, or reports that the two name different accounts. `drift.yml` reads the failing leaf's account entry in `DRIFT_PLAN_ROLE_ARNS`, which must be that account's `plan_role_arn`, never `deploy_role_arn`
+3. **Verify `AWS_ROLE_ARN`** is set as a secret (not a variable) on the `plan` GitHub Environment, beside `TERRAGRUNT_ACCOUNT_ID`. `deploy.yml` and `destroy.yml` read the `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` secrets instead, set on the `development`/`staging`/`production` GitHub Environment and on nothing broader; the job names whichever the environment does not set, refuses either one set at repository or organization level or left as a variable anywhere, or reports that the two name different accounts. `drift.yml` reads the failing leaf's account entry in `DRIFT_PLAN_ROLE_ARNS`, a secret on the `drift` GitHub Environment (not a variable, and set on nothing broader), which must be that account's `plan_role_arn`, never `deploy_role_arn`, from a leaf whose `plan_allowed_subject_claims` is `["environment:drift"]`
 
 4. **Check the workflow** is using the correct `permissions` block:
    ```yaml

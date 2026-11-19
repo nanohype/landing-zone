@@ -40,6 +40,7 @@ override_data {
 
 variables {
   environment          = "development"
+  account_environments = ["development"]
   region               = "us-east-1"
   team                 = "platform"
   github_org           = "nanohype"
@@ -206,6 +207,30 @@ run "plan_environment_claim_other_case_rejected" {
 
   variables {
     allowed_subject_claims = ["environment:Plan"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "drift_environment_claim_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:staging", "environment:drift"]
+  }
+
+  expect_failures = [
+    var.allowed_subject_claims,
+  ]
+}
+
+run "drift_environment_claim_other_case_rejected" {
+  command = plan
+
+  variables {
+    allowed_subject_claims = ["environment:DRIFT"]
   }
 
   expect_failures = [
@@ -425,6 +450,511 @@ run "deploy_role_trust_is_unchanged_by_the_plan_role" {
     ])
     error_message = "the deploy role must not have acquired the plan role's environment claim — the two roles exist to keep those trust surfaces separate"
   }
+}
+
+# ───────────────────── plan role: exact-environment allowlist ─────────────────────
+#
+# plan_allowed_subject_claims carries the same allowlist as allowed_subject_claims:
+# every entry an exact "environment:<name>". The plan role reads every object in
+# its account, state included, so a wildcard environment (which GitHub creates,
+# unprotected, the first time a workflow names it), a pull_request claim or a ref:
+# claim would hand that read to whoever can open the pull request, push the ref or
+# invent the environment. Each run is one way back in; the validation must refuse
+# them all, including beside a valid claim.
+
+run "plan_bare_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    plan_allowed_subject_claims = ["*"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "plan_environment_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    plan_allowed_subject_claims = ["environment:plan", "environment:*"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "plan_partial_wildcard_claim_rejected" {
+  command = plan
+
+  variables {
+    plan_allowed_subject_claims = ["environment:pla?"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "plan_pull_request_claim_rejected" {
+  command = plan
+
+  variables {
+    plan_allowed_subject_claims = ["environment:plan", "pull_request"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "plan_branch_ref_claim_rejected" {
+  command = plan
+
+  variables {
+    plan_allowed_subject_claims = ["ref:refs/heads/main"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "plan_empty_claims_rejected" {
+  command = plan
+
+  variables {
+    plan_allowed_subject_claims = []
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+# ─────────────────── plan role: the claim follows the account ───────────────────
+#
+# A plan role in an account holding staging or production reads that account's
+# one state bucket, every environment's state included, so it trusts exactly
+# environment:drift (drift.yml, main-only) from landing-zone alone, and never
+# environment:plan (ci.yml's PR plan job, any branch). The validation reads
+# var.account_environments — every environment the account holds, which
+# live/_envcommon/aws/github-oidc.hcl computes from the tree — not the leaf's
+# own directory, so a leaf in the development directory of the network or
+# backup account is held to the production rule. Every arm is pinned here, with
+# the rendered trust asserted on each accepted arm.
+
+run "development_plan_role_trusts_the_plan_environment" {
+  command = plan
+
+  variables {
+    environment          = "development"
+    account_environments = ["development"]
+    github_repos         = ["landing-zone"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.plan[0].assume_role_policy).Statement :
+      s if toset(flatten([
+        try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
+      ])) == toset(["repo:nanohype/landing-zone:environment:plan"])
+    ]) == 1
+    error_message = "the development plan role must trust exactly repo:nanohype/landing-zone:environment:plan by default"
+  }
+}
+
+run "staging_plan_role_trusts_exactly_the_drift_environment" {
+  command = plan
+
+  variables {
+    environment                 = "staging"
+    account_environments        = ["staging"]
+    github_repos                = ["landing-zone"]
+    allowed_subject_claims      = ["environment:staging"]
+    plan_allowed_subject_claims = ["environment:drift"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.plan[0].assume_role_policy).Statement :
+      s if toset(flatten([
+        try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
+      ])) == toset(["repo:nanohype/landing-zone:environment:drift"])
+    ]) == 1
+    error_message = "a staging plan role must trust exactly repo:nanohype/landing-zone:environment:drift"
+  }
+}
+
+run "production_plan_role_trusts_exactly_the_drift_environment" {
+  command = plan
+
+  variables {
+    environment                 = "production"
+    account_environments        = ["production"]
+    github_repos                = ["landing-zone"]
+    allowed_subject_claims      = ["environment:production"]
+    plan_allowed_subject_claims = ["environment:drift"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.plan[0].assume_role_policy).Statement :
+      s if toset(flatten([
+        try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
+      ])) == toset(["repo:nanohype/landing-zone:environment:drift"])
+    ]) == 1
+    error_message = "a production plan role must trust exactly repo:nanohype/landing-zone:environment:drift"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role.deploy[0].assume_role_policy).Statement :
+      alltrue([
+        for sub in flatten([try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])]) :
+        !strcontains(sub, "environment:drift")
+      ])
+    ])
+    error_message = "the deploy role must not acquire the plan role's drift claim"
+  }
+}
+
+# The shared-account case: a leaf in the DEVELOPMENT directory of an account that
+# also holds staging and production (network, backup) is held to the drift rule,
+# because the role it creates reads the same account-wide state bucket.
+run "development_directory_of_a_shared_account_trusts_exactly_the_drift_environment" {
+  command = plan
+
+  variables {
+    environment                 = "development"
+    account_environments        = ["development", "hub", "production", "staging"]
+    github_repos                = ["landing-zone"]
+    allowed_subject_claims      = ["environment:development"]
+    plan_allowed_subject_claims = ["environment:drift"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role.plan[0].assume_role_policy).Statement :
+      s if toset(flatten([
+        try(s.Condition.StringLike["token.actions.githubusercontent.com:sub"], [])
+      ])) == toset(["repo:nanohype/landing-zone:environment:drift"])
+    ]) == 1
+    error_message = "a plan role in an account holding production must trust exactly repo:nanohype/landing-zone:environment:drift, whichever environment directory its leaf sits in"
+  }
+}
+
+run "development_directory_of_a_shared_account_with_the_default_plan_claim_rejected" {
+  command = plan
+
+  variables {
+    environment          = "development"
+    account_environments = ["development", "hub", "production", "staging"]
+    github_repos         = ["landing-zone"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "hub_directory_of_a_shared_account_with_the_plan_claim_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "hub"
+    account_environments        = ["development", "hub", "production", "staging"]
+    github_repos                = ["landing-zone"]
+    plan_allowed_subject_claims = ["environment:plan"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+# The default ["environment:plan"] left in place by a production leaf is the copy
+# of the development pattern this validation exists to stop.
+run "production_plan_role_with_the_default_plan_claim_rejected" {
+  command = plan
+
+  variables {
+    environment          = "production"
+    account_environments = ["production"]
+    github_repos         = ["landing-zone"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "staging_plan_role_with_the_plan_claim_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "staging"
+    account_environments        = ["staging"]
+    github_repos                = ["landing-zone"]
+    plan_allowed_subject_claims = ["environment:plan"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "staging_plan_role_with_the_plan_claim_beside_drift_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "staging"
+    account_environments        = ["staging"]
+    github_repos                = ["landing-zone"]
+    plan_allowed_subject_claims = ["environment:drift", "environment:Plan"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "production_plan_role_with_another_environment_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "production"
+    account_environments        = ["production"]
+    github_repos                = ["landing-zone"]
+    plan_allowed_subject_claims = ["environment:production"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+run "production_plan_role_with_a_differently_cased_drift_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "production"
+    account_environments        = ["production"]
+    github_repos                = ["landing-zone"]
+    plan_allowed_subject_claims = ["environment:Drift"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+# The drift trust is safe because landing-zone's drift environment is main-only.
+# Any other listed repo would get repo:<org>/<repo>:environment:drift, and in that
+# repo a workflow on any branch that names the environment creates it unprotected.
+run "production_plan_role_trusting_a_second_repo_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "production"
+    account_environments        = ["production"]
+    github_repos                = ["landing-zone", "rackctl"]
+    allowed_subject_claims      = ["environment:production"]
+    plan_allowed_subject_claims = ["environment:drift"]
+  }
+
+  expect_failures = [
+    var.github_repos,
+  ]
+}
+
+run "staging_plan_role_trusting_another_repo_only_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "staging"
+    account_environments        = ["staging"]
+    github_repos                = ["rackctl"]
+    allowed_subject_claims      = ["environment:staging"]
+    plan_allowed_subject_claims = ["environment:drift"]
+  }
+
+  expect_failures = [
+    var.github_repos,
+  ]
+}
+
+# A deploy role for other repos in a production account is still possible: the
+# repo restriction binds the plan role only.
+run "production_leaf_without_a_plan_role_may_list_other_repos" {
+  command = plan
+
+  variables {
+    environment            = "production"
+    account_environments   = ["production"]
+    github_repos           = ["landing-zone", "rackctl"]
+    allowed_subject_claims = ["environment:production"]
+    create_plan_role       = false
+  }
+
+  assert {
+    condition     = length(aws_iam_role.plan) == 0 && length(aws_iam_role.deploy) == 1
+    error_message = "with create_plan_role false, a production leaf may list other repos for its deploy role"
+  }
+}
+
+run "development_plan_role_with_the_drift_claim_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "development"
+    account_environments        = ["development"]
+    plan_allowed_subject_claims = ["environment:plan", "environment:drift"]
+  }
+
+  expect_failures = [
+    var.plan_allowed_subject_claims,
+  ]
+}
+
+# The management, fleet and shared-services accounts hold neither development
+# alone nor staging or production. No workflow plans them, so they get no plan
+# role at all, whatever claim is offered.
+run "hub_account_plan_role_rejected" {
+  command = plan
+
+  variables {
+    environment          = "hub"
+    account_environments = ["hub"]
+  }
+
+  expect_failures = [
+    var.create_plan_role,
+  ]
+}
+
+run "org_account_plan_role_with_an_invented_environment_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "org"
+    account_environments        = ["org"]
+    plan_allowed_subject_claims = ["environment:org-plan"]
+  }
+
+  expect_failures = [
+    var.create_plan_role,
+  ]
+}
+
+run "shared_account_plan_role_with_the_drift_claim_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "shared"
+    account_environments        = ["shared"]
+    plan_allowed_subject_claims = ["environment:drift"]
+  }
+
+  expect_failures = [
+    var.create_plan_role,
+  ]
+}
+
+run "hub_account_without_a_plan_role_accepted" {
+  command = plan
+
+  variables {
+    environment          = "hub"
+    account_environments = ["hub"]
+    create_plan_role     = false
+  }
+
+  assert {
+    condition     = length(aws_iam_role.plan) == 0
+    error_message = "a hub account leaf with create_plan_role false must plan without a plan role"
+  }
+}
+
+# The environment rules bind the plan role only. A production leaf that creates
+# no plan role (the ECR Public pull leaf's shape) is not refused for the unused
+# default claim.
+run "production_leaf_without_a_plan_role_accepts_the_unused_default" {
+  command = plan
+
+  variables {
+    environment            = "production"
+    account_environments   = ["production"]
+    allowed_subject_claims = ["environment:production"]
+    create_plan_role       = false
+  }
+
+  assert {
+    condition     = length(aws_iam_role.plan) == 0 && length(aws_iam_role.deploy) == 1
+    error_message = "with create_plan_role false, a production leaf must plan without a plan role"
+  }
+}
+
+# ─────────────────── environment and account_environments vocabulary ───────────────────
+#
+# The rules above are keyed on exact names. A misspelt environment, or an account
+# list naming one, would fall outside every rule, so both are held to env.hcl's
+# vocabulary, and the leaf's environment must be one its account holds.
+
+run "capitalised_environment_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "Staging"
+    account_environments        = ["development"]
+    plan_allowed_subject_claims = ["environment:production"]
+  }
+
+  expect_failures = [
+    var.environment,
+  ]
+}
+
+run "abbreviated_account_environment_rejected" {
+  command = plan
+
+  variables {
+    environment                 = "production"
+    account_environments        = ["prod", "production"]
+    github_repos                = ["landing-zone"]
+    plan_allowed_subject_claims = ["environment:drift"]
+  }
+
+  expect_failures = [
+    var.account_environments,
+  ]
+}
+
+run "empty_account_environments_rejected" {
+  command = plan
+
+  variables {
+    account_environments = []
+  }
+
+  expect_failures = [
+    var.account_environments,
+  ]
+}
+
+run "account_environments_missing_the_leaf_environment_rejected" {
+  command = plan
+
+  variables {
+    environment          = "production"
+    account_environments = ["development"]
+  }
+
+  expect_failures = [
+    var.account_environments,
+  ]
 }
 
 # ─────────────────────────── ECR Public pull role ───────────────────────────

@@ -27,8 +27,9 @@ include "envcommon" {
 # The component validates every claim as an exact "environment:<name>": no
 # wildcard (GitHub creates an unprotected environment the first time a workflow
 # names one, so "environment:dev*" would admit any "devx" a branch invents), no
-# pull_request or ref: claim, and never "environment:plan" (ci.yml's PR plan job
-# and drift.yml declare it). The trust names environments, not refs: a job that
+# pull_request or ref: claim, and never "environment:plan" or "environment:drift"
+# (ci.yml's PR plan job and drift.yml declare them for the read-only plan role).
+# The trust names environments, not refs: a job that
 # declares `environment: development` presents the same sub from any branch, so
 # the `development` and `e2e` environments need a deployment-branch policy in repo
 # settings (and `e2e` required reviewers) before any policy is attached here. A
@@ -47,6 +48,20 @@ include "envcommon" {
 # environment in repo settings gates it on a human; the trust scoping holds either
 # way. plan_role_arn is what goes in the AWS_ROLE_ARN secret on `plan` — NOT
 # deploy_role_arn.
+#
+# `plan` is the trust for THIS account only. ci.yml declares it from any branch,
+# including a same-repository pull request's, which is acceptable for the
+# development account and nowhere else. The component's validation reads
+# `account_environments` — every environment this ACCOUNT holds, which
+# live/_envcommon/aws/github-oidc.hcl computes from the tree — and accepts
+# "environment:plan" only in an account holding development alone, as this one
+# does. In an account holding staging or production it requires exactly
+# "environment:drift" (drift.yml, whose `drift` environment admits main only)
+# with github_repos exactly ["landing-zone"], whichever environment directory
+# the leaf sits in: network and backup hold development directories beside their
+# production ones, and the role reads the same account-wide state either way.
+# So this leaf is not the pattern to copy for any other account's plan role; see
+# docs/operations.md, "Required before any staging or production plan role".
 #
 # This leaf moved to us-east-1 before the rest of the estate followed, and the
 # reason it moved first is worth keeping: the OIDC provider and both roles are

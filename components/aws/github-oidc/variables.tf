@@ -1,9 +1,50 @@
-# Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
-# tflint-ignore: terraform_unused_declarations
+# Uniform envcommon interface variable, and read here: it must be one of the
+# environments the account holds (account_environments), and its spelling is
+# held to the env.hcl vocabulary so a misspelt environment cannot fall outside
+# the rules plan_allowed_subject_claims applies.
 variable "environment" {
-  description = "Environment name (development, staging, production)"
+  description = "Environment name of the leaf (development, staging, production, hub, org or shared), injected by live/root.hcl from env.hcl. Must be one of account_environments. The plan role's trust is decided by the account (account_environments), not by this value; see plan_allowed_subject_claims."
   type        = string
-  default     = ""
+
+  validation {
+    condition     = contains(["development", "staging", "production", "hub", "org", "shared"], var.environment)
+    error_message = "environment must be one of development, staging, production, hub, org or shared, spelled exactly as env.hcl spells it: the plan role's trust rules are keyed on these names, and a value outside them (\"Production\", \"prod\", \"\") would fall outside every rule."
+  }
+}
+
+variable "account_environments" {
+  description = <<-EOT
+    Every environment the leaf's AWS account holds: the `environment` of each
+    env.hcl under the account directory (live/aws/<account>/<region>/<env>/env.hcl),
+    computed from the tree by live/_envcommon/aws/github-oidc.hcl. Required, with
+    no default, so a caller cannot leave it out and fall into a permissive arm.
+
+    The plan role's trust is decided by this, not by `environment`. The roles are
+    account-global and the account's one state bucket holds every environment's
+    state, so the trust boundary is the account: a github-oidc leaf in the
+    development directory of an account that also holds production (network,
+    backup) reads production state just as a leaf in its production directory
+    would. See plan_allowed_subject_claims for the three arms.
+  EOT
+  type        = list(string)
+
+  validation {
+    condition     = length(var.account_environments) > 0
+    error_message = "account_environments must name at least one environment: the environments the account holds decide which GitHub Environment the plan role may trust."
+  }
+
+  validation {
+    condition     = alltrue([for e in var.account_environments : contains(["development", "staging", "production", "hub", "org", "shared"], e)])
+    error_message = "account_environments entries must each be one of development, staging, production, hub, org or shared, spelled exactly as env.hcl spells them."
+  }
+
+  validation {
+    # The leaf's own environment is one the account holds by construction when
+    # envcommon computes the list. A caller passing a list that leaves it out is
+    # describing some other account.
+    condition     = contains(var.account_environments, var.environment)
+    error_message = "account_environments must contain the leaf's own environment: it lists every environment of the account the leaf sits in, which includes the leaf's."
+  }
 }
 
 # Uniform envcommon interface variable — every component declares it for live/_envcommon wiring; not consumed here.
@@ -63,6 +104,21 @@ variable "github_repos" {
     condition     = alltrue([for r in var.github_repos : can(regex("^[A-Za-z0-9._-]+$", r))])
     error_message = "github_repos entries must be literal GitHub repository names (letters, digits, \".\", \"_\" and \"-\" only); a \"*\" or \"?\" is a StringLike wildcard in the trust policy and would widen the deploy role to other repos and contexts."
   }
+
+  validation {
+    # The plan role renders repo:<org>/<repo>:environment:drift for EVERY repo
+    # here. The main-only branch policy that makes that claim safe exists on
+    # landing-zone's own `drift` environment only. In another repository a
+    # workflow on any branch that names `environment: drift` creates that
+    # environment, unprotected, and would assume this account's plan role. So a
+    # plan role in an account holding staging or production trusts landing-zone
+    # alone; a deploy role for another repo there takes create_plan_role = false
+    # and its own leaf.
+    condition = (!var.create_plan_role ||
+      length(setintersection(toset(var.account_environments), toset(["staging", "production"]))) == 0 ||
+    var.github_repos == tolist(["landing-zone"]))
+    error_message = "In an account that holds a staging or production environment, a leaf that creates the plan role must set github_repos to exactly [\"landing-zone\"]: the plan role trusts environment:drift in every listed repo, and only landing-zone's drift environment carries the main-only branch policy. In any other repository, a workflow on any branch that names `environment: drift` creates that environment unprotected and would assume this account's plan role. Set create_plan_role = false on a leaf that needs other repos."
+  }
 }
 
 variable "allowed_subject_claims" {
@@ -80,9 +136,9 @@ variable "allowed_subject_claims" {
       - any wildcard ("environment:*", "environment:prod*", "*"). GitHub creates an
         environment, with no protection rules, the first time a workflow names it,
         so a wildcard admits any environment name a branch's workflow invents.
-      - "environment:plan" in any letter case. ci.yml's PR plan job and drift.yml
-        declare it on purpose, and it belongs to the read-only plan role
-        (plan_allowed_subject_claims).
+      - "environment:plan" and "environment:drift" in any letter case. ci.yml's PR
+        plan job declares the first and drift.yml the second, and both belong to
+        the read-only plan role (plan_allowed_subject_claims).
       - any claim that is not an environment: "pull_request", "ref:..." (branch
         or tag refs) and the like. A ref or pull_request claim is held by anyone
         who can push that ref or open that pull request, with no environment rule
@@ -117,7 +173,16 @@ variable "allowed_subject_claims" {
     # `environment: Plan` runs under the plan environment's rules, which admit any
     # branch. Refuse every casing.
     condition     = alltrue([for c in var.allowed_subject_claims : lower(c) != "environment:plan"])
-    error_message = "allowed_subject_claims must not contain \"environment:plan\" in any letter case: ci.yml and drift.yml declare that environment from any branch, so trusting it hands the deploy role to every branch. The plan role (plan_allowed_subject_claims) is the one that trusts it."
+    error_message = "allowed_subject_claims must not contain \"environment:plan\" in any letter case: ci.yml's PR plan job declares that environment from any branch, so trusting it hands the deploy role to every branch. The plan role (plan_allowed_subject_claims) is the one that trusts it."
+  }
+
+  validation {
+    # The drift environment is main-only, but every drift.yml job that declares it
+    # exists to read: it is the read-only plan role's environment in staging and
+    # production. A deploy role trusting it would hand the role that provisions
+    # and destroys the substrate to a scheduled job that never needs it.
+    condition     = alltrue([for c in var.allowed_subject_claims : lower(c) != "environment:drift"])
+    error_message = "allowed_subject_claims must not contain \"environment:drift\" in any letter case: drift.yml declares that environment to assume the read-only plan role of a staging or production account (plan_allowed_subject_claims), and nothing in it deploys."
   }
 }
 
@@ -167,9 +232,21 @@ variable "max_session_duration" {
 }
 
 variable "create_plan_role" {
-  description = "Create the read-only plan role the CI plan matrix assumes on pull requests. Separate from the deploy role because the plan matrix runs on `pull_request`, a context the deploy role must never trust."
+  description = "Create the read-only plan role: in the development account, the one ci.yml's PR plan job assumes; in an account holding staging or production, the one drift.yml assumes from the main-only drift environment. Separate from the deploy role because the PR plan job runs on `pull_request`, a context the deploy role must never trust. Must be false in an account that holds neither (see plan_allowed_subject_claims)."
   type        = bool
   default     = true
+
+  # The `||` stays at the end of the line: checkov's HCL parser cannot read a line
+  # that begins with an operator.
+  validation {
+    # An account that is neither development-only nor holds staging or
+    # production (the management, fleet and shared-services accounts) has no
+    # workflow that plans it, so it has no environment whose protection rules
+    # this role could rest on. It gets no plan role rather than an invented one.
+    condition = (!var.create_plan_role || toset(var.account_environments) == toset(["development"]) ||
+    length(setintersection(toset(var.account_environments), toset(["staging", "production"]))) > 0)
+    error_message = "This account holds neither development alone nor a staging or production environment, so no workflow plans it and no GitHub Environment is designed to reach its plan role. Set create_plan_role = false on this leaf."
+  }
 }
 
 variable "plan_role_name" {
@@ -180,14 +257,32 @@ variable "plan_role_name" {
 
 variable "plan_allowed_subject_claims" {
   description = <<-EOT
-    GitHub OIDC `sub` claim suffixes the PLAN role trusts. Default is a single
-    GitHub Environment ("environment:plan"), which is the escape hatch the deploy
-    leaf prescribes for jobs needing a role from a non-environment context: the
-    job declares `environment: plan`, its token presents
-    repo:<org>/<repo>:environment:plan, and the environment can carry required
-    reviewers so an untrusted branch waits for a human before any credential is
-    issued. Deliberately NOT "pull_request" and NOT a bare branch claim — either
-    would hand a credential to any PR the moment it opens, on a public repo.
+    GitHub OIDC `sub` claim suffixes the PLAN role trusts, applied to every repo in
+    github_repos (final subject = repo:<org>/<repo>:<claim>). Every entry must be an
+    exact GitHub Environment claim, "environment:<name>", with no wildcard, for the
+    reasons allowed_subject_claims gives: GitHub creates an environment, with no
+    protection rules, the first time a workflow names it, and a pull_request or
+    ref: claim is held by anyone who can open that pull request or push that ref.
+
+    Which environment depends on the ACCOUNT (account_environments), not on the
+    leaf's directory, and the validation enforces it when create_plan_role is true:
+      - an account holding a staging or production environment (workload-staging,
+        workload-production, network, backup): exactly ["environment:drift"], with
+        github_repos exactly ["landing-zone"]. drift.yml declares that environment,
+        and its deployment-branch policy admits main only, so the account-wide read
+        this role carries (every environment's state included) is never reachable
+        from a pull request or another branch. "environment:plan" is refused in
+        any letter case, whichever environment directory the leaf sits in:
+        trusting it would hand staging and production data to every branch that
+        can run ci.yml.
+      - an account holding development and nothing else (workload-development):
+        the default, "environment:plan". ci.yml's PR plan job declares it from any
+        branch, including a same-repository pull request's, which is acceptable
+        for the development account and nowhere else. "environment:drift" is
+        refused here.
+      - any other account (one holding only hub, org or shared environments, or
+        development beside one of them): no plan role. No workflow plans those
+        accounts, so set create_plan_role = false.
   EOT
   type        = list(string)
   default     = ["environment:plan"]
@@ -198,8 +293,45 @@ variable "plan_allowed_subject_claims" {
   }
 
   validation {
-    condition     = !contains(var.plan_allowed_subject_claims, "*")
-    error_message = "plan_allowed_subject_claims must not contain a bare \"*\": that trusts every context including pull_request from any branch. Name the contexts explicitly."
+    # The same allowlist allowed_subject_claims carries: an exact environment is the
+    # only context whose protection rules can be checked in the repository settings.
+    condition     = alltrue([for c in var.plan_allowed_subject_claims : can(regex("^environment:[^*?]+$", c))])
+    error_message = "plan_allowed_subject_claims entries must each be an exact GitHub Environment claim, \"environment:<name>\", with no \"*\" or \"?\". A wildcard admits any environment name a branch's workflow declares, and GitHub creates that environment, unprotected, the first time a workflow names it. A pull_request or ref: claim is held by anyone who can open that pull request or push that ref."
+  }
+
+  # The conditions below keep each `||` at the end of a line, never at the start
+  # of one: checkov's HCL parser (python-hcl2) cannot read a line that begins
+  # with an operator, and a file it cannot parse fails the Security Scan.
+
+  validation {
+    # A plan role in an account holding staging or production reads that state
+    # and data, whichever environment directory its leaf sits in. Only the
+    # main-only drift environment may reach it; the PR plan environment, which
+    # any branch can declare, never may.
+    condition = (!var.create_plan_role ||
+      length(setintersection(toset(var.account_environments), toset(["staging", "production"]))) == 0 ||
+    var.plan_allowed_subject_claims == tolist(["environment:drift"]))
+    error_message = "In an account that holds a staging or production environment, plan_allowed_subject_claims must be exactly [\"environment:drift\"], whichever environment directory the leaf sits in: the plan role reads the account's one state bucket, every environment's state included. drift.yml declares environment:drift, whose deployment-branch policy admits main only. \"environment:plan\" is declared by ci.yml's PR plan job from any branch, so trusting it would hand this account's state and data to every branch that can run ci.yml."
+  }
+
+  validation {
+    # environment:plan belongs to the development account's plan role alone (the
+    # AWS_ROLE_ARN secret on the plan environment, which ci.yml's PR plan job
+    # assumes), in any casing, because GitHub environment names are
+    # case-insensitive.
+    condition = (!var.create_plan_role || toset(var.account_environments) == toset(["development"]) ||
+    alltrue([for c in var.plan_allowed_subject_claims : lower(c) != "environment:plan"]))
+    error_message = "plan_allowed_subject_claims may contain \"environment:plan\" (in any letter case) only in an account holding development and nothing else: ci.yml's PR plan job declares that environment from any branch, and only the development account's plan role may be reachable from a pull request."
+  }
+
+  validation {
+    # environment:drift belongs to plan roles in accounts holding staging or
+    # production alone: drift.yml plans only those leaves, so in any other account
+    # the claim would trust a job that never assumes the role.
+    condition = (!var.create_plan_role ||
+      length(setintersection(toset(var.account_environments), toset(["staging", "production"]))) > 0 ||
+    alltrue([for c in var.plan_allowed_subject_claims : lower(c) != "environment:drift"]))
+    error_message = "plan_allowed_subject_claims may contain \"environment:drift\" (in any letter case) only in an account holding a staging or production environment: drift.yml plans only those leaves, so no other plan role has a drift job to trust."
   }
 }
 

@@ -375,8 +375,8 @@ Environments the deploy, destroy and e2e workflows declare
 `repo:nanohype/landing-zone:environment:staging`,
 `repo:nanohype/landing-zone:environment:production` and
 `repo:nanohype/landing-zone:environment:e2e`; the `workload-development` leaf
-narrows that to `development` and `e2e`), never the `plan` environment the
-read-only plan role trusts — and you attach the policies CI needs via the
+narrows that to `development` and `e2e`), never the `plan` or `drift`
+environment the read-only plan role trusts — and you attach the policies CI needs via the
 component's `managed_policy_arns` (e.g. `AdministratorAccess` with a
 `permissions_boundary_arn`, or a scoped set). Skip this component entirely if you
 only run locally.
@@ -389,12 +389,14 @@ presents the same `sub` from any branch, and `deploy.yml`, `destroy.yml` and
 `e2e.yml` can be dispatched from any branch. An environment that does not exist
 yet is created unprotected the first time a workflow names it.
 
-The `AWS_ROLE_ARN` secret on the `plan` environment is the **plan** role
-(`plan_role_arn`), which ci.yml's plan job assumes from `environment: plan`.
-drift.yml assumes each account's own plan role from the same environment, read
-from the `DRIFT_PLAN_ROLE_ARNS` map of account directory to `plan_role_arn` (see
-[operations.md](operations.md#driftyml----drift-detection)). The deploy role does
-not trust that environment, so a `deploy_role_arn` in either variable makes PR
+The `AWS_ROLE_ARN` secret on the `plan` environment is the development
+account's **plan** role (`plan_role_arn`), which ci.yml's plan job assumes from
+`environment: plan`. drift.yml assumes each staging or production account's own
+plan role from a different environment, `drift`, which admits `main` only, and
+reads it from `DRIFT_PLAN_ROLE_ARNS`, a secret on that environment mapping
+account directory to `plan_role_arn` (see
+[operations.md](operations.md#driftyml----drift-detection)). The deploy role
+trusts neither environment, so a `deploy_role_arn` in either secret makes PR
 plans or drift detection fail at the credential step; in drift.yml that failure
 files a `drift-error` issue for each of the account's leaves and turns the run
 red.
@@ -402,13 +404,41 @@ red.
 Arming drift detection takes a plan role in every account directory that holds
 a `staging` or `production` leaf (`workload-staging`, `workload-production`,
 `network` and `backup`): the account's state backend created, one
-`github-oidc` leaf per account applied locally with that account's credentials,
-and its `plan_role_arn` recorded in the repository-level `DRIFT_PLAN_ROLE_ARNS`
-once that account's `staging` and `production` leaves have been applied. The per-account list is in
+`github-oidc` leaf per account with `plan_allowed_subject_claims =
+["environment:drift"]` applied locally with that account's credentials, and its
+`plan_role_arn` recorded in the `DRIFT_PLAN_ROLE_ARNS` secret on the `drift`
+environment once that account's `staging` and `production` leaves have been
+applied. The per-account list is in
 [operations.md](operations.md#arming-drift-detection-one-plan-role-per-account).
-It is blocked on two prerequisites recorded there: a staging or production plan
-role must not trust `environment:plan` as the development one does, and
-`plan_allowed_subject_claims` must become an exact-environment allowlist first.
+
+**Required before any of those leaves:** the `drift` GitHub Environment, with a
+deployment-branch policy admitting `main` only and no required reviewers, and
+the `DRIFT_PLAN_ROLE_ARNS` secret on it (single-line JSON, set on no repository
+or organization level, as a secret or as a variable). Create the environment
+before drift.yml declares it: a workflow naming a missing environment creates it
+unprotected.
+
+```bash
+gh api -X PUT repos/nanohype/landing-zone/environments/drift \
+  -F 'deployment_branch_policy[protected_branches]=false' \
+  -F 'deployment_branch_policy[custom_branch_policies]=true'
+gh api -X POST repos/nanohype/landing-zone/environments/drift/deployment-branch-policies \
+  -f name=main -f type=branch
+jq -c . drift-plan-role-arns.json | gh secret set DRIFT_PLAN_ROLE_ARNS --env drift --repo nanohype/landing-zone
+```
+
+The component holds the trust to that environment, keyed on the account rather
+than on the leaf's directory (envcommon passes every environment the account
+holds as `account_environments`): in an account holding `staging` or
+`production`, `plan_allowed_subject_claims` must be exactly
+`["environment:drift"]` and `github_repos` exactly `["landing-zone"]`, even for
+a leaf under that account's `development` directory; `environment:plan` is
+refused outside the development-only account; and an account holding neither
+(management, fleet, shared-services) takes `create_plan_role = false`. Delete
+any `DRIFT_PLAN_ROLE_ARNS` variable, at repository level or on the `drift`
+environment, before the drift change merges, and never run drift.yml with debug
+logging while one exists: a debug run traces the value of a variable, unmasked. The full checklist is in
+[operations.md](operations.md#required-before-any-staging-or-production-plan-role).
 
 ## End-to-end validation (`task e2e`)
 

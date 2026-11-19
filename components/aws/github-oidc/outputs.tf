@@ -1,5 +1,5 @@
 output "deploy_role_arn" {
-  description = "ARN of the GitHub Actions deploy role. Set it as the DEPLOY_ROLE_ARN secret on the GitHub Environment deploy.yml and destroy.yml declare (see docs/operations.md) and as the E2E_AWS_ROLE_ARN secret on the e2e environment for e2e.yml when using the CI path. Never AWS_ROLE_ARN: that holds plan_role_arn, and this role does not trust the plan environment ci.yml's plan job and drift.yml run in. Null when create_deploy_role is false."
+  description = "ARN of the GitHub Actions deploy role. Set it as the DEPLOY_ROLE_ARN secret on the GitHub Environment deploy.yml and destroy.yml declare (see docs/operations.md) and as the E2E_AWS_ROLE_ARN secret on the e2e environment for e2e.yml when using the CI path. Never AWS_ROLE_ARN: that holds plan_role_arn, and this role trusts neither the plan environment ci.yml's plan job runs in nor the drift environment drift.yml runs in. Null when create_deploy_role is false."
   value       = var.create_deploy_role ? aws_iam_role.deploy[0].arn : null
 }
 
@@ -9,7 +9,7 @@ output "oidc_provider_arn" {
 }
 
 output "plan_role_arn" {
-  description = "ARN of the read-only GitHub Actions plan role. Set as the AWS_ROLE_ARN secret on the plan environment so the CI plan matrix can assume it, and as this account's entry in the DRIFT_PLAN_ROLE_ARNS repo variable so drift.yml can plan the account's production and staging leaves. Null when create_plan_role is false."
+  description = "ARN of the read-only GitHub Actions plan role. From the development leaf, set as the AWS_ROLE_ARN secret on the plan environment so the CI plan matrix can assume it; from the leaf of an account holding staging or production, as this account's entry in the DRIFT_PLAN_ROLE_ARNS secret on the drift GitHub Environment so drift.yml can plan the account's production and staging leaves. Null when create_plan_role is false."
   value       = var.create_plan_role ? aws_iam_role.plan[0].arn : null
 }
 

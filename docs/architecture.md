@@ -204,7 +204,7 @@ component: it is written on `Platform.spec.datastores` and provisioned by
 | **service-quotas** | CloudWatch alarms for service quota utilization | platform |
 | **cost** | AWS Budgets alerts, Cost Anomaly Detection | finops |
 | **dns** | Route53 zones, subdomain delegation, ACM certificates | platform |
-| **github-oidc** | GitHub Actions OIDC provider + deploy role trusted from named contexts (`environment:development`, `environment:staging`, `environment:production`, `environment:e2e`) in named repos — never `environment:plan`, a tag ref, or a bare `:*` — plus a read-only plan role trusted from `environment:plan`, and an optional ECR Public pull role whose only permissions mint a public.ecr.aws token; no long-lived keys | platform |
+| **github-oidc** | GitHub Actions OIDC provider + deploy role trusted from named contexts (`environment:development`, `environment:staging`, `environment:production`, `environment:e2e`) in named repos — never `environment:plan` or `environment:drift`, a tag ref, or a bare `:*` — plus a read-only plan role trusted from `environment:plan` in the development-only account and exactly `environment:drift` (main-only, landing-zone only) in any account holding staging or production, enforced against every environment the account holds (`account_environments`, read from the tree by envcommon) rather than the leaf's directory, and refused in the hub, org and shared accounts, and an optional ECR Public pull role whose only permissions mint a public.ecr.aws token; no long-lived keys | platform |
 | **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed per environment — each workload environment runs its own for that environment's cluster, and the hub runs one for its own. | *(required input)* |
 | **private-dns** | Private hosted zones for a workload account, `create` or `adopt` mode, associated to the shared Route53 profile | platform |
 | **shared-dns** | Owner side of private DNS: the hosted zones plus the Route53 profile the workload accounts adopt | platform |
@@ -343,7 +343,7 @@ After `cluster-bootstrap` deploys Cilium and ArgoCD, ArgoCD watches the GitOps r
 
 ### CI/CD Authentication
 
-GitHub Actions assumes its roles via OIDC federation -- no long-lived credentials. ci.yml's plan job assumes the `AWS_ROLE_ARN` secret on the `plan` environment, drift.yml the plan role of each leaf's account from `DRIFT_PLAN_ROLE_ARNS`, deploy.yml and destroy.yml `DEPLOY_ROLE_ARN` from the GitHub Environment they declare, and e2e.yml `E2E_AWS_ROLE_ARN`. Each role's trust policy is scoped to the repository.
+GitHub Actions assumes its roles via OIDC federation -- no long-lived credentials. ci.yml's plan job assumes the `AWS_ROLE_ARN` secret on the `plan` environment, drift.yml the plan role of each leaf's account from `DRIFT_PLAN_ROLE_ARNS`, a secret on the main-only `drift` GitHub Environment, deploy.yml and destroy.yml the `DEPLOY_ROLE_ARN` secret on the GitHub Environment they declare, and e2e.yml the `E2E_AWS_ROLE_ARN` secret on `e2e`. Each role's trust policy is scoped to the repository.
 
 ### Pod Authentication (EKS Pod Identity)
 

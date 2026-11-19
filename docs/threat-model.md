@@ -38,8 +38,9 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   protection rules, the first time a workflow names it, so `environment:prod*`
   admits whatever `prodx` a branch's workflow invents. `pull_request` and `ref:`
   claims are refused because anyone able to open that pull request or push that
-  ref holds them. `environment:plan` is refused in every letter case: the PR plan
-  job and the drift job declare it, and it belongs to the read-only plan role.
+  ref holds them. `environment:plan` and `environment:drift` are refused in every
+  letter case: the PR plan job declares the first and the drift jobs the second,
+  and both belong to the read-only plan role.
   `github_org` and `github_repos` must be literal names, because a wildcard there
   (`landing-zone*`) would match `...:environment:plan` past every claim check.
   `github_repos` and `allowed_subject_claims` are both validated non-empty,
@@ -65,36 +66,94 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `workload-development` leaf trusts `environment:development` and
   `environment:e2e` only), so a job in a less-protected environment cannot reach
   another account's deploy role.
-- **Information disclosure** — the read-only plan role. It trusts
-  `environment:plan` (the `plan_allowed_subject_claims` default), which ci.yml's
-  PR plan job declares from any branch, including a same-repository pull
-  request's, and it carries account-wide `ReadOnlyAccess`: every S3 object,
-  state files included, and every DynamoDB item in the account. The
-  `workload-development` leaf ships that today. Residual, and **required before
-  any `staging` or `production` plan-role leaf exists** (drift.yml needs one per
-  account; see [operations.md](operations.md#required-before-any-staging-or-production-plan-role)):
-  (a) such a role must not trust `environment:plan` as-is. The recommended
-  design, pending the owner's decision, is a separate exact `environment:drift`
-  claim on a `drift` environment whose deployment-branch policy admits `main`
-  only, declared by drift.yml, or else a read policy narrower than
-  `ReadOnlyAccess`. (b) `plan_allowed_subject_claims` refuses only a bare `*`;
-  it must carry the exact-environment allowlist `allowed_subject_claims` has
-  (`^environment:[^*?]+$`), proven by a `tofu test` case, before those leaves
-  exist. Neither is implemented.
-- **Information disclosure** — account ids in drift issues. drift.yml files
-  plan output into issues on a public repository, and each leaf's output can
-  name its account (the state bucket, role ARNs). Mitigated:
+- **Information disclosure** — the read-only plan role. It carries account-wide
+  `ReadOnlyAccess`: every S3 object, state files included, and every DynamoDB
+  item in the account. Mitigated by tying its trust to the ACCOUNT, which is the
+  boundary that matters: the role is account-global and one state bucket holds
+  every environment's state, so a leaf's environment directory decides nothing.
+  `live/_envcommon/aws/github-oidc.hcl` reads every `env.hcl` under the account
+  directory and passes the set as `account_environments` (required, validated
+  against the env.hcl vocabulary, and required to contain the leaf's own
+  `environment`, which is validated the same way). In an account holding
+  `development` alone the plan role trusts `environment:plan` (the
+  `plan_allowed_subject_claims` default), which ci.yml's PR plan job declares
+  from any branch, including a same-repository pull request's; that is accepted
+  for the development account alone. In an account holding `staging` or
+  `production` it trusts exactly `environment:drift`, whichever environment
+  directory its leaf sits in (`network` and `backup` hold development
+  directories beside their production ones): drift.yml declares that
+  environment, and its deployment-branch policy admits `main` only, so no pull
+  request and no other branch reaches a staging or production account's data.
+  There `github_repos` must also be exactly `["landing-zone"]`, because the
+  role renders `environment:drift` for every listed repository and only
+  landing-zone's `drift` environment carries the branch policy; in another
+  repository any branch could create that environment unprotected. An account
+  holding neither (management, fleet, shared-services) is refused a plan role.
+  The component enforces all of this rather than documenting it:
+  `plan_allowed_subject_claims` is an exact-environment allowlist (every entry
+  matching `^environment:[^*?]+$`, so no wildcard, `pull_request` or `ref:`
+  claim), `environment:plan` is refused in any letter case outside a
+  development-only account, and `environment:drift` outside an account holding
+  `staging` or `production`. `tofu test` cases in
+  `components/aws/github-oidc/tests/` prove each arm, including a leaf in the
+  development directory of an account that also holds production. Residual:
+  the control is the `drift` environment's branch policy, which lives in
+  repository settings, and a branch policy admits by ref. It must exist,
+  admitting `main` only, before drift.yml names it, because a workflow naming a
+  missing environment creates it unprotected (see
+  [operations.md](operations.md#required-before-any-staging-or-production-plan-role)).
+  The same holds later: if the environment is ever deleted or renamed, the next
+  workflow on any branch that names it recreates it unprotected, and nothing in
+  the workflows can see that (reading an environment's branch policy needs a
+  token the workflows do not hold). A workflow on `main` that names
+  `environment: drift` passes the policy whoever triggered it, which
+  `pull_request_target`, `workflow_run` and `issue_comment` triggers would make
+  reachable from a pull request or a comment; `scripts/check-drift-workflow.py`
+  refuses the `drift` environment in any workflow but drift.yml, named
+  literally or computed (an expression is accepted only as a
+  `workflow_dispatch` choice input whose options exclude drift, because
+  `${{ github.event.pull_request.head.ref }}` is `drift` for a branch of that
+  name), and any drift.yml trigger other than `schedule` and
+  `workflow_dispatch`, so that path needs a pull request that fails CI.
+- **Information disclosure** — account ids in drift logs and issues. drift.yml
+  holds one plan role ARN per account, each carrying a real account id, and the
+  plan output it publishes can name its account (the state bucket, role ARNs).
+  Mitigated in the logs: the role map is `DRIFT_PLAN_ROLE_ARNS`, a secret on the
+  `drift` environment, so the runner prints it as `***` wherever it appears
+  whole, and every job that reads it runs `scripts/mask-aws-ids.sh` (the mask
+  script every workflow uses) on `DRIFT_PLAN_ROLE_ARNS` as the first command
+  of the first step that receives it,
+  registering every twelve-digit window and every IAM ARN in it with
+  `::add-mask::`. From that line
+  on nothing the job prints carries one: not the role step's output, not the
+  credential step's `role-to-assume` input, not any later step's env block, and
+  not the raw plan output. No job output carries a role value (the runner drops
+  a job output containing a masked value, so each `Drift Check` job reads its
+  role from the secret itself). `refuse-inherited-config` fails the run if
+  `DRIFT_PLAN_ROLE_ARNS` exists as a repository or organization secret or
+  variable: a variable is not masked, and a broader secret is readable by every
+  workflow and is what the drift jobs would fall back to. Mitigated in the
+  issues, which the runner's masking never reaches:
   `scripts/redact-account-ids.py` replaces every id in `DRIFT_PLAN_ROLE_ARNS`
   and every other standalone twelve-digit run before an issue step reads the
   output, and the issue step applies the same rules to the title and body.
-  Residual, accepted: the workflow's job logs, public on this repository, are
-  not redacted. Repository variables are not masked and the runner prints each
-  step's env block, so `select-accounts`' log carries the whole
-  `DRIFT_PLAN_ROLE_ARNS` value, every `Drift Check` job's log carries the full
-  id list it redacts with, and each job's credential step inputs and raw plan
-  output carry its own account's id. Every id in the variable is therefore
-  readable by anyone who can read the Actions logs; the redaction keeps it out
-  of the issues.
+  The masking script carries a self-test (synthetic ids) that runs on every
+  pull request, and `scripts/check-workflow-id-masking.py` fails a drift.yml in
+  which a job reads the secret before the step that masks it, as it does for
+  every workflow.
+  Residual: masking is by value. An account id that is not in the secret (a
+  cross-account reference in plan output) prints in the job log; the issue
+  redaction's standalone-twelve-digit pass still removes it from the issue. A
+  secret stored across several lines would have each line masked separately,
+  so the masking script refuses one and the docs require single-line JSON. With
+  step debug logging on, the runner traces each expression's value: a secret is
+  masked there, a variable is not, so a debug run would print a
+  `DRIFT_PLAN_ROLE_ARNS` variable left at repository level (in
+  `refuse-inherited-config`) or on the drift environment (in
+  `select-accounts`, which refuses one there); the old variable must be
+  deleted, and drift.yml never run with debug logging while
+  one exists. The other workflows' ids are held the same way; see
+  "account ids and role ARNs in the Actions logs" below.
 - **Spoofing** — a workflow assuming the ECR Public pull role. Accepted within a
   bound: this role alone trusts `pull_request`
   (`repo:<org>/<repo>:pull_request` and `repo:<org>/<repo>:ref:refs/heads/main`
@@ -114,7 +173,7 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   ARN a workflow reads is a secret on the GitHub Environment its job declares
   (`DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` on `development`, `staging` and
   `production`; `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` on `plan`;
-  `E2E_AWS_ROLE_ARN` on `e2e`), which the runner masks whole from the job's
+  `E2E_AWS_ROLE_ARN` on `e2e`; `DRIFT_PLAN_ROLE_ARNS` on `drift`), which the runner masks whole from the job's
   first line; and the first step in each job that receives one runs
   `scripts/mask-aws-ids.sh` as its first command, registering every
   twelve-digit window of every digit run and every IAM ARN in it, so the
@@ -145,15 +204,11 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   same-repository branch can edit it as freely as it can edit the workflow,
   which is why the `plan` environment's reviewers, not the script, are the
   control on what a pull request does with the plan role. Fork pull requests
-  receive no secrets. (d) drift.yml reads `DRIFT_PLAN_ROLE_ARNS` from a
-  repository variable until the drift-environment change moves it to a secret
-  on a main-only `drift` environment, masked by a drift-specific mask script;
-  the id-masking gate exempts drift.yml only while it is byte-identical to the
-  file that change replaces. Once it lands, drift is folded onto the shared
-  script (`mask-aws-ids.sh DRIFT_PLAN_ROLE_ARNS` is the drop-in replacement),
-  the drift-specific script and the exemption are deleted, and the mask-first
-  rule for the role map moves from that change's drift-workflow gate to the
-  id-masking gate alone. (e) e2e.yml's target is whatever account its role
+  receive no secrets. (d) drift.yml's `DRIFT_PLAN_ROLE_ARNS` is a secret
+  on the `drift` environment, and what keeps the staging and production plan
+  roles it names off other branches is that environment's main-only
+  deployment-branch policy, which no workflow can read: the environment must
+  exist, protected, before drift.yml names it (see the drift entry above). (e) e2e.yml's target is whatever account its role
   lives in: the account id is the role ARN's own account segment, so nothing
   independent ties the run to the `account_dir` input, and e2e.sh's
   `sts get-caller-identity` comparison only confirms the credential is the
