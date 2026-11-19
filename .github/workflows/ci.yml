@@ -52,7 +52,8 @@ jobs:
   # <root>/<cloud>/<component>/ directory across components/, fleet/, and
   # modules/ (the vend roots and shared modules validate alongside the
   # components); the plan matrix lists every
-  # live/<cloud>/<account>/<region>/<env>/<component>/terragrunt.hcl. Both
+  # live/<cloud>/workload-development/<region>/<env>/<component>/terragrunt.hcl
+  # (why only that account is said where it is filtered, below). Both
   # use `git ls-files` so .terraform/, .terragrunt-cache/, and other
   # gitignored paths are excluded by construction.
   discover:
@@ -92,6 +93,31 @@ jobs:
                 | map({root: .[0], cloud: .[1], component: .[2]})
               '
           )
+          # The plan matrix is the workload-development account's leaves and no
+          # others. The plan job assumes ONE credential, the AWS_ROLE_ARN secret
+          # on the `plan` environment, with ONE TERRAGRUNT_ACCOUNT_ID beside it,
+          # and that role can only be the development account's: github-oidc
+          # accepts environment:plan in a plan role's trust only in an account
+          # holding `development` and nothing else. root.hcl assumes no role, so
+          # every leaf plans with that credential and resolves its backend and
+          # provider from that one account id. A staging, production, hub, org,
+          # network, backup or shared-services leaf planned here would plan
+          # against the development account — a create-everything plan fed by
+          # mocks where its dependencies have no state, or a failure — which
+          # reports nothing true about the leaf it names. Staging and
+          # production leaves, in every account, are planned by drift.yml with
+          # each account's own plan role. deploy.yml plans and applies only
+          # live/aws/workload-<env>/ leaves. The hub, org and shared leaves,
+          # and the backup and network development leaves, are run locally
+          # with their own account's credentials (docs/operations.md); no
+          # workflow plans them.
+          #
+          # The filter is on the ACCOUNT, not the env directory: backup,
+          # network and reference-adopt each hold a `development` directory of
+          # their own, and none of them is the account the plan role is in.
+          # reference-adopt is render-only documentation in any case (its
+          # cross-account dependencies have no state anywhere); the evaluate
+          # job renders it with every other leaf.
           plan=$(
             git ls-files live/ \
             | grep '/terragrunt\.hcl$' \
@@ -106,6 +132,7 @@ jobs:
                     env: .[4],
                     component: .[5]
                   })
+                | map(select(.account == "workload-development"))
               '
           )
           # Every value here becomes a matrix entry, and matrix entries reach
@@ -447,8 +474,8 @@ jobs:
   # outside its own account directory. A terragrunt `dependency` is resolved while the
   # config is PARSED, so an unapplied cross-account dependency fails `init` — not just
   # `apply` — and no TF_VAR can bypass it. Neither of the other terragrunt gates can
-  # see that: evaluate renders against mocks by design, and plan green-skips whenever
-  # AWS_ROLE_ARN is unset. So this is the only thing standing between a well-reviewed
+  # see that: evaluate renders against mocks by design, and plan covers only
+  # workload-development and green-skips whenever AWS_ROLE_ARN is unset. So this is the only thing standing between a well-reviewed
   # change and an un-installable default environment. Cross-account worked examples
   # live outside workload-*, in live/aws/reference-adopt/.
   account-local-deps:

@@ -11,7 +11,7 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 1. **Branch** -- create a feature branch from `main`
 2. **Validate locally** -- `task check` (formatting, validation, lint, the `tofu test` suites, and every gate CI runs)
 3. **Plan against development** -- `task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=<name>`
-4. **Open a PR** -- CI runs fmt, validate (per-component matrix), tflint, checkov, and the plan matrix
+4. **Open a PR** -- CI runs fmt, validate (per-component matrix), tflint, checkov, and the plan matrix (`workload-development` leaves only)
 5. **Review** -- get approval, verify plan output in CI
 6. **Merge** -- deploy via `deploy.yml` workflow dispatch
 
@@ -75,7 +75,7 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 10. Run `task check` — formatting, validation, lint, the `tofu test` suites, and
     every gate under `scripts/`. This is the sequence CI runs.
 
-11. CI auto-discovers the new component from the tree (`git ls-files`) -- the validate, test and plan matrix entries materialize on the next PR with no workflow edit.
+11. CI auto-discovers the new component from the tree (`git ls-files`) -- the validate, test and (for a `workload-development` leaf) plan matrix entries materialize on the next PR with no workflow edit.
 
 ## Adding a Multi-Tenant Component
 

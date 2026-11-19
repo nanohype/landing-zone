@@ -133,7 +133,7 @@ Five GitHub Actions workflows, all authenticating via AWS OIDC with no long-live
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR / push | placeholders, fmt, validate, tofu test, tflint, checkov, terragrunt evaluate, mock-outputs + smoke-outputs cross-checks, plan (per-component matrix) |
+| `ci.yml` | PR / push | placeholders, fmt, validate, tofu test, tflint, checkov, terragrunt evaluate, mock-outputs + smoke-outputs cross-checks, plan (per-leaf matrix, `workload-development` only) |
 | `deploy.yml` | Manual | Plan or apply with account/region/env/component inputs |
 | `destroy.yml` | Manual | Development/staging only, requires confirmation |
 | `drift.yml` | Scheduled | Weekday production + staging drift detection, creates GitHub issues |

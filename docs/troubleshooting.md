@@ -174,9 +174,9 @@ If you are migrating state to a new bucket, use `terragrunt init -migrate-state`
 
 **Symptom:** A new component is not being validated or planned in CI.
 
-**Cause:** The `ci.yml` validate and plan matrices are auto-discovered from the tree with `git ls-files` — nothing is hand-listed in the workflow. A component that CI never runs is almost always untracked.
+**Cause:** The `ci.yml` validate and plan matrices are auto-discovered from the tree with `git ls-files` — nothing is hand-listed in the workflow. A component that CI never runs is almost always untracked. The plan matrix holds only `live/aws/workload-development/` leaves, by design: the plan job's one credential is the development account's plan role, so a leaf in another account (staging, production, hub, org, network, backup, shared-services, reference-adopt) never gets a `Plan (…)` entry. Those are rendered by the evaluate job, and staging and production are planned by `drift.yml`.
 
 **Fix:**
 1. `git add` the component (`components/aws/<name>/`) and each live leaf (`live/aws/<account>/<region>/<env>/<name>/terragrunt.hcl`) — discovery only sees tracked files.
-2. Confirm the paths match the discovery shape: `components/<root>/<cloud>/<component>/` for validate, `live/<cloud>/<account>/<region>/<env>/<component>/terragrunt.hcl` for plan.
-3. Push — the `Validate (…)` and `Plan (…)` matrix entries materialize on the next run. No workflow edit is needed; `deploy.yml`/`destroy.yml` take the component as a free-form input, so there is no allowlist to update either.
+2. Confirm the paths match the discovery shape: `components/<root>/<cloud>/<component>/` for validate, `live/<cloud>/workload-development/<region>/<env>/<component>/terragrunt.hcl` for plan.
+3. Push — the `Validate (…)` and, for a `workload-development` leaf, `Plan (…)` matrix entries materialize on the next run. No workflow edit is needed; `deploy.yml`/`destroy.yml` take the component as a free-form input, so there is no allowlist to update either.
