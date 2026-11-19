@@ -281,16 +281,19 @@ jobs:
         # No one is at the keyboard, so both paths run non-interactively.
         # --non-interactive answers terragrunt's own prompts (it is the
         # terragrunt 1.x spelling, TG_NON_INTERACTIVE as an env var). It does not
-        # answer tofu's: `run --all` appends -auto-approve to apply on its own,
-        # but a single unit passes the tofu command through as written, so tofu
-        # apply stops at its "Enter a value:" confirmation with nothing to
-        # answer it: with stdin closed it fails ("error asking for approval:
-        # EOF"), with stdin held open it waits out the job timeout, and either
-        # way nothing is applied.
+        # answer tofu's: `run --all` appends -input=false to every tofu command
+        # and -auto-approve to apply on its own, but a single unit passes the
+        # tofu command through as written, so tofu apply stops at its "Enter a
+        # value:" confirmation with nothing to answer it: with stdin closed it
+        # fails ("error asking for approval: EOF"), with stdin held open it
+        # waits out the job timeout, and either way nothing is applied.
         # The single-component path therefore passes -auto-approve, and only for
-        # apply: plan has no confirmation to skip. A human still decides before
-        # anything changes: the environment's protection rules hold the job
-        # before it starts (production requires approval), as on the all path.
+        # apply: plan has no confirmation to skip. It does not pass -input=false,
+        # so the two paths still differ there: a single unit missing a required
+        # variable can still reach tofu's input prompt, where the all path fails
+        # fast. A human still decides before anything changes: the
+        # environment's protection rules hold the job before it starts
+        # (production requires approval), as on the all path.
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
