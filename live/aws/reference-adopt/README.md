@@ -37,10 +37,6 @@ now encodes the rule that was previously only a convention: a leaf under
 `live/aws/workload-*/` may not depend on a unit outside its own account directory.
 This tree is not `workload-*`, so the example keeps working.
 
-Nor is it planned. ci.yml's PR plan matrix holds `workload-development` leaves only,
-because its one credential is the development account's plan role; this tree is
-rendered by the evaluate job with every other leaf, and never applied.
-
 ## Standing it up for real
 
 The owner side has to exist first, and today it does not — end to end:

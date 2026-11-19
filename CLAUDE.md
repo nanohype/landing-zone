@@ -97,7 +97,7 @@ live/
 
 ## CI/CD
 
-- `ci.yml` — PRs: placeholders gate, fmt, validate (per-component matrix), tofu test, tflint, checkov, terragrunt evaluate (live-leaf render), mock-outputs cross-check, smoke-outputs cross-check, plan matrix (`workload-development` leaves only — the one account its plan role reaches)
+- `ci.yml` — PRs: placeholders gate, fmt, validate (per-component matrix), tofu test, tflint, checkov, terragrunt evaluate (live-leaf render), mock-outputs cross-check, smoke-outputs cross-check, plan matrix
 - `deploy.yml` — manual dispatch: account/region/environment/component, plan or apply
 - `destroy.yml` — manual dispatch: development/staging only, requires confirmation string
 - `drift.yml` — scheduled weekday drift detection on production + staging (matrix auto-discovered), creates GitHub issues
