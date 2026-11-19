@@ -5,10 +5,14 @@
 # billable AWS. scripts/e2e.sh always tears down (EXIT trap), so a failed run
 # does not leave billing on.
 #
-# Requires:
-#   vars.E2E_AWS_ROLE_ARN   — an OIDC role in the target account with rights to
+# Requires, on the `e2e` GitHub Environment:
+#   secrets.E2E_AWS_ROLE_ARN — an OIDC role in the target account with rights to
 #                             provision/destroy the substrate + IAM (the operator
 #                             installs via GitOps from ghcr, so no ECR needed).
+#                             A secret, not a variable: the repository is public,
+#                             and a variable is printed unmasked in the env block
+#                             of every step that reads it. The target account is
+#                             this role's account; there is no account input.
 #   secrets.E2E_GITHUB_TOKEN — a token (PAT or App) with read on
 #                             eks-agent-platform + cloudgov and write on the
 #                             tenants repo (deploy-key admin + push).
@@ -17,9 +21,6 @@ name: e2e (manual)
 on:
   workflow_dispatch:
     inputs:
-      account_id:
-        description: "Target AWS account ID (12 digits)"
-        required: true
       region:
         description: "Region"
         default: "us-east-1"
@@ -62,6 +63,55 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      # The first step that receives E2E_AWS_ROLE_ARN, and its first command masks
+      # it. The runner masks the secret's value whole (its env block prints
+      # `***`), but not the account id inside it, which e2e.sh prints, names the
+      # state bucket and the S3 buckets after, and which every terragrunt error
+      # and AWS AccessDenied repeats. scripts/mask-aws-ids.sh registers the id and
+      # the ARN with ::add-mask:: before anything else in this job can print, so
+      # from here on the log shows `***` in their place. Masks are per job.
+      #
+      # The target account is the role's own: the ARN's account segment, handed
+      # to e2e.sh as E2E_ACCOUNT_ID through a step output (which stays inside the
+      # job and prints as `***`; the runner would drop a JOB output carrying a
+      # masked value). It used to be a dispatch input, which no step can mask
+      # before it is printed: an input is typed into the dispatch form, kept in
+      # the run's event payload, and printed in the env block of the first step
+      # that reads it. e2e.sh still checks the assumed credential's account
+      # (sts get-caller-identity) against it before it touches anything.
+      #
+      # It also fails when E2E_AWS_ROLE_ARN is still a VARIABLE at any level the
+      # e2e environment resolves (the environment, the repository, the
+      # organization): only `true` or `false` reaches the step. With step debug
+      # logging on, the runner traces the value it reads for that variable before
+      # the comparison, unmasked, so never run this workflow with debug logging
+      # while the old variable exists.
+      - name: Mask and check E2E_AWS_ROLE_ARN
+        id: role
+        env:
+          E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}
+          ROLE_ARN_VARIABLE: ${{ vars.E2E_AWS_ROLE_ARN != '' }}
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional E2E_AWS_ROLE_ARN
+          failed=0
+          if [ "$ROLE_ARN_VARIABLE" != "false" ]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is still a variable::E2E_AWS_ROLE_ARN is set as a variable on the e2e environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it (gh variable delete E2E_AWS_ROLE_ARN --env e2e --repo <owner>/<repo>, or without --env for a repository variable); it is a secret on the e2e environment now (see docs/first-deploy-aws.md)."
+            failed=1
+          fi
+          if [ -z "$E2E_AWS_ROLE_ARN" ]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is not set::The e2e environment has no E2E_AWS_ROLE_ARN secret (Settings > Environments > e2e > Environment secrets). Set it to the github-oidc deploy role in the target account (see docs/first-deploy-aws.md)."
+            failed=1
+          elif ! [[ "$E2E_AWS_ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/.+$ ]]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is not a role ARN::The e2e environment's E2E_AWS_ROLE_ARN is not an IAM role ARN (arn:aws:iam::<account>:role/<name>)."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "account_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "E2E_AWS_ROLE_ARN is an environment secret naming a role; its account is the e2e target."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: nanohype/eks-agent-platform
@@ -107,8 +157,11 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
-          role-to-assume: ${{ vars.E2E_AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.E2E_AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
+          # Already masked by the step above; stated so the action's own handling
+          # of the account id it reads back cannot be the one place it is not.
+          mask-aws-account-id: true
 
       # Let the tenants-repo clone/push (and the bootstrap deploy key) use the
       # token over https, transparently rewriting the SSH URL.
@@ -118,7 +171,7 @@ jobs:
 
       - name: run e2e (provision → tenant → validate → teardown)
         env:
-          E2E_ACCOUNT_ID: ${{ inputs.account_id }}
+          E2E_ACCOUNT_ID: ${{ steps.role.outputs.account_id }}
           E2E_REGION: ${{ inputs.region }}
           E2E_ENV: ${{ inputs.environment }}
           E2E_ACCOUNT_DIR: ${{ inputs.account_dir }}

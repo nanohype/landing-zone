@@ -48,37 +48,64 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # vars.X resolves from the job's environment first, then the repository, then
-  # the organization. This job declares no environment, so it sees only the
-  # repository and organization values. DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID
-  # must exist on GitHub Environments alone: set at either broader level, an
-  # environment that never got its own values would inherit them and deploy with
-  # another environment's role and account id. Failing here also costs no
-  # environment approval.
+  # secrets.X and vars.X resolve from the job's environment first, then the
+  # repository, then the organization. This job declares no environment, so it
+  # sees only the repository and organization values. DEPLOY_ROLE_ARN and
+  # DEPLOY_ACCOUNT_ID must exist on GitHub Environments alone, as secrets:
+  #   - a repository or organization SECRET of either name is what an
+  #     environment that never got its own would inherit, so it would deploy
+  #     with another environment's role and account id; and it is readable by
+  #     every workflow in the repository, not only by jobs an environment admits.
+  #   - a repository or organization VARIABLE of either name is how these used
+  #     to be stored, and a variable is never masked: the runner prints it in the
+  #     env block of every step that reads it, on this public repository.
+  # Only whether each is set reaches the step, as `true` or `false`, so in a
+  # normal run this job prints none of the values even when one is set. With
+  # step debug logging on (a re-run with debug logging, or ACTIONS_STEP_DEBUG),
+  # the runner traces how it evaluates each expression, including the value it
+  # reads for each variable below, before the comparison. A secret is masked
+  # there (`***`); a variable is not, so a debug run while an old variable still
+  # exists prints its account id. The GITHUB_TOKEN cannot read repository
+  # variables, so no other check is available: delete the old variables, and
+  # never run this workflow with debug logging while one exists. Failing here
+  # costs no environment approval. The deploy job repeats the variable check in
+  # its environment, which also sees a variable left on the environment itself.
   refuse-inherited-config:
-    name: Refuse repository-level DEPLOY_* variables
+    name: Refuse repository-level DEPLOY_* secrets and any DEPLOY_* variable
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
     steps:
-      - name: Require DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID to be environment-only
+      - name: Require DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID to be environment secrets only
+        # secrets-outside-env is this job's purpose, not a leak: reading the
+        # secrets with no environment is the only way to see whether a
+        # repository- or organization-level one exists (listing secrets needs an
+        # admin token), and only each comparison's true/false reaches the step.
         env:
-          INHERITED_ROLE_ARN: ${{ vars.DEPLOY_ROLE_ARN }}
-          INHERITED_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
+          INHERITED_ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN != '' }} # zizmor: ignore[secrets-outside-env]
+          INHERITED_ACCOUNT_ID_SECRET: ${{ secrets.DEPLOY_ACCOUNT_ID != '' }} # zizmor: ignore[secrets-outside-env]
+          ROLE_ARN_VARIABLE: ${{ vars.DEPLOY_ROLE_ARN != '' }}
+          ACCOUNT_ID_VARIABLE: ${{ vars.DEPLOY_ACCOUNT_ID != '' }}
         run: |
           failed=0
-          if [ -n "$INHERITED_ROLE_ARN" ]; then
-            echo "::error title=DEPLOY_ROLE_ARN is set outside an environment::DEPLOY_ROLE_ARN is set as a repository or organization variable, so every GitHub Environment without its own would inherit it. Remove it there and set it on each of the development, staging and production environments instead (see docs/operations.md)."
-            failed=1
-          fi
-          if [ -n "$INHERITED_ACCOUNT_ID" ]; then
-            echo "::error title=DEPLOY_ACCOUNT_ID is set outside an environment::DEPLOY_ACCOUNT_ID is set as a repository or organization variable, so every GitHub Environment without its own would inherit it. Remove it there and set it on each of the development, staging and production environments instead (see docs/operations.md)."
-            failed=1
-          fi
+          for name in DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID; do
+            case "$name" in
+              DEPLOY_ROLE_ARN) secret="$INHERITED_ROLE_ARN_SECRET" variable="$ROLE_ARN_VARIABLE" ;;
+              DEPLOY_ACCOUNT_ID) secret="$INHERITED_ACCOUNT_ID_SECRET" variable="$ACCOUNT_ID_VARIABLE" ;;
+            esac
+            if [ "$secret" != "false" ]; then
+              echo "::error title=${name} is a repository or organization secret::${name} is set as a repository or organization secret, which every GitHub Environment without its own would inherit and every workflow in the repository can read. Delete it there (gh secret delete ${name} --repo <owner>/<repo>) and set it on each of the development, staging and production environments instead (see docs/operations.md)."
+              failed=1
+            fi
+            if [ "$variable" != "false" ]; then
+              echo "::error title=${name} is a repository or organization variable::${name} is set as a repository or organization variable. Variables are never masked, so its value would reach the public Actions logs. Delete it (gh variable delete ${name} --repo <owner>/<repo>); it is a secret on each environment now (see docs/operations.md)."
+              failed=1
+            fi
+          done
           if [ "$failed" -ne 0 ]; then
             exit 1
           fi
-          echo "DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID are not set at repository or organization level."
+          echo "DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID are set at neither repository nor organization level, as a secret or as a variable."
 
   deploy:
     permissions:
@@ -102,15 +129,33 @@ jobs:
       # for a local checkout and never right here: a run against the placeholder
       # bucket dies at backend init, after the environment approval was spent.
       #
-      # The role and account id come from DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID on
-      # the GitHub Environment this job declares, so each of development, staging and production
-      # names its own account. They are deliberately not AWS_ROLE_ARN and
-      # TERRAGRUNT_ACCOUNT_ID: those exist as repository variables for ci.yml's plan
-      # job, and an environment without its own value would silently inherit the
-      # plan role and the repository's account id. refuse-inherited-config keeps
-      # the DEPLOY_* names off the repository and organization, so here an empty
-      # value really means this environment is not configured, and the run stops
-      # before any credential is issued.
+      # The role and account id come from the DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID
+      # secrets on the GitHub Environment this job declares, so each of development,
+      # staging and production names its own account. They are deliberately not
+      # AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID, ci.yml's plan-job pair: a name shared
+      # with the plan role invites setting it once at repository level, where an
+      # environment without its own value would silently inherit the plan role and
+      # that account's id. refuse-inherited-config keeps the DEPLOY_* names off the
+      # repository and organization, so here an empty value really means this
+      # environment is not configured, and the run stops before any credential is
+      # issued.
+      #
+      # This is the first step that receives either secret, and its first command
+      # masks them: the runner masks a secret's value whole (its env block below
+      # prints `***`), but not the account id inside the role ARN, nor the id in
+      # the state bucket name a terragrunt error prints. scripts/mask-aws-ids.sh
+      # registers every account id and ARN in both with ::add-mask:: before
+      # anything else in this job can print, so this step's output, the
+      # credentials step's role-to-assume input, the env blocks below and the
+      # terragrunt output all show `***` in their place. Later steps read the
+      # secrets again from the secrets context rather than from this step,
+      # because they are already masked there. --optional, because this step
+      # reports a missing value itself, naming the environment it belongs on.
+      #
+      # It also fails when either name is still a VARIABLE, at any level this
+      # environment resolves (the environment, the repository, the
+      # organization): only `true` or `false` reaches the step. The debug-logging
+      # residual is the one refuse-inherited-config documents.
       #
       # One environment therefore names one account: the workload-<environment>
       # account. Other account directories also hold development/staging/production
@@ -124,23 +169,34 @@ jobs:
       # Dispatch inputs reach the shell through env, not ${{ }} in the script.
       - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
         env:
-          DEPLOY_ROLE_ARN: ${{ vars.DEPLOY_ROLE_ARN }}
-          DEPLOY_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
+          DEPLOY_ROLE_ARN: ${{ secrets.DEPLOY_ROLE_ARN }}
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          ROLE_ARN_VARIABLE: ${{ vars.DEPLOY_ROLE_ARN != '' }}
+          ACCOUNT_ID_VARIABLE: ${{ vars.DEPLOY_ACCOUNT_ID != '' }}
           TARGET_ENV: ${{ inputs.environment }}
           ACCOUNT: ${{ inputs.account }}
           REGION: ${{ inputs.region }}
           COMPONENT: ${{ inputs.component }}
         run: |
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID
           failed=0
+          if [ "$ROLE_ARN_VARIABLE" != "false" ]; then
+            echo "::error title=DEPLOY_ROLE_ARN is still a variable::DEPLOY_ROLE_ARN is set as a variable on the ${TARGET_ENV} environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it (gh variable delete DEPLOY_ROLE_ARN --env ${TARGET_ENV} --repo <owner>/<repo>); it is a secret on the environment now (see docs/operations.md)."
+            failed=1
+          fi
+          if [ "$ACCOUNT_ID_VARIABLE" != "false" ]; then
+            echo "::error title=DEPLOY_ACCOUNT_ID is still a variable::DEPLOY_ACCOUNT_ID is set as a variable on the ${TARGET_ENV} environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it (gh variable delete DEPLOY_ACCOUNT_ID --env ${TARGET_ENV} --repo <owner>/<repo>); it is a secret on the environment now (see docs/operations.md)."
+            failed=1
+          fi
           if [ -z "$DEPLOY_ACCOUNT_ID" ]; then
-            echo "::error title=DEPLOY_ACCOUNT_ID is not set::The ${TARGET_ENV} environment has no DEPLOY_ACCOUNT_ID variable (Settings > Environments > ${TARGET_ENV} > Environment variables), so root.hcl would name the state bucket after the tracked account.hcl placeholder. Set it to the 12-digit id of the workload-${TARGET_ENV} account (see docs/operations.md)."
+            echo "::error title=DEPLOY_ACCOUNT_ID is not set::The ${TARGET_ENV} environment has no DEPLOY_ACCOUNT_ID secret (Settings > Environments > ${TARGET_ENV} > Environment secrets), so root.hcl would name the state bucket after the tracked account.hcl placeholder. Set it to the 12-digit id of the workload-${TARGET_ENV} account (see docs/operations.md)."
             failed=1
           elif ! [[ "$DEPLOY_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
             echo "::error title=DEPLOY_ACCOUNT_ID is not an account id::The ${TARGET_ENV} environment's DEPLOY_ACCOUNT_ID is not a 12-digit AWS account id."
             failed=1
           fi
           if [ -z "$DEPLOY_ROLE_ARN" ]; then
-            echo "::error title=DEPLOY_ROLE_ARN is not set::The ${TARGET_ENV} environment has no DEPLOY_ROLE_ARN variable (Settings > Environments > ${TARGET_ENV} > Environment variables). Set it to the github-oidc deploy role in the workload-${TARGET_ENV} account (see docs/operations.md)."
+            echo "::error title=DEPLOY_ROLE_ARN is not set::The ${TARGET_ENV} environment has no DEPLOY_ROLE_ARN secret (Settings > Environments > ${TARGET_ENV} > Environment secrets). Set it to the github-oidc deploy role in the workload-${TARGET_ENV} account (see docs/operations.md)."
             failed=1
           elif ! [[ "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/.+$ ]]; then
             echo "::error title=DEPLOY_ROLE_ARN is not a role ARN::The ${TARGET_ENV} environment's DEPLOY_ROLE_ARN is not an IAM role ARN (arn:aws:iam::<account>:role/<name>)."
@@ -178,8 +234,12 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
-          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
+          # Already masked by the guard step; stated so the action's own
+          # handling of the account id it reads back cannot be the one place it
+          # is not.
+          mask-aws-account-id: true
 
       # DEPLOY_ACCOUNT_ID, passed to terragrunt as TERRAGRUNT_ACCOUNT_ID, names the
       # state bucket and the role decides where the provider acts; root.hcl
@@ -191,13 +251,12 @@ jobs:
       # account's state against the other account's resources, and an apply
       # builds a second copy of the stack in the role's account.
       #
-      # The error text names no account id, but the log does not keep ids private:
-      # the runner prints each step's env block, Variables are not masked, and
-      # configure-aws-credentials echoes the role ARN. AWS does not treat an
-      # account id as a secret.
+      # The error text names no account id either way, and every id and ARN in
+      # both secrets has been masked since the guard step, so the env block below
+      # and the STS answer print as `***`.
       - name: Verify the credential is in DEPLOY_ACCOUNT_ID's account
         env:
-          DEPLOY_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           TARGET_ENV: ${{ inputs.environment }}
         run: |
           if ! caller_account=$(aws sts get-caller-identity --query Account --output text); then
@@ -219,7 +278,7 @@ jobs:
         # under the deploy role's AWS credentials. An env var is a value bash reads,
         # not text bash parses.
         env:
-          TERRAGRUNT_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
           ACTION: ${{ inputs.action }}
         run: |

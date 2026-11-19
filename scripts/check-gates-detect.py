@@ -538,6 +538,21 @@ def mutations() -> list[Mutation]:
             marker='"qldb:PartiQLSelect",',
         ),
         Mutation(
+            "check-workflow-id-masking.py",
+            "a workflow reads a role ARN from an unmasked variable",
+            # The real shape this repo shipped: role-to-assume read from
+            # vars., which the runner prints, with the account id inside it,
+            # before any step of the job can mask it.
+            lambda t: _edit(
+                t,
+                ".github/workflows/deploy.yml",
+                "          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}\n",
+                "          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }} # "
+                + token("check-workflow-id-masking.py") + "\n",
+            ),
+            marker=token("check-workflow-id-masking.py"),
+        ),
+        Mutation(
             "no-placeholders.sh",
             "a placeholder sentinel survives into deploy config",
             lambda t: _append(
