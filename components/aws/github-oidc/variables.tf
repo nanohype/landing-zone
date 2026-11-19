@@ -213,16 +213,63 @@ variable "oidc_thumbprints" {
   ]
 }
 
+variable "create_permissions_boundary" {
+  description = <<-EOT
+    Create this component's permissions boundary (permissions_boundary_name) and
+    attach it to the deploy role and the plan role. It allows everything, so the
+    attached managed policies stay the effective grant, and denies what a CI
+    session must never do as itself: change the boundary, the roles a
+    github-oidc leaf creates or the GitHub OIDC provider; strip a boundary from
+    any principal; assume a role or mint an IAM user, password or access key;
+    act on Organizations or account settings; disable CloudTrail, GuardDuty,
+    Config, Security Hub or Access Analyzer. It does not cap the roles the
+    deploy session creates; see the boundary section of main.tf and
+    docs/threat-model.md, section 1. Mutually exclusive with
+    permissions_boundary_arn.
+  EOT
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.create_permissions_boundary || var.permissions_boundary_arn == ""
+    error_message = "Set create_permissions_boundary or permissions_boundary_arn, not both: a role carries one boundary, and both would leave the one this component creates attached to nothing."
+  }
+
+  validation {
+    condition     = !var.create_permissions_boundary || var.create_deploy_role || var.create_plan_role
+    error_message = "create_permissions_boundary needs a role to carry it: set it on the leaf that creates the deploy or plan role (an ECR Public pull leaf, which creates neither, would mint a second boundary nothing carries, under the same name)."
+  }
+}
+
+variable "permissions_boundary_name" {
+  description = "Name of the permissions boundary policy create_permissions_boundary creates, at path \"/\". Customer managed policy names are account-global, so one github-oidc leaf per account creates it."
+  type        = string
+  default     = "github-actions-boundary"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9+=,.@_-]{1,128}$", var.permissions_boundary_name))
+    error_message = "permissions_boundary_name must be a valid IAM policy name: 1 to 128 of letters, digits and +=,.@_-."
+  }
+}
+
 variable "permissions_boundary_arn" {
-  description = "Optional permissions boundary capping the deploy role. Empty = none (recommended to set in sensitive accounts)."
+  description = "An existing permissions boundary to put on the deploy and plan roles instead of the one create_permissions_boundary creates. Empty = none, unless create_permissions_boundary is set."
   type        = string
   default     = ""
 }
 
 variable "managed_policy_arns" {
-  description = "Managed policies to attach to the deploy role. Empty by default — the role is inert until you attach what CI needs (e.g. AdministratorAccess with a permissions boundary, or a scoped set) when adopting the GitHub Actions path. The repo-scoped trust is the primary control."
+  description = "Managed policies to attach to the deploy role. Empty by default — the role is inert until you attach what CI needs when adopting the GitHub Actions path: a scoped set, or AdministratorAccess, which is accepted only under a permissions boundary (create_permissions_boundary or permissions_boundary_arn). The repo-scoped trust is the primary control; the boundary is what holds when that trust is met by a job it should not have been."
   type        = list(string)
   default     = []
+
+  validation {
+    # The `||` stays at the end of each line: checkov's HCL parser cannot read a
+    # line that begins with an operator.
+    condition = (var.create_permissions_boundary || var.permissions_boundary_arn != "" ||
+    alltrue([for a in var.managed_policy_arns : !can(regex("^arn:aws[a-z-]*:iam::aws:policy/AdministratorAccess$", a))]))
+    error_message = "managed_policy_arns may contain AdministratorAccess only under a permissions boundary: set create_permissions_boundary = true (or permissions_boundary_arn). Without one, a job in a trusted environment can rewrite the role's own trust, strip boundaries, assume other roles and mint long-lived keys."
+  }
 }
 
 variable "max_session_duration" {

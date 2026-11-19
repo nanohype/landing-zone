@@ -80,6 +80,21 @@ sequence is the same everywhere and `run --all` resolves it.
 environment, so it carries a single `development` live root and adding siblings would mint the same
 account-level OIDC provider three times.
 
+It is also applied **locally**, with the account's own admin credentials, never by `deploy.yml`. In
+`workload-development` the deploy role carries `AdministratorAccess` under the `github-actions-boundary`
+permissions boundary the component creates, on both the deploy and the plan role, and that boundary
+refuses every write to the boundary itself, to the roles a `github-oidc` leaf creates and to the
+GitHub OIDC provider (plus stripping any boundary, assuming a role, minting IAM users or keys,
+Organizations and account actions, and disabling the audit services; the list and its reasons are in
+[first-deploy-aws.md](first-deploy-aws.md#execution-model-local-default-vs-ci)). A `deploy.yml` run
+with `component=all` reaches the `github-oidc` and `ecr-public-pull` leaves too: applied, they plan
+empty; with a pending change, the run fails there with `AccessDenied`, and the change goes in with:
+
+```bash
+TERRAGRUNT_ACCOUNT_ID=<workload-development account id> AWS_PROFILE=<its admin profile> \
+  task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=github-oidc
+```
+
 The cross-account **network-owner** components (`shared-network`, `egress-network`) and the
 **portal** control plane (`portal-*`) deploy from their own `live/aws/network/` and
 `live/aws/fleet/` trees, not the per-environment workload accounts.
@@ -287,7 +302,7 @@ The account directories that hold `staging` or `production` leaves today (from `
 The OIDC provider and both roles are account-global, so each account gets exactly **one** `github-oidc` leaf; the table names the conventional directory for it. The trust rules follow the **account**, not that directory: `live/_envcommon/aws/github-oidc.hcl` reads every `env.hcl` under the account directory and passes the set as `account_environments`, and the component holds a plan role in any account that holds `staging` or `production` to the rules below even when its leaf sits under `development` (as it would in `network` or `backup`, which hold development directories too). For each account directory above:
 
 0. **Create the account's state backend.** None of these accounts has one yet, and the local apply in step 3 cannot initialise without the `<account_id>-us-east-1-tfstate` bucket. Under that account's credentials, run `task init-backend REGION=us-east-1` (it takes the caller's account id, or `ACCOUNT_ID=<id>`), which runs `scripts/init-backend-aws.sh`.
-1. **Add the leaf** at `live/aws/<account>/us-east-1/<env>/github-oidc/terragrunt.hcl`, modelled on the `workload-development` one, with `github_repos = ["landing-zone"]`, the deploy-role setting from the table, and the plan role left on (`create_plan_role` defaults to true) with `plan_allowed_subject_claims = ["environment:drift"]`. The component refuses anything else in these accounts, whichever environment directory the leaf sits in: the default `["environment:plan"]` is the development trust, and a second repository in `github_repos` would trust that repository's `drift` environment too, which has no branch policy; both fail the plan rather than ship.
+1. **Add the leaf** at `live/aws/<account>/us-east-1/<env>/github-oidc/terragrunt.hcl`, modelled on the `workload-development` one, with `github_repos = ["landing-zone"]`, the deploy-role setting from the table, and the plan role left on (`create_plan_role` defaults to true) with `plan_allowed_subject_claims = ["environment:drift"]`. Do not copy its `managed_policy_arns`: a staging or production deploy role is granted on its own decision, and `AdministratorAccess` is refused there too unless `create_permissions_boundary` (or `permissions_boundary_arn`) is set. The component refuses anything else in these accounts, whichever environment directory the leaf sits in: the default `["environment:plan"]` is the development trust, and a second repository in `github_repos` would trust that repository's `drift` environment too, which has no branch policy; both fail the plan rather than ship.
 2. **Create or reference the OIDC provider.** AWS allows one provider per issuer per account. If the account has none for `token.actions.githubusercontent.com` (check with `aws iam list-open-id-connect-providers` under that account's credentials), leave `create_oidc_provider` at its default `true`; if it already has one, set `create_oidc_provider = false` and the component references it.
 3. **Apply it locally with that account's credentials**, the same way as the `org` components: `TERRAGRUNT_ACCOUNT_ID=<that account's id> AWS_PROFILE=<that account's profile> task apply ACCOUNT=<account> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=github-oidc`. Neither deploy.yml nor drift.yml can apply it: the role it creates is the one they would need.
 4. **Record the plan role, once the account's leaves are applied.** Read it with `terragrunt output -raw plan_role_arn` in the leaf directory, and add it to the `DRIFT_PLAN_ROLE_ARNS` secret on the `drift` environment under the account directory's name (edit the local JSON file and re-run the `gh secret set` command above; a secret cannot be read back) only after that account's `staging` and `production` leaves have been applied. An entry arms every one of the account's leaves at once: a leaf never applied plans as all creates and files a `Drift detected` issue (about twenty for a workload account), and one whose dependencies have no state yet fails and files a `drift-error` issue. The next run after the entry is added plans that account's leaves; until then they are listed as skipped.

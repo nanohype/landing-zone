@@ -8,7 +8,8 @@ include "envcommon" {
 }
 
 # Apply ONCE per account (the OIDC provider is account-global). Run locally with
-# admin/SSO creds when/if the GitHub Actions CI path is adopted. Outputs:
+# admin/SSO creds, never from deploy.yml (see THE DEPLOY ROLE'S PERMISSIONS
+# below). Outputs:
 #   - deploy_role_arn: the DEPLOY_ROLE_ARN secret on the `development` GitHub
 #     Environment (deploy.yml/destroy.yml), and the E2E_AWS_ROLE_ARN secret on
 #     `e2e` for e2e.yml.
@@ -71,10 +72,38 @@ include "envcommon" {
 # driven by the Ventures OU's `guardrail-region-lock`, a different reason that
 # could be repealed.
 
+# THE DEPLOY ROLE'S PERMISSIONS. deploy.yml applies every workload-development
+# leaf, and e2e.yml stands up and tears down the substrate, so the role carries
+# AdministratorAccess: a scoped set would have to track every service a dozen
+# components touch, and fail a deploy each time one grows. What keeps that from
+# being "every development job owns the account's CI trust" is the boundary the
+# component creates (create_permissions_boundary) and puts on BOTH this role and
+# the plan role. It allows everything, so AdministratorAccess and ReadOnlyAccess
+# stay the grants, and denies what a CI session must never do as itself:
+# rewrite the boundary, the github-oidc roles (by ARN, and every role tagged
+# Component = github-oidc, so the ECR Public pull leaf beside this one too) or
+# the GitHub OIDC provider; strip a boundary from anything; assume a role or
+# mint an IAM user, password or access key; act on Organizations or account
+# settings; disable CloudTrail, GuardDuty, Config, Security Hub or Access
+# Analyzer. The component refuses AdministratorAccess without a boundary.
+#
+# It does not cap the roles a deploy creates: those come from a dozen
+# components, most with no boundary input, so a role or a Lambda the session
+# makes runs outside it. See the boundary section of the component's main.tf and
+# docs/threat-model.md, section 1.
+#
+# Consequence for deploy.yml with component=all: its `run --all` reaches this
+# leaf and the ECR Public pull leaf too. Once they have been applied locally
+# their plan is empty and nothing is written; any change they would make is a
+# write the boundary refuses, so they stay a local apply with the account's own
+# admin credentials (docs/operations.md).
+#
 # The account already has the GitHub Actions OIDC provider (AWS allows one per
 # issuer), so this component references it rather than creating a second.
 inputs = {
-  github_repos           = ["landing-zone"]
-  allowed_subject_claims = ["environment:development", "environment:e2e"]
-  create_oidc_provider   = false
+  github_repos                = ["landing-zone"]
+  allowed_subject_claims      = ["environment:development", "environment:e2e"]
+  create_oidc_provider        = false
+  managed_policy_arns         = ["arn:aws:iam::aws:policy/AdministratorAccess"]
+  create_permissions_boundary = true
 }

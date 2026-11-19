@@ -377,9 +377,45 @@ Environments the deploy, destroy and e2e workflows declare
 `repo:nanohype/landing-zone:environment:e2e`; the `workload-development` leaf
 narrows that to `development` and `e2e`), never the `plan` or `drift`
 environment the read-only plan role trusts — and you attach the policies CI needs via the
-component's `managed_policy_arns` (e.g. `AdministratorAccess` with a
-`permissions_boundary_arn`, or a scoped set). Skip this component entirely if you
-only run locally.
+component's `managed_policy_arns`: a scoped set, or `AdministratorAccess`, which
+the component accepts only under a permissions boundary. Skip this component
+entirely if you only run locally.
+
+The `workload-development` leaf does the second: `managed_policy_arns =
+["arn:aws:iam::aws:policy/AdministratorAccess"]` with `create_permissions_boundary
+= true`, which creates the `github-actions-boundary` policy and puts it on both
+the deploy and the plan role. The boundary allows everything, so
+`AdministratorAccess` and `ReadOnlyAccess` stay the effective grants, and denies
+what a CI session must never do as itself:
+
+- change the boundary, the roles a `github-oidc` leaf creates (this leaf's two
+  by ARN, and every role tagged `Component = github-oidc`, the ECR Public pull
+  role included) or the GitHub OIDC provider;
+- strip a permissions boundary from any role or user;
+- assume a role, or create an IAM user, console password, access key or
+  service-specific credential;
+- any `organizations:` or `account:` action;
+- disable CloudTrail, GuardDuty, Config, Security Hub or Access Analyzer (the
+  verbs of `org-scp`'s `DenyDisablingSecurity`, which ships unattached).
+
+It does not require the roles a deploy creates to carry it: a dozen components
+create roles, most with no boundary input, so that rule would fail the first
+deploy. A role or a function the deploy session creates therefore runs outside
+it; section 1 of [threat-model.md](threat-model.md) states the
+residual.
+
+Apply the leaf locally with the account's own admin credentials, not from
+`deploy.yml`:
+
+```bash
+TERRAGRUNT_ACCOUNT_ID=<workload-development account id> AWS_PROFILE=<its admin profile> \
+  task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=github-oidc
+```
+
+The boundary refuses every write to this leaf's own resources, so once it is
+applied a `deploy.yml` run reaching it (`component=all`) has an empty plan
+there, and any change it would make fails with `AccessDenied`. Changing the
+boundary or either role is always a local apply.
 
 Before attaching any policy, give every environment the role trusts a
 deployment-branch policy in the repository settings (main, or protected

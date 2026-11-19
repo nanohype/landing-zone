@@ -157,6 +157,14 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
      contents: read
    ```
 
+## CI Deploy Fails With "explicit deny in a permissions boundary"
+
+**Symptom:** a `deploy.yml`, `destroy.yml` or `e2e.yml` run in `workload-development` assumes the deploy role, then fails with `AccessDenied ... with an explicit deny in a permissions boundary`.
+
+**Cause:** the deploy role carries `AdministratorAccess` under the `github-actions-boundary` policy the `github-oidc` component creates, and the call is one that boundary refuses on purpose: a write to the boundary, to a role a `github-oidc` leaf created (deploy, plan, ECR Public pull) or to the GitHub OIDC provider; stripping a permissions boundary; `sts:AssumeRole`; creating an IAM user, password or access key; an `organizations:` or `account:` action; or disabling CloudTrail, GuardDuty, Config, Security Hub or Access Analyzer. The error names the action and the resource.
+
+**Fix:** none of these is CI work. A pending change to the `github-oidc` or `ecr-public-pull` leaf (a `component=all` run reaches both) goes in with a local apply under the account's own admin credentials ([operations.md](operations.md#deployment-order)); anything else on the list is a change for a person with those credentials, not for the pipeline. Do not widen the boundary to get a run through: the list and why each entry is on it are in the boundary section of `components/aws/github-oidc/main.tf`.
+
 ## "Backend configuration changed"
 
 **Cause:** The S3 backend configuration (bucket name, key, region) has changed since the last `init`.
