@@ -34,9 +34,10 @@ the two cannot drift apart in the direction that matters.
 A claim reaches the permitted set two ways: as a variable's default, or as the
 exact list a validation REQUIRES. The second is how `environment:drift` gets
 there: `plan_allowed_subject_claims` defaults to the development account's
-`environment:plan`, and its validation requires a staging or production leaf to
-set exactly `tolist(["environment:drift"])`. That claim is emitted by every
-staging or production plan role, so the documentation of drift.yml may show it,
+`environment:plan`, and its validation requires a plan role in an account
+holding staging or production to set exactly `tolist(["environment:drift"])`.
+That claim is emitted by every such plan role, so the documentation of drift.yml
+may show it,
 and it is read from the validation rather than listed here, so removing the
 requirement removes the permission.
 

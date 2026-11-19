@@ -37,7 +37,11 @@ resource-tagging standard) and are the identity every resource inherits.
 | `owner` | optional | `"platform-engineering"` | `Owner` (falls back to `cost_center`) |
 
 `environment` must match `^[a-z][a-z0-9-]*$` (enforced by variable validation in
-every component).
+every component). `github-oidc` narrows it to `development`, `staging`,
+`production`, `hub`, `org` or `shared`, because its plan-role trust rules are
+keyed on those names and reads every `env.hcl` in the account to apply them: a
+new environment name needs those rules extended before a `github-oidc` leaf can
+sit in its account.
 
 Route 53 hosted zones are the one exception to "every resource inherits". Route 53's
 `ChangeTagsForResource` accepts at most 10 tags per call, and the default tag set alone is
@@ -243,9 +247,17 @@ Leave them unset for a private endpoint.
    branch names no planned account, and the run ends red, and one added before
    they are applied files a drift issue for every leaf that plans as creates.
    The account's plan role comes from its own `github-oidc` leaf, with
-   `plan_allowed_subject_claims = ["environment:drift"]` (the component refuses
-   any other trust in `staging` or `production`), applied locally with that
-   account's credentials, after the setup in
+   `plan_allowed_subject_claims = ["environment:drift"]` and
+   `github_repos = ["landing-zone"]`, applied locally with that account's
+   credentials. The component refuses any other trust in an account holding
+   `staging` or `production`, whichever environment directory the leaf sits in:
+   `live/_envcommon/aws/github-oidc.hcl` passes it every environment the account
+   holds (`account_environments`, read from the account's `env.hcl` files), so a
+   new `env.hcl` changes what the account's existing `github-oidc` leaf must
+   trust. Adding a `staging` or `production` directory to the development-only
+   account would refuse its `environment:plan` plan role until it moves to
+   `environment:drift`. An account holding only `hub`, `org` or `shared` takes
+   `create_plan_role = false`. Do this after the setup in
    [operations.md](operations.md#required-before-any-staging-or-production-plan-role).
 4. `terragrunt run --all -- plan` from the env dir; deploy components in dependency
    order (see [architecture.md](architecture.md) Dependency Graph).

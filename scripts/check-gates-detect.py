@@ -266,6 +266,20 @@ def mutations() -> list[Mutation]:
             marker=token("check-documented-oidc-trust.py"),
         ),
         Mutation(
+            "check-drift-workflow.py",
+            "a workflow other than drift.yml declares the main-only drift environment",
+            # The real shape: a job on main that wants the staging and production
+            # plan roles names the drift environment, and the branch policy, which
+            # admits by ref, lets it through.
+            lambda t: _edit(
+                t,
+                ".github/workflows/ci.yml",
+                "    environment: plan\n",
+                "    environment: drift  # " + token("check-drift-workflow.py") + "\n",
+            ),
+            marker=token("check-drift-workflow.py"),
+        ),
+        Mutation(
             "check-e2e-covers-leaves.py",
             "a live leaf is neither exercised by e2e.sh nor exempt with a reason",
             lambda t: _write(

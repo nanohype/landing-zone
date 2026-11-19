@@ -24,9 +24,17 @@ jobs:
   #   - a repository or organization VARIABLE of that name is how this map used
   #     to be stored, and a variable is not masked: any job that printed it would
   #     publish every account id it holds.
-  # Only whether each is set reaches the step, as `true` or `false`, so this job
-  # prints neither value even when one is set. It needs no environment, so it
-  # costs no approval and runs from any branch.
+  # Only whether each is set reaches the step, as `true` or `false`, so in a
+  # normal run this job prints neither value even when one is set. With step
+  # debug logging on (a re-run with debug logging, or ACTIONS_STEP_DEBUG), the
+  # runner traces how it evaluates each expression, including the value it
+  # reads for the variable below, before the comparison. A secret is masked there
+  # (`***`); a variable is not, so a debug run while the old repository variable
+  # still exists would print every account id in it. The GITHUB_TOKEN cannot
+  # read repository variables, so no other check is available: delete the old
+  # variable, and never run this workflow with debug logging while one exists.
+  # This job needs no environment, so it costs no approval and runs from any
+  # branch.
   refuse-inherited-config:
     name: Refuse repository-level DRIFT_PLAN_ROLE_ARNS
     runs-on: ubuntu-latest
@@ -132,8 +140,10 @@ jobs:
   # reads its role from the secret itself. Everything this job writes to an
   # annotation or the run summary names account directories, never values, and
   # goes through jq's `redact`, which replaces any run of twelve or more digits
-  # with <account-id>, so even a key that is an account id is not echoed in the
-  # summary, which the masker does not reach.
+  # with <account-id>. The runner also passes the run summary through its
+  # masker before uploading it, so a registered id or ARN would show as `***`
+  # there anyway; `redact` is a second layer, which also covers a key that is an
+  # account id in a form the masker did not register.
   select-accounts:
     name: Select accounts with a plan role
     needs: [refuse-inherited-config, discover]

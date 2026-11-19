@@ -407,10 +407,17 @@ gh api -X POST repos/nanohype/landing-zone/environments/drift/deployment-branch-
 jq -c . drift-plan-role-arns.json | gh secret set DRIFT_PLAN_ROLE_ARNS --env drift --repo nanohype/landing-zone
 ```
 
-The component holds the trust to that environment: in a `staging` or
-`production` leaf, `plan_allowed_subject_claims` must be exactly
-`["environment:drift"]`, and `environment:plan` is refused outside
-`development`. The full checklist is in
+The component holds the trust to that environment, keyed on the account rather
+than on the leaf's directory (envcommon passes every environment the account
+holds as `account_environments`): in an account holding `staging` or
+`production`, `plan_allowed_subject_claims` must be exactly
+`["environment:drift"]` and `github_repos` exactly `["landing-zone"]`, even for
+a leaf under that account's `development` directory; `environment:plan` is
+refused outside the development-only account; and an account holding neither
+(management, fleet, shared-services) takes `create_plan_role = false`. Delete
+any repository-level `DRIFT_PLAN_ROLE_ARNS` variable before the drift change
+merges, and never run drift.yml with debug logging while one exists: a debug
+run traces the value of a variable, unmasked. The full checklist is in
 [operations.md](operations.md#required-before-any-staging-or-production-plan-role).
 
 ## End-to-end validation (`task e2e`)

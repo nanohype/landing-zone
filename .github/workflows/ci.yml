@@ -905,6 +905,17 @@ jobs:
       # request rather than the next scheduled drift run.
       - name: Drift redaction self-test
         run: python3 scripts/redact-account-ids.py --self-test
+      # The other half of keeping account ids out of drift.yml's public output:
+      # scripts/mask-drift-role-map.sh registers every id and role ARN in the
+      # role map with the runner's masker before anything in a drift job prints.
+      # Nothing else exercises it before the next scheduled run, so its
+      # self-test (synthetic ids only) runs here, and shellcheck reads it, since
+      # actionlint only reads the inline run: blocks. Where drift.yml must call
+      # it is held by the drift-workflow job.
+      - name: Drift log-masking self-test
+        run: |
+          shellcheck scripts/mask-drift-role-map.sh
+          bash scripts/mask-drift-role-map.sh --self-test
 
   # The gates above are the assertions no `tofu test` can reach, and they are regex
   # over HCL — a matcher that stops matching keeps exiting 0, and the summary line
@@ -971,6 +982,27 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 scripts/check-documented-oidc-trust.py
+
+  # The staging and production plan roles trust the `drift` GitHub Environment,
+  # whose deployment-branch policy admits main only, and that environment holds
+  # DRIFT_PLAN_ROLE_ARNS, every account's id. A branch policy admits by ref, so
+  # another workflow on main naming the environment (a pull_request_target,
+  # workflow_run or issue_comment trigger runs with ref main) would get past it,
+  # and drift.yml's logs stay free of ids only while each job masks the map
+  # before anything reads it. This holds both in the workflow text.
+  drift-workflow:
+    name: Drift Environment Stays In drift.yml
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.3
+      - run: python3 scripts/check-drift-workflow.py
 
   # Every teardown gate on a component must open on the same lever. AWS spreads the
   # protections across unrelated resources and nothing in the dependency graph joins
@@ -1166,6 +1198,7 @@ jobs:
         architecture-components,
         smoke-outputs,
         documented-oidc-trust,
+        drift-workflow,
         region-consistency,
         gate-controls,
         workflows,
