@@ -56,9 +56,9 @@ locals {
 # set of denies that hold whatever is attached to the role, because an identity
 # policy cannot widen past a boundary and an explicit deny beats any allow.
 #
-# One question decides what is on the list: what must a CI session, acting AS
-# ITSELF, never be able to do in an account it administers? Four answers, one or
-# two statements each:
+# WHAT IT IS FOR. A guard on what a CI session does DIRECTLY, as itself: the
+# one-call mistakes and shortcuts that turn an administering job into a change
+# of the account's CI trust or audit. Four answers, one or two statements each:
 #
 #   1. Rewrite its own definition. The boundary policy, the roles a github-oidc
 #      leaf creates (this leaf's deploy and plan roles by ARN, and any role tagged
@@ -67,40 +67,62 @@ locals {
 #      local apply with the account's own admin credentials, never by the
 #      identities they define. Without this, one AttachRolePolicy or
 #      UpdateAssumeRolePolicy turns a development deploy job into a wider trust,
-#      and one CreatePolicyVersion turns this boundary into an allow-all.
+#      and one CreatePolicyVersion turns this boundary into an allow-all. Tags
+#      are protected only where something reads them: the Component tag on a
+#      role, which the tag-keyed statement selects on. Every other tag on these
+#      resources is left writable, because the root config stamps a per-commit
+#      Revision default tag on everything, and refusing that retag would fail
+#      every deploy.yml component=all run at this leaf.
 #   2. Shed a ceiling. Delete{Role,User}PermissionsBoundary is refused on every
-#      principal: no component removes a boundary, and stripping one is the
-#      single call that uncaps a principal.
-#   3. Step out into a principal this boundary does not cap. sts:AssumeRole is
-#      refused (nothing the deploy, destroy, e2e or plan jobs run chains into a
-#      role; the providers mint EKS tokens from the job's own identity), and so
-#      is minting an IAM user, a console password or a long-lived key, which
-#      would outlive the job's one-hour session.
-#   4. Act beyond the account, or blind its audit. Organizations and account
-#      settings (leave the org, close the account, change its contacts or
-#      regions) are not CI business in a member account. The audit-service verbs
-#      are exactly org-scp's DenyDisablingSecurity, which this repo authors but
-#      ships unattached (docs/threat-model.md, section 6): this boundary holds
-#      them for the most exposed admin principal in the account whether or not
-#      that SCP is in force. No component in a workload account manages a trail,
-#      a detector, a recorder, Security Hub or an analyzer, so no deploy needs
-#      them.
+#      principal: stripping a boundary is the single call that uncaps a
+#      principal, and no deploy removes one (a component that drops a boundary
+#      input is a local apply; docs/troubleshooting.md).
+#   3. Step directly into a principal this boundary does not cap, or leave a
+#      credential behind. sts:AssumeRole is refused (nothing the deploy,
+#      destroy, e2e or plan jobs run chains into a role; the providers mint EKS
+#      tokens from the job's own identity), and so is minting an IAM user, a
+#      console password or a long-lived key, which would outlive the job's
+#      one-hour session.
+#   4. Act beyond the account, or blind its audit. Writes to Organizations and
+#      to account settings (leave the org, close the account, change its
+#      contacts or regions) are not CI business in a member account; the reads
+#      stay open, because an Identity Center-backed Grafana workspace
+#      (managed-monitoring) calls organizations:DescribeOrganization as the
+#      caller. The audit-service verbs are exactly org-scp's
+#      DenyDisablingSecurity, which this repo authors but ships unattached
+#      (docs/threat-model.md, section 6): this boundary holds them for the most
+#      exposed admin principal in the account whether or not that SCP is in
+#      force. No component in a workload account manages a trail, a detector, a
+#      recorder, Security Hub or an analyzer, so no deploy needs them.
 #
-# WHAT IT DOES NOT DO, and why. It does not require the roles the deploy session
-# creates to carry this boundary (a Deny on CreateRole/PutRolePermissionsBoundary
-# unless iam:PermissionsBoundary is this ARN, as fleet-vend's vend boundary
-# does). The development tree creates roles in a dozen components (cluster and
-# its EKS/Karpenter modules, cluster-addons, druid, pipeline, governance,
-# managed-monitoring, backup, model-import, network's flow logs, agent-iam),
-# most with no boundary input, and two more (break-glass, fleet-hub) put a
-# boundary of their own on theirs, so that Deny would fail the first
-# deploy.yml run on every role it touches. It would also be the wrong ceiling
-# for them: these denies are written for a CI session, and the agent-platform
-# operator, for one, assumes roles at runtime. So a role the session creates,
-# and compute it hands that role to, runs outside this boundary. That residual is
-# stated in docs/threat-model.md, section 1; closing it means threading a
-# boundary through every role-creating component, as fleet-vend does for vended
-# clusters.
+# WHAT IT IS NOT: containment of a job that sets out to escape it. Role creation
+# is not capped (below), so a job holding this role can create a role with
+# AdministratorAccess that trusts the account's existing GitHub OIDC provider,
+# request a fresh token in the same job (it has id-token: write) and call
+# sts:AssumeRoleWithWebIdentity, which is unauthenticated, so this boundary is
+# never evaluated on it. UpdateAssumeRolePolicy on an existing unprotected role
+# works the same way, and so does a role trusting a principal outside the
+# account, or an uncapped role handed to compute the job starts. From any of
+# them every protection above can be undone. IAM has no condition key on a
+# trust policy's contents, so no deny here can refuse "a role trusting GitHub";
+# denying CreateOpenIDConnectProvider/CreateSAMLProvider would close two doors
+# of many and is left out for that reason. What stops a deliberate job is who
+# can run one: the branch policies on the development and e2e environments and
+# e2e's required reviewers.
+#
+# WHY ROLE CREATION IS NOT CAPPED. Capping it means a Deny on CreateRole and
+# PutRolePermissionsBoundary unless iam:PermissionsBoundary is an allowed
+# boundary, as fleet-vend's vend boundary does. The development tree creates
+# roles in a dozen components (cluster and its EKS/Karpenter modules,
+# cluster-addons, druid, pipeline, governance, managed-monitoring, backup,
+# model-import, network's flow logs, agent-iam), most with no boundary input,
+# and two more (break-glass, fleet-hub) put a boundary of their own on theirs,
+# so that Deny would fail the first deploy.yml run on every role it touches. It
+# would also be the wrong ceiling for them: these denies are written for a CI
+# session, and the agent-platform operator, for one, assumes roles at runtime.
+# Closing it means threading a boundary input through every role-creating
+# component and allowlisting the boundaries they carry; docs/threat-model.md,
+# section 1, states the residual until then.
 ################################################################################
 
 data "aws_caller_identity" "current" {
@@ -135,7 +157,8 @@ locals {
   ) : []
 
   # Every write that changes what a role is: its trust, its policies, its
-  # boundary, its tags (the tag statement keys on Component), or its existence.
+  # boundary, or its existence. Tags are ProtectTheComponentTag's, keyed on the
+  # one tag anything reads.
   role_definition_actions = [
     "iam:DeleteRole",
     "iam:UpdateRole",
@@ -147,8 +170,6 @@ locals {
     "iam:DeleteRolePolicy",
     "iam:PutRolePermissionsBoundary",
     "iam:DeleteRolePermissionsBoundary",
-    "iam:TagRole",
-    "iam:UntagRole",
   ]
 }
 
@@ -171,8 +192,6 @@ data "aws_iam_policy_document" "boundary" {
       "iam:DeletePolicyVersion",
       "iam:SetDefaultPolicyVersion",
       "iam:DeletePolicy",
-      "iam:TagPolicy",
-      "iam:UntagPolicy",
     ]
     resources = [local.created_boundary_arn]
   }
@@ -201,6 +220,34 @@ data "aws_iam_policy_document" "boundary" {
     }
   }
 
+  # ... and the Component tag that statement selects on: retagging it off a
+  # role would take that role out of the statement above. Only that key is
+  # refused, so the per-commit Revision default tag a deploy.yml run rewrites
+  # still goes through. aws:ResourceTag is absent while a role is being
+  # created, so a component creating its own role with a Component tag (which
+  # IAM authorizes as iam:TagRole) is not caught here.
+  statement {
+    sid    = "ProtectTheComponentTag"
+    effect = "Deny"
+    actions = [
+      "iam:TagRole",
+      "iam:UntagRole",
+    ]
+    resources = ["arn:${local.boundary_partition}:iam::${local.boundary_account}:role/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Component"
+      values   = ["github-oidc"]
+    }
+
+    condition {
+      test     = "ForAnyValue:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["Component"]
+    }
+  }
+
   # ... and the identity provider every one of those trusts names.
   statement {
     sid    = "ProtectTheGithubOidcProvider"
@@ -210,8 +257,6 @@ data "aws_iam_policy_document" "boundary" {
       "iam:UpdateOpenIDConnectProviderThumbprint",
       "iam:AddClientIDToOpenIDConnectProvider",
       "iam:RemoveClientIDFromOpenIDConnectProvider",
-      "iam:TagOpenIDConnectProvider",
-      "iam:UntagOpenIDConnectProvider",
     ]
     resources = [local.oidc_provider_arn]
   }
@@ -227,7 +272,8 @@ data "aws_iam_policy_document" "boundary" {
     resources = ["*"]
   }
 
-  # 3. Stepping out into a principal this boundary does not cap.
+  # 3. Stepping directly into a principal this boundary does not cap, or leaving
+  #    a credential behind.
   statement {
     sid    = "DenyLeavingThisBoundary"
     effect = "Deny"
@@ -242,13 +288,40 @@ data "aws_iam_policy_document" "boundary" {
     resources = ["*"]
   }
 
-  # 4. Beyond the account, and its audit.
+  # 4. Beyond the account, and its audit. Every Organizations and Account verb
+  #    that is not a read (Describe*, List*, Get*), by verb prefix, so an action
+  #    AWS adds under one of these verbs is covered when it ships.
   statement {
-    sid    = "DenyOrganizationAndAccountActions"
+    sid    = "DenyOrganizationAndAccountWrites"
     effect = "Deny"
     actions = [
-      "organizations:*",
-      "account:*",
+      "organizations:Accept*",
+      "organizations:Attach*",
+      "organizations:Cancel*",
+      "organizations:Close*",
+      "organizations:Create*",
+      "organizations:Decline*",
+      "organizations:Delete*",
+      "organizations:Deregister*",
+      "organizations:Detach*",
+      "organizations:Disable*",
+      "organizations:Enable*",
+      "organizations:Invite*",
+      "organizations:Leave*",
+      "organizations:Move*",
+      "organizations:Put*",
+      "organizations:Register*",
+      "organizations:Remove*",
+      "organizations:Tag*",
+      "organizations:Untag*",
+      "organizations:Update*",
+      "account:Accept*",
+      "account:Close*",
+      "account:Delete*",
+      "account:Disable*",
+      "account:Enable*",
+      "account:Put*",
+      "account:Start*",
     ]
     resources = ["*"]
   }
@@ -277,10 +350,15 @@ data "aws_iam_policy_document" "boundary" {
   }
 }
 
+# name and description are both ForceNew on aws_iam_policy, and AWS refuses to
+# delete a policy while a role uses it as a boundary (DeleteConflict), so a
+# change to either plans a destroy-then-create that fails part way. Keep the
+# description as it is; renaming the boundary means taking it off both roles
+# first (docs/operations.md).
 resource "aws_iam_policy" "boundary" {
   count       = var.create_permissions_boundary ? 1 : 0
   name        = var.permissions_boundary_name
-  description = "Permissions boundary on the GitHub Actions deploy and plan roles: allows what their policies grant, denies self-modification, boundary removal, role assumption, IAM users and keys, Organizations/account actions and disabling audit services"
+  description = "Permissions boundary on the GitHub Actions deploy and plan roles (github-oidc component)"
   policy      = data.aws_iam_policy_document.boundary[0].json
   tags        = local.tags
 }

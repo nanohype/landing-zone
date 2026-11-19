@@ -218,13 +218,16 @@ variable "create_permissions_boundary" {
     Create this component's permissions boundary (permissions_boundary_name) and
     attach it to the deploy role and the plan role. It allows everything, so the
     attached managed policies stay the effective grant, and denies what a CI
-    session must never do as itself: change the boundary, the roles a
-    github-oidc leaf creates or the GitHub OIDC provider; strip a boundary from
-    any principal; assume a role or mint an IAM user, password or access key;
-    act on Organizations or account settings; disable CloudTrail, GuardDuty,
-    Config, Security Hub or Access Analyzer. It does not cap the roles the
-    deploy session creates; see the boundary section of main.tf and
-    docs/threat-model.md, section 1. Mutually exclusive with
+    session must never do directly, as itself: change the boundary, the roles a
+    github-oidc leaf creates (or their Component tag) or the GitHub OIDC
+    provider; strip a boundary from any principal; assume a role or mint an IAM
+    user, password or access key; write to Organizations or account settings;
+    disable CloudTrail, GuardDuty, Config, Security Hub or Access Analyzer. It
+    does not cap the roles the session creates, so it is a guard against direct
+    self-modification and long-lived credentials, not containment of a job that
+    sets out to escape it (one CreateRole trusting the GitHub OIDC provider and
+    an AssumeRoleWithWebIdentity step around it); see the boundary section of
+    main.tf and docs/threat-model.md, section 1. Mutually exclusive with
     permissions_boundary_arn.
   EOT
   type        = bool
@@ -259,7 +262,7 @@ variable "permissions_boundary_arn" {
 }
 
 variable "managed_policy_arns" {
-  description = "Managed policies to attach to the deploy role. Empty by default — the role is inert until you attach what CI needs when adopting the GitHub Actions path: a scoped set, or AdministratorAccess, which is accepted only under a permissions boundary (create_permissions_boundary or permissions_boundary_arn). The repo-scoped trust is the primary control; the boundary is what holds when that trust is met by a job it should not have been."
+  description = "Managed policies to attach to the deploy role. Empty by default — the role is inert until you attach what CI needs when adopting the GitHub Actions path: a scoped set, or an AWS managed policy granting unrestricted IAM writes (AdministratorAccess, IAMFullAccess), which is accepted only under a permissions boundary (create_permissions_boundary or permissions_boundary_arn). That rule is a check on those two names, not an analysis of what a policy grants: a customer managed policy allowing iam:* passes it, and needs the same boundary by the operator's own decision. The repo-scoped trust and the trusted environments' branch policies are the primary control."
   type        = list(string)
   default     = []
 
@@ -267,8 +270,8 @@ variable "managed_policy_arns" {
     # The `||` stays at the end of each line: checkov's HCL parser cannot read a
     # line that begins with an operator.
     condition = (var.create_permissions_boundary || var.permissions_boundary_arn != "" ||
-    alltrue([for a in var.managed_policy_arns : !can(regex("^arn:aws[a-z-]*:iam::aws:policy/AdministratorAccess$", a))]))
-    error_message = "managed_policy_arns may contain AdministratorAccess only under a permissions boundary: set create_permissions_boundary = true (or permissions_boundary_arn). Without one, a job in a trusted environment can rewrite the role's own trust, strip boundaries, assume other roles and mint long-lived keys."
+    alltrue([for a in var.managed_policy_arns : !can(regex("^arn:aws[a-z-]*:iam::aws:policy/(AdministratorAccess|IAMFullAccess)$", a))]))
+    error_message = "managed_policy_arns may contain AdministratorAccess or IAMFullAccess only under a permissions boundary: set create_permissions_boundary = true (or permissions_boundary_arn). Without one, a job in a trusted environment can rewrite the role's own trust, strip boundaries, assume other roles and mint long-lived keys in a single call each."
   }
 }
 

@@ -377,32 +377,46 @@ Environments the deploy, destroy and e2e workflows declare
 `repo:nanohype/landing-zone:environment:e2e`; the `workload-development` leaf
 narrows that to `development` and `e2e`), never the `plan` or `drift`
 environment the read-only plan role trusts — and you attach the policies CI needs via the
-component's `managed_policy_arns`: a scoped set, or `AdministratorAccess`, which
-the component accepts only under a permissions boundary. Skip this component
-entirely if you only run locally.
+component's `managed_policy_arns`: a scoped set, or `AdministratorAccess` (or
+`IAMFullAccess`), which the component accepts only under a permissions boundary.
+That rule checks those two policy names; a customer managed policy allowing
+`iam:*` passes it and needs the same boundary on your own decision. Skip this
+component entirely if you only run locally.
 
 The `workload-development` leaf does the second: `managed_policy_arns =
 ["arn:aws:iam::aws:policy/AdministratorAccess"]` with `create_permissions_boundary
 = true`, which creates the `github-actions-boundary` policy and puts it on both
 the deploy and the plan role. The boundary allows everything, so
 `AdministratorAccess` and `ReadOnlyAccess` stay the effective grants, and denies
-what a CI session must never do as itself:
+what a CI session must never do directly, as itself:
 
 - change the boundary, the roles a `github-oidc` leaf creates (this leaf's two
   by ARN, and every role tagged `Component = github-oidc`, the ECR Public pull
-  role included) or the GitHub OIDC provider;
+  role included) or the GitHub OIDC provider, or retag `Component` off one of
+  those roles (other tags stay writable: the root config stamps a per-commit
+  `Revision` tag on everything);
 - strip a permissions boundary from any role or user;
 - assume a role, or create an IAM user, console password, access key or
   service-specific credential;
-- any `organizations:` or `account:` action;
+- write to Organizations or to account settings (leave the organization, close
+  the account, change its contacts or regions); the reads stay open, because
+  `managed-monitoring`'s Identity Center workspace reads the organization as the
+  caller;
 - disable CloudTrail, GuardDuty, Config, Security Hub or Access Analyzer (the
   verbs of `org-scp`'s `DenyDisablingSecurity`, which ships unattached).
 
-It does not require the roles a deploy creates to carry it: a dozen components
-create roles, most with no boundary input, so that rule would fail the first
-deploy. A role or a function the deploy session creates therefore runs outside
-it; section 1 of [threat-model.md](threat-model.md) states the
-residual.
+That makes it a guard against direct self-modification and long-lived
+credentials, not containment of a job that sets out to escape it. It does not
+require the roles a deploy creates to carry it: a dozen components create
+roles, most with no boundary input, so that rule would fail the first deploy.
+So a `development` or `e2e` job can create a role with `AdministratorAccess`
+trusting this account's GitHub OIDC provider, request a fresh token in the same
+job and call `sts:AssumeRoleWithWebIdentity`, which is unauthenticated and so
+never evaluated against this boundary, and from that role undo any of the
+above. The controls that carry the weight against a deliberate job are the
+ones on who can run it: the deployment-branch policies on `development` and
+`e2e`, and `e2e`'s required reviewers (below). Section 1 of
+[threat-model.md](threat-model.md) states the residual.
 
 Apply the leaf locally with the account's own admin credentials, not from
 `deploy.yml`:
@@ -412,10 +426,15 @@ TERRAGRUNT_ACCOUNT_ID=<workload-development account id> AWS_PROFILE=<its admin p
   task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=github-oidc
 ```
 
-The boundary refuses every write to this leaf's own resources, so once it is
-applied a `deploy.yml` run reaching it (`component=all`) has an empty plan
-there, and any change it would make fails with `AccessDenied`. Changing the
-boundary or either role is always a local apply.
+Once it is applied, a `deploy.yml` run reaching this leaf (`component=all`)
+plans only the per-commit `Revision` tag there, which the boundary leaves
+writable; any other change it would make fails with `AccessDenied`. Changing
+the boundary or either role is always a local apply. A `destroy.yml` run with
+`component=all` fails at this leaf and the `ecr-public-pull` leaf by design
+([operations.md](operations.md#destroyyml----manual-destroy)). The boundary's
+name and description are fixed once applied: both are replace-on-change, and
+AWS refuses to delete a policy while a role uses it as a boundary, so renaming
+it means taking it off both roles in a local apply first.
 
 Before attaching any policy, give every environment the role trusts a
 deployment-branch policy in the repository settings (main, or protected

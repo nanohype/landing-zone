@@ -83,12 +83,15 @@ account-level OIDC provider three times.
 It is also applied **locally**, with the account's own admin credentials, never by `deploy.yml`. In
 `workload-development` the deploy role carries `AdministratorAccess` under the `github-actions-boundary`
 permissions boundary the component creates, on both the deploy and the plan role, and that boundary
-refuses every write to the boundary itself, to the roles a `github-oidc` leaf creates and to the
-GitHub OIDC provider (plus stripping any boundary, assuming a role, minting IAM users or keys,
-Organizations and account actions, and disabling the audit services; the list and its reasons are in
+refuses the session's direct writes to the boundary itself, to the roles a `github-oidc` leaf creates
+(and their `Component` tag) and to the GitHub OIDC provider (plus stripping any boundary, assuming a
+role, minting IAM users or keys, Organizations and account writes, and disabling the audit services;
+the list, its reasons and what it does not stop are in
 [first-deploy-aws.md](first-deploy-aws.md#execution-model-local-default-vs-ci)). A `deploy.yml` run
-with `component=all` reaches the `github-oidc` and `ecr-public-pull` leaves too: applied, they plan
-empty; with a pending change, the run fails there with `AccessDenied`, and the change goes in with:
+with `component=all` reaches the `github-oidc` and `ecr-public-pull` leaves too. Applied, the only
+change it plans there is the per-commit `Revision` default tag (`live/root.hcl`), which the boundary
+leaves writable, so the run goes through; any other pending change fails there with `AccessDenied`,
+and goes in with:
 
 ```bash
 TERRAGRUNT_ACCOUNT_ID=<workload-development account id> AWS_PROFILE=<its admin profile> \
@@ -225,6 +228,8 @@ One environment names one account, so the workflow deploys only `live/aws/worklo
 - `confirm` -- must exactly match the environment name
 
 The confirmation guard (`confirm == environment`) prevents accidental destroys. Runs `terragrunt run --non-interactive -- destroy -input=false -auto-approve` in the component directory, or `terragrunt run --all --non-interactive -- destroy -input=false` for `all`: `run --all` appends `-auto-approve` to a destroy on its own but, unlike for plan and apply, not `-input=false`, so both paths spell that flag out and hand tofu the same flags. On either path a unit missing a required variable fails at once instead of stopping at tofu's input prompt, and the destroy proceeds without a confirmation prompt. The step also sets `TF_INPUT=false`, which tofu reads as `-input=false` on every command, so terragrunt's automatic `tofu init`, which takes no flag from the command line, fails at once on anything it would ask for too. The `confirm` input and the environment's protection rules are the confirmation; tofu's own prompt has no one to answer it in a workflow run.
+
+In `development`, a `component=all` destroy is expected to **fail at the `github-oidc` and `ecr-public-pull` leaves**, after destroying every other unit (neither has a dependent). Their first destroy step detaches a policy from a role the deploy role's permissions boundary protects (`DetachRolePolicy` on the deploy and plan roles, `DeleteRolePolicy` on the ECR Public pull role), so the call is refused and nothing in those two leaves is removed. That is the boundary doing its job: without it the run would delete the CI role it is running as. Those leaves are removed only by a local destroy with the account's own admin credentials (`task destroy` with the same `TERRAGRUNT_ACCOUNT_ID`/`AWS_PROFILE` as the local apply in [Deployment order](#deployment-order)), destroying `ecr-public-pull` before `github-oidc`.
 
 **Configuration:** the same environment-only `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` secrets as `deploy.yml`, on the `development` and `staging` GitHub Environments, with the same checks and the same masking: neither set at repository or organization level, neither left as a variable anywhere, both set on the environment and naming one account, the `account` input equal to `workload-<environment>`, the `component` input `all` or a leaf directory under it, and the assumed credential's account equal to `DEPLOY_ACCOUNT_ID`. The last matters most here: a destroy run with the state of one account and the credential of another sends the state's resource ids to the wrong account, where most of them are simply not found and dropped from state, leaving the real resources running untracked.
 
