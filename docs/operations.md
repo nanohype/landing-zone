@@ -179,7 +179,7 @@ gh variable delete E2E_AWS_ROLE_ARN --repo "$REPO"   # or --env e2e, wherever it
 - `component` -- specific component name or "all"
 - `action` -- plan or apply
 
-Uses GitHub environment protection rules -- production requires approval. When `component=all`, runs `terragrunt run --all -- <action>`. Otherwise targets the specific component directory.
+Uses GitHub environment protection rules -- production requires approval, before the job starts. When `component=all`, runs `terragrunt run --all --non-interactive -- <action>`, and terragrunt appends `-auto-approve` to an apply on its own. Otherwise it runs in the specific component directory, also non-interactively: `terragrunt run --non-interactive -- plan`, or `terragrunt run --non-interactive -- apply -auto-approve` for an apply. Both paths therefore apply without a confirmation prompt; the environment approval is the confirmation, and with no one at the keyboard tofu's own prompt would otherwise fail the job or hold it until the timeout without applying. A plan is never auto-approved: it has nothing to confirm.
 
 The `environment` choice covers only the three workload environments. The management-account `org` components (the [Organization Components](#organization-components) above) are **local-CLI-only** — deploy them with `task apply ACCOUNT=management ENVIRONMENT=org COMPONENT=<component>` under your own admin/SSO credentials. `org` is intentionally not a workflow choice because the management account is applied rarely and by hand.
 
@@ -209,7 +209,7 @@ One environment names one account, so the workflow deploys only `live/aws/worklo
 - `component` -- specific component name or "all"
 - `confirm` -- must exactly match the environment name
 
-The confirmation guard (`confirm == environment`) prevents accidental destroys. Runs `terragrunt destroy` or `terragrunt run --all -- destroy`.
+The confirmation guard (`confirm == environment`) prevents accidental destroys. Runs `terragrunt run --non-interactive -- destroy -auto-approve` in the component directory, or `terragrunt run --all --non-interactive -- destroy` (which appends `-auto-approve` itself) for `all`. The `confirm` input and the environment's protection rules are the confirmation; tofu's own prompt has no one to answer it in a workflow run.
 
 **Configuration:** the same environment-only `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` secrets as `deploy.yml`, on the `development` and `staging` GitHub Environments, with the same checks and the same masking: neither set at repository or organization level, neither left as a variable anywhere, both set on the environment and naming one account, the `account` input equal to `workload-<environment>`, the `component` input `all` or a leaf directory under it, and the assumed credential's account equal to `DEPLOY_ACCOUNT_ID`. The last matters most here: a destroy run with the state of one account and the credential of another sends the state's resource ids to the wrong account, where most of them are simply not found and dropped from state, leaving the real resources running untracked.
 
