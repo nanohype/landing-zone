@@ -293,15 +293,18 @@ jobs:
         # commands, -auto-approve on apply only (plan has nothing to confirm).
         # A unit missing a required variable therefore fails fast on either
         # path, and an apply proceeds without a prompt on either. Terragrunt's
-        # automatic `tofu init` takes neither flag on either path; it has
-        # nothing to ask on a fresh checkout, where root.hcl generates a
-        # complete backend block. A human still decides before anything
-        # changes: the environment's protection rules hold the job before it
-        # starts (production requires approval).
+        # automatic `tofu init` takes no flag from either command line, so
+        # TF_INPUT=false covers it: tofu reads it as -input=false on every
+        # command, init included, so a backend or variable needing a value
+        # fails at once there too, on both paths, instead of waiting at a
+        # prompt. A human still decides before anything changes: the
+        # environment's protection rules hold the job before it starts
+        # (production requires approval).
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
           ACTION: ${{ inputs.action }}
+          TF_INPUT: "false"
         run: |
           case "$ACTION" in
             plan | apply) ;;

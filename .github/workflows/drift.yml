@@ -407,7 +407,11 @@ jobs:
       # leaf missing a required variable would stop at tofu's "Enter a value:"
       # prompt and, with stdin held open, wait out the job timeout instead of
       # failing as a drift check error. With it the plan errors at once (code 1)
-      # and is reported like any other plan error.
+      # and is reported like any other plan error. Terragrunt's automatic
+      # `tofu init` takes no flag from this command line, so TF_INPUT=false
+      # covers it: tofu reads it as -input=false on every command, init
+      # included, so a backend or variable needing a value fails init the same
+      # way (code 1) instead of waiting at a prompt.
       #
       # A failed "Configure AWS credentials" is recorded as code 1 without running
       # terragrunt: plan.txt then holds a message naming the account directory
@@ -438,6 +442,7 @@ jobs:
           ACCOUNT_ID: ${{ steps.role.outputs.account_id }}
           CREDS_OUTCOME: ${{ steps.creds.outcome }}
           ACCOUNT_DIR: ${{ matrix.account }}
+          TF_INPUT: "false"
         run: |
           if [ "$CREDS_OUTCOME" != "success" ]; then
             {
