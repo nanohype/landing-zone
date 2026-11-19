@@ -1310,9 +1310,22 @@ jobs:
         # whether the plan runs, not on what it would change, so it never contends
         # with an apply (it still fails the build if the plan itself errors). An
         # apply running at the same moment can only make this plan's diff stale.
+        #
+        # No one is at the keyboard, so the plan runs in the same form as
+        # deploy.yml's and drift.yml's: --non-interactive answers terragrunt's
+        # own prompts, and -input=false answers tofu's "Enter a value:" prompt
+        # for a required variable nothing set, which a single unit would
+        # otherwise pass through and, with stdin held open, wait at until the
+        # job timeout. TF_INPUT=false covers the tofu command terragrunt runs
+        # on its own, the automatic `tofu init`, which takes no flag from this
+        # command line: tofu reads TF_INPUT=false as -input=false on every
+        # command, init included, so a backend or variable needing a value
+        # fails the plan at once instead of holding it. A failure still exits
+        # non-zero and fails the build.
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
-        run: terragrunt plan -lock=false -no-color
+          TF_INPUT: "false"
+        run: terragrunt run --non-interactive -- plan -input=false -lock=false -no-color
 
   merge-gate:
     name: merge gate

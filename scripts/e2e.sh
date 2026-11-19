@@ -54,7 +54,13 @@ RESULT="FAILED"
 
 log() { echo -e "\n\033[1;36m=== $* ===\033[0m"; }
 die() { echo -e "\033[1;31mFATAL: $*\033[0m" >&2; exit 1; }
-tg()  { ( cd "$BASE/$1" && TG_NON_INTERACTIVE=true terragrunt "${@:2}" ); }
+# Every terragrunt call here runs unattended (in e2e.yml, and from `task e2e`,
+# which nobody sits through prompt by prompt). TG_NON_INTERACTIVE answers
+# terragrunt's own prompts; TF_INPUT=false is tofu's -input=false for every
+# tofu command terragrunt runs, its automatic `tofu init` included, so a
+# backend or variable needing a value fails the step at once instead of
+# waiting at "Enter a value:".
+tg()  { ( cd "$BASE/$1" && TG_NON_INTERACTIVE=true TF_INPUT=false terragrunt "${@:2}" ); }
 
 # Clear a stale Terragrunt/S3 state lock for a component. An interrupted run
 # (Ctrl-C, killed mid-apply) leaves a .tflock that blocks the next apply/destroy.

@@ -287,14 +287,17 @@ jobs:
         # terragrunt does not add: -input=false on both, -auto-approve on the
         # single unit. A unit missing a required variable therefore fails fast
         # on either path, and a destroy proceeds without a prompt on either.
-        # Terragrunt's automatic `tofu init` takes neither flag on either path;
-        # it has nothing to ask on a fresh checkout, where root.hcl generates a
-        # complete backend block. A human still decides before anything is
-        # deleted: the `confirm` input this job's `if:` requires, and the
-        # environment's protection rules.
+        # Terragrunt's automatic `tofu init` takes no flag from either command
+        # line, so TF_INPUT=false covers it: tofu reads it as -input=false on
+        # every command, init included, so a backend or variable needing a
+        # value fails at once there too, on both paths, instead of waiting at a
+        # prompt. A human still decides before anything is deleted: the
+        # `confirm` input this job's `if:` requires, and the environment's
+        # protection rules.
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
+          TF_INPUT: "false"
         run: |
           if [ "$COMPONENT" = "all" ]; then
             terragrunt run --all --non-interactive -- destroy -input=false
