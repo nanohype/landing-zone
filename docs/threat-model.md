@@ -66,6 +66,52 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `workload-development` leaf trusts `environment:development` and
   `environment:e2e` only), so a job in a less-protected environment cannot reach
   another account's deploy role.
+- **Elevation of privilege / Tampering by the deploy session itself** — the
+  `workload-development` deploy role carries `AdministratorAccess`, so any job
+  that meets its trust (a `development` or `e2e` job, from whatever branch those
+  environments' branch policies admit) administers the account. **The controls
+  that carry the weight are the ones on who can run such a job**: the
+  deployment-branch policies on the `development` and `e2e` environments, and
+  `e2e`'s required reviewers. Below that, the permissions boundary the component
+  creates (`create_permissions_boundary`, policy `github-actions-boundary`) on
+  both the deploy and the plan role guards against what the session does
+  directly, as itself — a mistaken or shortcut call, not a determined job. It
+  allows everything and denies: writes to the boundary, to the roles a
+  `github-oidc` leaf creates (by ARN, and by the `Component = github-oidc` tag,
+  which covers the ECR Public pull role that trusts `pull_request`; retagging
+  `Component` off them is refused too) and to the GitHub OIDC provider;
+  stripping a boundary from any principal; `sts:AssumeRole` and minting an IAM
+  user, console password, access key or service-specific credential, so nothing
+  it leaves outlives its one-hour session by those routes; Organizations and
+  account-setting writes; and the audit-disabling verbs of `org-scp`'s
+  `DenyDisablingSecurity`, which binds nothing until an operator attaches it
+  (section 6). The component refuses `AdministratorAccess` or `IAMFullAccess` in
+  `managed_policy_arns` without a boundary (a check on those two names, not an
+  analysis of what a policy grants), and `tofu test` pins the boundary on both
+  roles and every statement's exact actions. **Residual, stated rather than
+  discovered: the boundary is not containment.** It caps the session, not what
+  the session creates, and it does not require created roles to carry it,
+  because the development tree creates roles in a dozen components, most with
+  no boundary input and two (`break-glass`, `fleet-hub`) with boundaries of
+  their own, so that rule would fail every deploy. So a job can, in three calls
+  and without leaving the account or keeping a credential: create a role with
+  `AdministratorAccess` trusting the account's existing GitHub OIDC provider
+  (or `UpdateAssumeRolePolicy` on an existing unprotected role, such as
+  `break-glass`'s), request a fresh OIDC token in the same job (it holds
+  `id-token: write`), and call `sts:AssumeRoleWithWebIdentity` — unauthenticated,
+  so the caller's boundary is never evaluated. From that role it can rewrite the
+  deploy role's trust, version the boundary into an allow-all or delete the
+  provider. A role trusting a principal outside the account, a new SAML or OIDC
+  provider, or an uncapped role handed to compute the job starts work the same
+  way. It can also replace (not strip) a boundary on another role, which
+  components legitimately set. IAM has no condition key on a trust policy's
+  contents, so no deny on the session can refuse "a role trusting GitHub".
+  Closing this means threading a boundary input through every role-creating
+  component and denying `CreateRole`/`PutRolePermissionsBoundary` unless the
+  request names an allowed boundary, as `fleet-vend` does for vended clusters.
+  Changes to the boundary or the roles are a local apply with the account's own
+  admin credentials; `deploy.yml` gets `AccessDenied` on them, except the
+  per-commit `Revision` retag, which the boundary leaves writable.
 - **Information disclosure** — the read-only plan role. It carries account-wide
   `ReadOnlyAccess`: every S3 object, state files included, and every DynamoDB
   item in the account. Mitigated by tying its trust to the ACCOUNT, which is the

@@ -8,7 +8,8 @@ include "envcommon" {
 }
 
 # Apply ONCE per account (the OIDC provider is account-global). Run locally with
-# admin/SSO creds when/if the GitHub Actions CI path is adopted. Outputs:
+# admin/SSO creds, never from deploy.yml (see THE DEPLOY ROLE'S PERMISSIONS
+# below). Outputs:
 #   - deploy_role_arn: the DEPLOY_ROLE_ARN secret on the `development` GitHub
 #     Environment (deploy.yml/destroy.yml), and the E2E_AWS_ROLE_ARN secret on
 #     `e2e` for e2e.yml.
@@ -71,10 +72,46 @@ include "envcommon" {
 # driven by the Ventures OU's `guardrail-region-lock`, a different reason that
 # could be repealed.
 
+# THE DEPLOY ROLE'S PERMISSIONS. deploy.yml applies every workload-development
+# leaf, and e2e.yml stands up and tears down the substrate, so the role carries
+# AdministratorAccess: a scoped set would have to track every service a dozen
+# components touch, and fail a deploy each time one grows. The component
+# creates a boundary (create_permissions_boundary) and puts it on BOTH this role
+# and the plan role. It allows everything, so AdministratorAccess and
+# ReadOnlyAccess stay the grants, and denies what a CI session must never do
+# directly, as itself: rewrite the boundary, the github-oidc roles (by ARN, and
+# every role tagged Component = github-oidc, so the ECR Public pull leaf beside
+# this one too) or the GitHub OIDC provider; strip a boundary from anything;
+# assume a role or mint an IAM user, password or access key; write to
+# Organizations or account settings; disable CloudTrail, GuardDuty, Config,
+# Security Hub or Access Analyzer. The component refuses AdministratorAccess
+# (or IAMFullAccess) without a boundary.
+#
+# It is a guard against direct self-modification and long-lived credentials,
+# NOT containment of a job that sets out to escape it. Role creation is not
+# capped (a dozen components create roles, most with no boundary input), so a
+# development or e2e job can create an admin role trusting this account's
+# GitHub OIDC provider and step into it with AssumeRoleWithWebIdentity in the
+# same job, where this boundary is never evaluated, and undo all of the above
+# from there. What stops that is who can run such a job: the branch policies on
+# the `development` and `e2e` environments, and `e2e`'s required reviewers. See
+# the boundary section of the component's main.tf and docs/threat-model.md,
+# section 1.
+#
+# Consequences for CI: a deploy.yml run with component=all reaches this leaf and
+# the ECR Public pull leaf too. The only write it can make there is the
+# per-commit Revision default tag, which the boundary leaves writable; any other
+# change is refused with AccessDenied and goes in with a local apply under the
+# account's own admin credentials (docs/operations.md). A destroy.yml run with
+# component=all fails at both leaves by design, after destroying the rest:
+# they are removed only by a local destroy.
+#
 # The account already has the GitHub Actions OIDC provider (AWS allows one per
 # issuer), so this component references it rather than creating a second.
 inputs = {
-  github_repos           = ["landing-zone"]
-  allowed_subject_claims = ["environment:development", "environment:e2e"]
-  create_oidc_provider   = false
+  github_repos                = ["landing-zone"]
+  allowed_subject_claims      = ["environment:development", "environment:e2e"]
+  create_oidc_provider        = false
+  managed_policy_arns         = ["arn:aws:iam::aws:policy/AdministratorAccess"]
+  create_permissions_boundary = true
 }

@@ -157,6 +157,21 @@ Common mistake: adding a dependency for convenience (e.g., reading an output you
      contents: read
    ```
 
+## CI Deploy Fails With "explicit deny in a permissions boundary"
+
+**Symptom:** a `deploy.yml`, `destroy.yml` or `e2e.yml` run in `workload-development` assumes the deploy role, then fails with `AccessDenied ... with an explicit deny in a permissions boundary`.
+
+**Cause:** the deploy role carries `AdministratorAccess` under the `github-actions-boundary` policy the `github-oidc` component creates, and the call is one that boundary refuses on purpose: a write to the boundary, to a role a `github-oidc` leaf created (deploy, plan, ECR Public pull; including retagging their `Component` tag) or to the GitHub OIDC provider; stripping a permissions boundary; `sts:AssumeRole`; creating an IAM user, password or access key; an Organizations or account-setting write; or disabling CloudTrail, GuardDuty, Config, Security Hub or Access Analyzer. The error names the action and the resource.
+
+**Fix:** none of these is CI work.
+
+- A pending change to the `github-oidc` or `ecr-public-pull` leaf (a `component=all` run reaches both) goes in with a local apply under the account's own admin credentials ([operations.md](operations.md#deployment-order)). The per-commit `Revision` tag is the one write CI can make there, so a run failing at these leaves has a real change pending.
+- A `destroy.yml` run with `component=all` in `development` always fails at those two leaves, after destroying everything else: that is the boundary refusing to let the run delete the role it runs as. They are removed only by a local destroy ([operations.md](operations.md#destroyyml----manual-destroy)).
+- `DeleteRolePermissionsBoundary` on any role (for example, a component whose boundary input is changed from a value back to empty) is refused on every principal, so removing a boundary is a local apply too. Deleting a whole role does not call it, so destroys are unaffected.
+- Anything else on the list is a change for a person with the account's own credentials, not for the pipeline.
+
+Do not widen the boundary to get a run through: the list and why each entry is on it are in the boundary section of `components/aws/github-oidc/main.tf`.
+
 ## "Backend configuration changed"
 
 **Cause:** The S3 backend configuration (bucket name, key, region) has changed since the last `init`.

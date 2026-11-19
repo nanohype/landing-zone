@@ -38,6 +38,16 @@ override_data {
   }
 }
 
+# The account id the permissions boundary builds its own ARN and the protected
+# role ARNs from (data.aws_caller_identity, read only when
+# create_permissions_boundary is set). Replaced for the same reason as above.
+override_data {
+  target = data.aws_caller_identity.current
+  values = {
+    account_id = "123456789012"
+  }
+}
+
 variables {
   environment          = "development"
   account_environments = ["development"]
@@ -1088,5 +1098,408 @@ run "ecr_public_pull_bare_wildcard_claim_rejected" {
 
   expect_failures = [
     var.ecr_public_pull_subject_claims,
+  ]
+}
+
+# ─────────────────────────── permissions boundary ───────────────────────────
+#
+# The workload-development deploy role carries AdministratorAccess, and what
+# keeps that from being "every development job owns the account's CI trust" is
+# the boundary this component creates. These runs pin the four things that make
+# it a ceiling rather than a label: it is on BOTH roles (by the exact ARN the
+# policy is created under), it allows everything so the attached policies stay
+# the grant, every deny statement is present with its exact actions and
+# resources, and AdministratorAccess or IAMFullAccess without a boundary does
+# not plan at all. Each deny's action set is pinned exactly rather than as a
+# floor: dropping one verb from a statement is the regression these exist to
+# catch. They also pin what the boundary must NOT deny, since a deploy.yml run
+# that plans this leaf rewrites its per-commit Revision tag, and a
+# managed-monitoring apply reads Organizations as the caller. The boundary
+# policy is decoded from the rendered aws_iam_policy_document, the same JSON
+# aws_iam_policy.boundary is created with.
+
+run "no_boundary_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_iam_policy.boundary) == 0
+    error_message = "no boundary policy may be created unless create_permissions_boundary is set"
+  }
+
+  assert {
+    condition     = aws_iam_role.deploy[0].permissions_boundary == null && aws_iam_role.plan[0].permissions_boundary == null
+    error_message = "with no boundary input, neither role may carry a boundary"
+  }
+
+  assert {
+    condition     = output.permissions_boundary_arn == null
+    error_message = "permissions_boundary_arn must be null when the roles carry no boundary"
+  }
+}
+
+run "administrator_access_with_the_created_boundary" {
+  command = plan
+
+  variables {
+    managed_policy_arns         = ["arn:aws:iam::aws:policy/AdministratorAccess"]
+    create_permissions_boundary = true
+  }
+
+  assert {
+    condition     = aws_iam_policy.boundary[0].name == "github-actions-boundary" && aws_iam_policy.boundary[0].path == "/"
+    error_message = "the boundary must be created as github-actions-boundary at path \"/\", the ARN the roles name"
+  }
+
+  assert {
+    condition     = aws_iam_role.deploy[0].permissions_boundary == "arn:aws:iam::123456789012:policy/github-actions-boundary"
+    error_message = "the deploy role must carry the boundary this component creates"
+  }
+
+  assert {
+    condition     = aws_iam_role.plan[0].permissions_boundary == "arn:aws:iam::123456789012:policy/github-actions-boundary"
+    error_message = "the plan role must carry the same boundary as the deploy role"
+  }
+
+  assert {
+    condition     = output.permissions_boundary_arn == "arn:aws:iam::123456789012:policy/github-actions-boundary"
+    error_message = "permissions_boundary_arn must report the boundary the roles carry"
+  }
+
+  assert {
+    condition     = toset(keys(aws_iam_role_policy_attachment.deploy)) == toset(["arn:aws:iam::aws:policy/AdministratorAccess"])
+    error_message = "the deploy role must carry exactly the managed policies the leaf lists"
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_policy.boundary[0].policy) == jsondecode(data.aws_iam_policy_document.boundary[0].json)
+    error_message = "the boundary policy must be created from the rendered boundary document these runs decode"
+  }
+
+  assert {
+    condition     = aws_iam_role.deploy[0].tags["Component"] == "github-oidc" && aws_iam_role.plan[0].tags["Component"] == "github-oidc"
+    error_message = "both roles must carry Component = github-oidc, the tag ProtectEveryGithubOidcRole keys on"
+  }
+
+  # name and description are ForceNew, and AWS refuses to delete a policy in use
+  # as a boundary, so a reworded description plans a replacement that fails.
+  assert {
+    condition     = aws_iam_policy.boundary[0].description == "Permissions boundary on the GitHub Actions deploy and plan roles (github-oidc component)"
+    error_message = "the boundary's description is ForceNew and the policy cannot be deleted while both roles use it: changing it plans a destroy-then-create that fails part way (see the comment on aws_iam_policy.boundary)"
+  }
+}
+
+run "boundary_allows_what_the_policies_grant_and_denies_the_rest" {
+  command = plan
+
+  variables {
+    managed_policy_arns         = ["arn:aws:iam::aws:policy/AdministratorAccess"]
+    create_permissions_boundary = true
+  }
+
+  # The one Allow is everything, so AdministratorAccess on the deploy role and
+  # ReadOnlyAccess on the plan role stay the effective grants.
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Effect == "Allow"
+    ]) == 1
+    error_message = "the boundary must carry exactly one Allow statement"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Effect == "Allow" && flatten([s.Action]) == ["*"] && flatten([s.Resource]) == ["*"] && try(s.Condition, null) == null
+    ]) == 1
+    error_message = "the boundary's Allow must be an unconditional Action \"*\" on Resource \"*\": anything narrower silently caps AdministratorAccess or ReadOnlyAccess"
+  }
+
+  assert {
+    condition = toset([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s.Sid if s.Effect == "Deny"
+      ]) == toset([
+      "ProtectThisBoundary",
+      "ProtectTheseCiRoles",
+      "ProtectEveryGithubOidcRole",
+      "ProtectTheComponentTag",
+      "ProtectTheGithubOidcProvider",
+      "DenyStrippingABoundary",
+      "DenyLeavingThisBoundary",
+      "DenyOrganizationAndAccountWrites",
+      "DenyDisablingSecurityServices",
+    ])
+    error_message = "the boundary must carry exactly the nine deny statements main.tf documents"
+  }
+
+  # 1. Its own definition.
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "ProtectThisBoundary" && s.Effect == "Deny" &&
+      flatten([s.Resource]) == ["arn:aws:iam::123456789012:policy/github-actions-boundary"] &&
+      toset(flatten([s.Action])) == toset(["iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:DeletePolicy"])
+    ]) == 1
+    error_message = "ProtectThisBoundary must deny exactly CreatePolicyVersion, DeletePolicyVersion, SetDefaultPolicyVersion and DeletePolicy on the boundary's own ARN"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "ProtectTheseCiRoles" && s.Effect == "Deny" &&
+      toset(flatten([s.Resource])) == toset([
+        "arn:aws:iam::123456789012:role/github-actions-deploy",
+        "arn:aws:iam::123456789012:role/github-actions-plan",
+      ]) &&
+      toset(flatten([s.Action])) == toset([
+        "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateRoleDescription", "iam:UpdateAssumeRolePolicy",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+        "iam:PutRolePermissionsBoundary", "iam:DeleteRolePermissionsBoundary",
+      ])
+    ]) == 1
+    error_message = "ProtectTheseCiRoles must deny exactly the trust, policy, boundary, update and delete writes on the deploy and plan roles by ARN"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "ProtectEveryGithubOidcRole" && s.Effect == "Deny" &&
+      flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/*"] &&
+      flatten([try(s.Condition.StringEquals["aws:ResourceTag/Component"], [])]) == ["github-oidc"] &&
+      toset(flatten([s.Action])) == toset([
+        "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateRoleDescription", "iam:UpdateAssumeRolePolicy",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+        "iam:PutRolePermissionsBoundary", "iam:DeleteRolePermissionsBoundary",
+      ])
+    ]) == 1
+    error_message = "ProtectEveryGithubOidcRole must deny exactly the same role writes as ProtectTheseCiRoles on every role tagged Component = github-oidc (the ECR Public pull role on its own leaf included)"
+  }
+
+  # The Component tag is what puts a role in the statement above, so retagging
+  # it is refused on those roles; any other key is not, because the root config
+  # stamps a per-commit Revision tag a deploy.yml run rewrites.
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "ProtectTheComponentTag" && s.Effect == "Deny" &&
+      flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/*"] &&
+      toset(flatten([s.Action])) == toset(["iam:TagRole", "iam:UntagRole"]) &&
+      flatten([try(s.Condition.StringEquals["aws:ResourceTag/Component"], [])]) == ["github-oidc"] &&
+      flatten([try(s.Condition["ForAnyValue:StringEquals"]["aws:TagKeys"], [])]) == ["Component"]
+    ]) == 1
+    error_message = "ProtectTheComponentTag must deny TagRole and UntagRole on github-oidc roles exactly when the request names the Component key"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement :
+      length(setintersection(toset(flatten([s.Action])), toset([
+        "iam:TagRole", "iam:UntagRole", "iam:TagPolicy", "iam:UntagPolicy",
+        "iam:TagOpenIDConnectProvider", "iam:UntagOpenIDConnectProvider",
+      ]))) == 0 || flatten([try(s.Condition["ForAnyValue:StringEquals"]["aws:TagKeys"], [])]) == ["Component"]
+    ])
+    error_message = "no statement may deny a tag write without keying on the Component tag: the per-commit Revision default tag would fail every deploy.yml component=all run at this leaf"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "ProtectTheGithubOidcProvider" && s.Effect == "Deny" &&
+      flatten([s.Resource]) == ["arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"] &&
+      toset(flatten([s.Action])) == toset([
+        "iam:DeleteOpenIDConnectProvider", "iam:UpdateOpenIDConnectProviderThumbprint",
+        "iam:AddClientIDToOpenIDConnectProvider", "iam:RemoveClientIDFromOpenIDConnectProvider",
+      ])
+    ]) == 1
+    error_message = "ProtectTheGithubOidcProvider must deny deleting or re-audiencing the GitHub OIDC provider the trusts name"
+  }
+
+  # 2. Shedding a ceiling.
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "DenyStrippingABoundary" && s.Effect == "Deny" && flatten([s.Resource]) == ["*"] &&
+      toset(flatten([s.Action])) == toset(["iam:DeleteRolePermissionsBoundary", "iam:DeleteUserPermissionsBoundary"])
+    ]) == 1
+    error_message = "DenyStrippingABoundary must deny both Delete*PermissionsBoundary verbs on every principal"
+  }
+
+  # 3. Stepping out.
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "DenyLeavingThisBoundary" && s.Effect == "Deny" && flatten([s.Resource]) == ["*"] &&
+      toset(flatten([s.Action])) == toset([
+        "sts:AssumeRole", "iam:CreateUser", "iam:CreateLoginProfile", "iam:UpdateLoginProfile",
+        "iam:CreateAccessKey", "iam:CreateServiceSpecificCredential",
+      ])
+    ]) == 1
+    error_message = "DenyLeavingThisBoundary must deny exactly sts:AssumeRole and minting an IAM user, password, access key or service-specific credential"
+  }
+
+  # 4. Beyond the account, and its audit.
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "DenyOrganizationAndAccountWrites" && s.Effect == "Deny" && flatten([s.Resource]) == ["*"] &&
+      toset(flatten([s.Action])) == toset([
+        "organizations:Accept*", "organizations:Attach*", "organizations:Cancel*", "organizations:Close*",
+        "organizations:Create*", "organizations:Decline*", "organizations:Delete*", "organizations:Deregister*",
+        "organizations:Detach*", "organizations:Disable*", "organizations:Enable*", "organizations:Invite*",
+        "organizations:Leave*", "organizations:Move*", "organizations:Put*", "organizations:Register*",
+        "organizations:Remove*", "organizations:Tag*", "organizations:Untag*", "organizations:Update*",
+        "account:Accept*", "account:Close*", "account:Delete*", "account:Disable*", "account:Enable*",
+        "account:Put*", "account:Start*",
+      ])
+    ]) == 1
+    error_message = "DenyOrganizationAndAccountWrites must deny exactly the Organizations and Account write verbs main.tf lists"
+  }
+
+  # The reads stay open: an Identity Center-backed Grafana workspace
+  # (managed-monitoring) calls organizations:DescribeOrganization as the caller.
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : [
+        for a in flatten([s.Action]) :
+        s.Effect != "Deny" || !can(regex("^(organizations|account):(\\*|Describe|List|Get)", a))
+      ]
+    ]))
+    error_message = "no deny may reach an organizations: or account: read (a service-wide wildcard, Describe*, List* or Get*): managed-monitoring's Identity Center workspace reads the organization as the caller"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "DenyDisablingSecurityServices" && s.Effect == "Deny" && flatten([s.Resource]) == ["*"] &&
+      length(setsubtract(toset([
+        "cloudtrail:StopLogging", "cloudtrail:DeleteTrail", "guardduty:DeleteDetector",
+        "config:StopConfigurationRecorder", "securityhub:DisableSecurityHub", "access-analyzer:DeleteAnalyzer",
+      ]), toset(flatten([s.Action])))) == 0
+    ]) == 1
+    error_message = "DenyDisablingSecurityServices must deny the audit-disabling verbs org-scp's DenyDisablingSecurity carries"
+  }
+
+  # No deny may reach the actions a deploy performs on everything else: role
+  # creation and policy attachment stay unconditioned outside the protected set.
+  assert {
+    condition = alltrue([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement :
+      !(contains(flatten([s.Action]), "iam:CreateRole") || contains(flatten([s.Action]), "iam:PassRole"))
+    ])
+    error_message = "the boundary must not deny iam:CreateRole or iam:PassRole: the development deploy creates roles in a dozen components, most with no boundary input"
+  }
+}
+
+run "boundary_protects_only_the_roles_this_leaf_creates" {
+  command = plan
+
+  variables {
+    create_plan_role            = false
+    create_permissions_boundary = true
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.boundary[0].json).Statement : s
+      if s.Sid == "ProtectTheseCiRoles" && flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/github-actions-deploy"]
+    ]) == 1
+    error_message = "a leaf without a plan role must name only its deploy role in ProtectTheseCiRoles"
+  }
+}
+
+run "administrator_access_under_a_supplied_boundary_accepted" {
+  command = plan
+
+  variables {
+    managed_policy_arns      = ["arn:aws:iam::aws:policy/AdministratorAccess"]
+    permissions_boundary_arn = "arn:aws:iam::123456789012:policy/estate-ci-boundary"
+  }
+
+  assert {
+    condition     = length(aws_iam_policy.boundary) == 0
+    error_message = "a supplied boundary must not create this component's own"
+  }
+
+  assert {
+    condition = (aws_iam_role.deploy[0].permissions_boundary == "arn:aws:iam::123456789012:policy/estate-ci-boundary" &&
+    aws_iam_role.plan[0].permissions_boundary == "arn:aws:iam::123456789012:policy/estate-ci-boundary")
+    error_message = "a supplied permissions_boundary_arn must go on both roles"
+  }
+}
+
+run "scoped_policies_without_a_boundary_accepted" {
+  command = plan
+
+  variables {
+    managed_policy_arns = ["arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"]
+  }
+
+  assert {
+    condition     = aws_iam_role.deploy[0].permissions_boundary == null
+    error_message = "the AdministratorAccess rule must not require a boundary for a scoped policy set"
+  }
+}
+
+run "administrator_access_without_a_boundary_rejected" {
+  command = plan
+
+  variables {
+    managed_policy_arns = ["arn:aws:iam::aws:policy/AdministratorAccess"]
+  }
+
+  expect_failures = [
+    var.managed_policy_arns,
+  ]
+}
+
+run "iam_full_access_without_a_boundary_rejected" {
+  command = plan
+
+  variables {
+    managed_policy_arns = ["arn:aws:iam::aws:policy/IAMFullAccess"]
+  }
+
+  expect_failures = [
+    var.managed_policy_arns,
+  ]
+}
+
+run "administrator_access_in_another_partition_without_a_boundary_rejected" {
+  command = plan
+
+  variables {
+    managed_policy_arns = ["arn:aws-us-gov:iam::aws:policy/AdministratorAccess"]
+  }
+
+  expect_failures = [
+    var.managed_policy_arns,
+  ]
+}
+
+run "both_boundary_inputs_rejected" {
+  command = plan
+
+  variables {
+    create_permissions_boundary = true
+    permissions_boundary_arn    = "arn:aws:iam::123456789012:policy/estate-ci-boundary"
+  }
+
+  expect_failures = [
+    var.create_permissions_boundary,
+  ]
+}
+
+run "boundary_on_a_leaf_without_deploy_or_plan_role_rejected" {
+  command = plan
+
+  variables {
+    create_deploy_role          = false
+    create_plan_role            = false
+    create_ecr_public_pull_role = true
+    ecr_public_pull_repos       = ["eks-gitops"]
+    create_permissions_boundary = true
+  }
+
+  expect_failures = [
+    var.create_permissions_boundary,
   ]
 }
