@@ -214,7 +214,7 @@ VARS_ALLOWED: set[str] = set()
 # The ids the workflows read today. The floor requires the scan to have seen
 # each one read as a secret, so a tokeniser that stops recognising reads cannot
 # report a clean tree.
-KNOWN_SECRET_READS = {"DEPLOY_ROLE_ARN", "DEPLOY_ACCOUNT_ID", "AWS_ROLE_ARN",
+KNOWN_ID_READS = {"DEPLOY_ROLE_ARN", "DEPLOY_ACCOUNT_ID", "AWS_ROLE_ARN",
                       "TERRAGRUNT_ACCOUNT_ID", "E2E_AWS_ROLE_ARN"}
 
 # drift.yml exactly as on main at 52233f8 (the last commit before the
@@ -439,7 +439,7 @@ def exact_expr(text) -> str | None:
     return m.group(1) if m else None
 
 
-def secret_whole(text) -> str | None:
+def whole_read_name(text) -> str | None:
     """NAME when the whole string is `${{ secrets.NAME }}` (any spelling)."""
     expr = exact_expr(text)
     toks = tokenize(expr) if expr is not None else None
@@ -564,8 +564,8 @@ class Result:
         self.findings: list[tuple[str, int, str]] = []
         self.exempt_notes: list[str] = []
         self.mask_steps = 0
-        self.secret_reads = 0
-        self.secret_names: set[str] = set()
+        self.id_reads = 0
+        self.id_names: set[str] = set()
         self.workflows = 0
 
 
@@ -610,8 +610,8 @@ def check(root: Path) -> Result:
             )
         res.findings.extend(out)
         res.mask_steps += sub.mask_steps
-        res.secret_reads += sub.secret_reads
-        res.secret_names |= sub.secret_names
+        res.id_reads += sub.id_reads
+        res.id_names |= sub.id_names
     return res
 
 
@@ -621,7 +621,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
 
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
     guarded_vars: set[str] = set()     # vars.NAME compared against ''
-    secret_reads: dict[str, tuple[str, int]] = {}  # NAME -> (spelling, first line)
+    id_reads: dict[str, tuple[str, int]] = {}  # NAME -> (spelling, first line)
     wf_shell = shell_of(doc)
 
     def literal_ids(value, line):
@@ -704,9 +704,9 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                         continue
                     if not ident(name):
                         continue
-                    res.secret_reads += 1
-                    res.secret_names.add(key)
-                    secret_reads.setdefault(key, (name, at))
+                    res.id_reads += 1
+                    res.id_names.add(key)
+                    id_reads.setdefault(key, (name, at))
                     found.add(key)
                     whole_value = entry and whole is not None and whole == expr and s is r \
                         and len(r.path) == 1
@@ -732,7 +732,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
         """An id-named key takes only a whole secret, a mask-step output or a guard."""
         for text, ln in strings_with_lines(value, line):
             for expr, idx in expressions(text, False):
-                if mask_ids is not None and secret_whole(text) is not None:
+                if mask_ids is not None and whole_read_name(text) is not None:
                     continue
                 if is_guard(text):
                     continue
@@ -867,7 +867,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                                       "which this step's env does not carry, so it masks nothing "
                                       "for it.")
                         ok = False
-                    elif secret_whole(env[k]) is None:
+                    elif whole_read_name(env[k]) is None:
                         bad(env.key_lines.get(k, env.line),
                             f"job '{job_id}', mask step '{step_name}' masks {k}, which holds "
                             f"{str(env[k])[:60]!r}. What a mask step masks, and what it hands on "
@@ -915,7 +915,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                 v = w["role-to-assume"]
                 ln = w.key_lines.get("role-to-assume", w.line)
                 sid = step_output_whole(v)
-                if not (secret_whole(v) is not None or (sid is not None and sid in mask_step_ids)):
+                if not (whole_read_name(v) is not None or (sid is not None and sid in mask_step_ids)):
                     bad(ln, f"job '{job_id}': role-to-assume is {str(v)[:60]!r}. It must be "
                             "`${{ secrets.NAME }}`, read after the job's mask step, or "
                             "`${{ steps.ID.outputs.X }}` from that mask step. The action "
@@ -967,7 +967,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                     "environment and `permissions: {}` that fails when "
                     f"`${{{{ secrets.{name} != '' }}}}`, and make this job need it.")
 
-    for key, (name, ln) in sorted(secret_reads.items(), key=lambda kv: kv[1][1]):
+    for key, (name, ln) in sorted(id_reads.items(), key=lambda kv: kv[1][1]):
         if key not in guarded_vars:
             bad(ln, f"reads the id secret {name}, and nothing in this workflow compares "
                     f"`vars.{name}` against ''. A value left behind as a variable from before "
@@ -985,8 +985,8 @@ def report(res: Result) -> int:
         print(f"\n{len(res.findings)} finding(s). See the docstring of "
               "scripts/check-workflow-id-masking.py and docs/operations.md.")
         return 1
-    print(f"OK: {res.workflows} workflow(s) read; {res.secret_reads} id secret read(s) of "
-          f"{len(res.secret_names)} name(s), each masked first by one of {res.mask_steps} mask "
+    print(f"OK: {res.workflows} workflow(s) read; {res.id_reads} id secret read(s) of "
+          f"{len(res.id_names)} name(s), each masked first by one of {res.mask_steps} mask "
           "step(s), none from vars.")
     return 0
 
@@ -997,7 +997,7 @@ def main_check() -> int:
         print(f"::error::{why} Refusing to report a pass.")
         return 1
     res = check(ROOT)
-    unseen = sorted(KNOWN_SECRET_READS - res.secret_names)
+    unseen = sorted(KNOWN_ID_READS - res.id_names)
     if res.workflows < 4 or res.mask_steps < 4 or unseen:
         print(f"::error::read {res.workflows} workflow(s) and {res.mask_steps} mask step(s) "
               "under .github/workflows (expected at least 4 of each), and saw no read of "
@@ -1191,7 +1191,7 @@ def self_test() -> int:
             for rel, ln, msg in clean.findings:
                 print(f"  {rel}:{ln}: {msg[:120]}", file=sys.stderr)
             return 1
-        unseen = KNOWN_SECRET_READS - clean.secret_names
+        unseen = KNOWN_ID_READS - clean.id_names
         if unseen:
             print(f"FAIL [unmutated]: no read of {', '.join(sorted(unseen))} was seen",
                   file=sys.stderr)
