@@ -102,4 +102,4 @@ live/
 - `destroy.yml` — manual dispatch: development/staging only, requires confirmation string
 - `drift.yml` — scheduled weekday drift detection on production + staging (matrix auto-discovered), creates GitHub issues
 - `e2e.yml` — manual dispatch: provisions a real substrate, installs the operator, deploys a tenant via GitOps, then tears down (never scheduled — real spend)
-- Auth: AWS OIDC. ci.yml's plan job reads `AWS_ROLE_ARN`, drift.yml `DRIFT_PLAN_ROLE_ARNS` (one plan role per account directory), deploy.yml and destroy.yml `DEPLOY_ROLE_ARN` from their GitHub Environment, e2e.yml `E2E_AWS_ROLE_ARN`
+- Auth: AWS OIDC. Every account id and role ARN a workflow reads is a secret on the environment its job declares, masked by `scripts/mask-aws-ids.sh` before anything prints (enforced by `scripts/check-workflow-id-masking.py`). ci.yml's plan job reads `AWS_ROLE_ARN`, drift.yml `DRIFT_PLAN_ROLE_ARNS` (one plan role per account directory), deploy.yml and destroy.yml `DEPLOY_ROLE_ARN` from their GitHub Environment, e2e.yml `E2E_AWS_ROLE_ARN`

@@ -582,6 +582,22 @@ MUTATIONS = [
 ]
 
 
+# drift.yml once the drift-environment change has replaced it: the role map is
+# a secret on the drift environment, masked by mask-drift-role-map.sh. Applied
+# whenever drift.yml reads that secret, and then every one must apply.
+DRIFT_MUTATIONS = [
+    ("drift: something prints ahead of the role-map mask", "drift.yml",
+     "        run: |\n          # First: mask every id and role ARN",
+     "        run: |\n          echo \"selecting\"\n          # First: mask every id and role ARN", None),
+    ("drift: role-to-assume from the matrix", "drift.yml",
+     "role-to-assume: ${{ steps.role.outputs.role_arn }}",
+     "role-to-assume: ${{ matrix.role_arn }}", None),
+    ("drift: the guard job reads the variable's value", "drift.yml",
+     "INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}",
+     "INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS }}", None),
+]
+
+
 def self_test() -> int:
     failures = 0
     ran = 0
@@ -610,6 +626,8 @@ def self_test() -> int:
                 hashlib.sha256(drift.read_bytes()).hexdigest() == EXEMPT[rel_drift][0]:
             mutations.append(("an edit lapses drift.yml's exemption", "drift.yml",
                               "jobs:\n", "jobs:\n", r"vars\.DRIFT_PLAN_ROLE_ARNS"))
+        elif drift.is_file() and "secrets.DRIFT_PLAN_ROLE_ARNS" in drift.read_text():
+            mutations.extend(DRIFT_MUTATIONS)
         for name, fname, old, new, expect in mutations:
             ran += 1
             target = base / WORKFLOWS_REL / fname

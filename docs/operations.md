@@ -118,7 +118,51 @@ Using `task apply ACCOUNT=<account> REGION=<region> ENVIRONMENT=<env>` (without 
 | **architecture-components** | Runs `scripts/check-architecture-components.sh` -- the architecture doc's component inventory must be the components that exist, both directions; CLAUDE.md's layer list is checked in the omission direction only. A documented component that is gone sends a reader to a missing directory; a component no table names is quieter and worse, because the doc reads as complete. |
 | **teardown-gates** | Runs `scripts/check-teardown-gates.py` -- in a component declaring `force_destroy_buckets`, every teardown-gate attribute must resolve permissively when the lever is set, and every protectable resource must carry one. A module without the lever declares why in the script's EXEMPT table. No tflint or checkov rule covers `force_destroy` or `deletion_protection`, and a `tofu test` assert cannot reach a grandchild module's attributes. |
 | **tenant-schema-readers** | Runs `scripts/check-tenant-schema-readers.py` -- every field a `tenants` object type declares must be read by a resource in that component. A field with no reader is a control an operator can set, sees accepted, and believes is in force. |
-| **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan -lock=false` to show what would change (credential-gated -- skips green when `AWS_ROLE_ARN` is unset). The credential is the read-only plan role, which cannot write the `.tflock` object `root.hcl`'s `use_lockfile = true` takes, so the plan skips the lock. The PR plan writes nothing and nothing applies its result (it gates on whether the plan runs, not on what it would change), so it never contends with an apply. |
+| **workflow-id-masking** | Runs `scripts/check-workflow-id-masking.py`, and the self-tests of both it and `scripts/mask-aws-ids.sh` -- every AWS account id and role ARN a workflow reads is a secret on the environment its job declares, never a variable; the first step that receives one runs the mask script as its first command; none reaches a workflow- or job-level env, `run:` text or an action input ahead of the mask; and each workflow fails while a name it reads as a secret is still a variable. See [Account ids in the Actions logs](#account-ids-in-the-actions-logs). |
+| **plan** | PRs only. Matrix auto-discovered from `live/`. Runs `terragrunt plan -lock=false` to show what would change (credential-gated -- skips green unless both the `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` secrets are set on the `plan` environment, and fails while either name is still a variable). The credential is the read-only plan role, which cannot write the `.tflock` object `root.hcl`'s `use_lockfile = true` takes, so the plan skips the lock. The PR plan writes nothing and nothing applies its result (it gates on whether the plan runs, not on what it would change), so it never contends with an apply. |
+
+### Account ids in the Actions logs
+
+The repository is public, and so are its Actions logs. Every AWS account id and IAM role ARN a workflow reads is a **secret on the GitHub Environment its job declares**, never a variable:
+
+| Secret | Environment | Workflow |
+|---|---|---|
+| `DEPLOY_ROLE_ARN`, `DEPLOY_ACCOUNT_ID` | `development`, `staging`, `production` | deploy.yml, destroy.yml (`production`: deploy.yml only) |
+| `AWS_ROLE_ARN`, `TERRAGRUNT_ACCOUNT_ID` | `plan` | ci.yml's plan job |
+| `E2E_AWS_ROLE_ARN` | `e2e` | e2e.yml |
+| `DRIFT_PLAN_ROLE_ARNS` | `drift` once the drift-environment change lands; a repository variable until then | drift.yml |
+
+A variable cannot be rescued by masking: the runner prints it in the env block of every step that receives it, and configure-aws-credentials prints it as `role-to-assume`, before any step can register a mask. A secret is masked from the job's first line, but only whole: the account id inside a role ARN, the state bucket `<account_id>-<region>-tfstate` in a terragrunt error, an ARN in an AWS AccessDenied message would print in the clear. So in each job, the first step that receives one of these secrets runs `scripts/mask-aws-ids.sh` as its first command. It registers every twelve-digit window of every run of twelve or more digits, and every IAM ARN, with `::add-mask::`, before anything else prints; refuses a value spanning several lines (the runner would mask each line on its own); and never prints a value, not even in an error. Masks are per job, so every job that reads one masks it. From that line on, the job's log shows `***` for each id and ARN: the credentials step's inputs, every later env block, `sts get-caller-identity`, and terragrunt's output. Later steps read the secret from the `secrets` context again rather than through a job output, because the runner drops a job output that carries a masked value.
+
+Each workflow also fails while a name it reads is still set as a **variable** at any level: the job that reads the secret compares the variable against `''` in its first step, which sees the environment's, the repository's and the organization's values. deploy.yml and destroy.yml additionally refuse, in a first job that declares no environment and costs no approval, either `DEPLOY_*` name set as a repository or organization **secret** (or variable): every environment without its own would inherit it. Only `true` or `false` reaches a step, so a normal run prints none of these values even while one is misplaced. The residual: with step debug logging on (a re-run with debug logging, or `ACTIONS_STEP_DEBUG`), the runner traces how it evaluates each expression, including the value it reads for a variable, before the comparison. A secret is masked there; a variable is not. The `GITHUB_TOKEN` cannot read repository variables, so no other check exists: delete the old variables, and never run a workflow with debug logging while one exists.
+
+`scripts/check-workflow-id-masking.py` (CI job `workflow-id-masking`) holds all of this in the workflow text: no id from `vars.`, no id as a dispatch input, the mask step first, no workflow- or job-level env, `role-to-assume` only from a secret or a mask step's output, `mask-aws-account-id: true` on every configure-aws-credentials step, and the leftover-variable comparison for every secret read. drift.yml is exempt while it is byte-identical to the file the drift-environment change replaces, and is held to every rule from the first edit.
+
+**What remains visible.** Account directory names (`workload-staging`), environment and region names, role names that appear outside an ARN, and the ids of accounts whose ids are in none of the secrets a job reads: an AWS-owned account in a managed resource's ARN, or another of your accounts that a plan reaches through an API response rather than through the job's own secrets. The repository holds only placeholder ids, so the last case needs an API to return one.
+
+**Migrating from variables.** Set each secret on its environment, then delete the variable it replaces. Until both are done for a workflow, its run fails with an error naming what is left. With the `gh` CLI, for each `<env>` in `development`, `staging` and `production` (values are placeholders; read them from the account's `github-oidc` outputs):
+
+```bash
+REPO=nanohype/landing-zone
+
+# deploy.yml and destroy.yml, once per environment
+gh secret set DEPLOY_ROLE_ARN   --env <env> --repo "$REPO" --body 'arn:aws:iam::<workload-env-account-id>:role/<deploy-role-name>'
+gh secret set DEPLOY_ACCOUNT_ID --env <env> --repo "$REPO" --body '<workload-env-account-id>'
+gh variable delete DEPLOY_ROLE_ARN   --env <env> --repo "$REPO"
+gh variable delete DEPLOY_ACCOUNT_ID --env <env> --repo "$REPO"
+
+# ci.yml's plan job: the development account's plan role and id
+gh secret set AWS_ROLE_ARN          --env plan --repo "$REPO" --body 'arn:aws:iam::<development-account-id>:role/github-actions-plan'
+gh secret set TERRAGRUNT_ACCOUNT_ID --env plan --repo "$REPO" --body '<development-account-id>'
+gh variable delete AWS_ROLE_ARN          --repo "$REPO"
+gh variable delete TERRAGRUNT_ACCOUNT_ID --repo "$REPO"
+
+# e2e.yml
+gh secret set E2E_AWS_ROLE_ARN --env e2e --repo "$REPO" --body 'arn:aws:iam::<e2e-account-id>:role/<deploy-role-name>'
+gh variable delete E2E_AWS_ROLE_ARN --repo "$REPO"   # or --env e2e, wherever it was set
+```
+
+`gh secret set` without `--body` reads the value from stdin, which keeps it out of shell history. `gh variable list --repo "$REPO"` and `gh variable list --env <env> --repo "$REPO"` show what is left; a `gh variable delete` for a name that does not exist at that level fails harmlessly. ci.yml's plan job reads both its secrets or skips: an unconfigured fork or repository stays green, a leftover variable turns every pull request red until it is deleted.
 
 ### deploy.yml -- Manual Deploy
 
@@ -135,18 +179,18 @@ Uses GitHub environment protection rules -- production requires approval. When `
 
 The `environment` choice covers only the three workload environments. The management-account `org` components (the [Organization Components](#organization-components) above) are **local-CLI-only** — deploy them with `task apply ACCOUNT=management ENVIRONMENT=org COMPONENT=<component>` under your own admin/SSO credentials. `org` is intentionally not a workflow choice because the management account is applied rarely and by hand.
 
-**Configuration:** two variables on each GitHub Environment (Settings > Environments > `<environment>` > Environment variables), and on nothing broader. The job declares `environment: <environment>`, so each environment carries its own account's values:
+**Configuration:** two secrets on each GitHub Environment (Settings > Environments > `<environment>` > Environment secrets), and on nothing broader. The job declares `environment: <environment>`, so each environment carries its own account's values:
 
-| Variable | Value |
+| Secret | Value |
 |---|---|
 | `DEPLOY_ROLE_ARN` | the OIDC deploy role in the `workload-<environment>` account (the `github-oidc` component's `deploy_role_arn` output in that account) |
 | `DEPLOY_ACCOUNT_ID` | the 12-digit id of the `workload-<environment>` account. The job passes it to terragrunt as `TERRAGRUNT_ACCOUNT_ID`, and `root.hcl` names the state bucket `<account_id>-<region>-tfstate` from it; without it the bucket would be named after the tracked `account.hcl` placeholder |
 
-A GitHub variable that an environment does not set resolves to the repository's value, then the organization's. That is why these are not `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID`: those are repository variables (the read-only plan role and the account id for `ci.yml`'s plan job), and an environment that forgot its own would silently inherit them. For the same reason a first job, which declares no environment and so sees only repository and organization values, fails the run when either `DEPLOY_*` name is set at one of those levels. Never set them there.
+A GitHub secret that an environment does not set resolves to the repository's value, then the organization's. That is why these are not `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID`, the read-only plan role and account id `ci.yml`'s plan job reads from the `plan` environment: a name shared with the plan role invites setting it once at repository level, and an environment that forgot its own would silently inherit it. For the same reason a first job, which declares no environment and so sees only repository and organization values, fails the run when either `DEPLOY_*` name is set at one of those levels as a secret or as a variable, and the deploy job fails when either is still a variable on the environment. Never set them there.
 
 Before any credential is issued, the job fails when the environment sets neither or only one of the two, when `DEPLOY_ACCOUNT_ID` is not 12 digits, when `DEPLOY_ROLE_ARN` is not a role ARN in `DEPLOY_ACCOUNT_ID`'s account, when the `account` input is not `workload-<environment>`, when the `region` input names no directory under that account, or when the `component` input is neither `all` nor a single directory name holding a `terragrunt.hcl` under that environment. After assuming the role it compares the credential's account (`aws sts get-caller-identity`) with `DEPLOY_ACCOUNT_ID` and fails on a mismatch, so a role and an id for two different accounts never reach terragrunt.
 
-The account ids are visible in the run log: the runner prints each step's environment and Variables are not masked. AWS does not treat an account id as a secret; the error messages simply avoid repeating them.
+The account id and the role ARN do not appear in the run log: the first step masks both, and every derived piece, before anything prints (see [Account ids in the Actions logs](#account-ids-in-the-actions-logs)). The error messages name neither either way.
 
 One environment names one account, so the workflow deploys only `live/aws/workload-<environment>/` leaves. The `backup/` and `network/` account directories also hold `development`/`staging`/`production` leaves; run with the workload account's role and id, they would build that account's stack inside the workload account. Deploy them locally under that account's own credentials, the same way as the `org` components: `task apply ACCOUNT=<account> REGION=us-east-1 ENVIRONMENT=<environment> COMPONENT=<component>` with `TERRAGRUNT_ACCOUNT_ID` exported as that account's id.
 
@@ -163,7 +207,7 @@ One environment names one account, so the workflow deploys only `live/aws/worklo
 
 The confirmation guard (`confirm == environment`) prevents accidental destroys. Runs `terragrunt destroy` or `terragrunt run --all -- destroy`.
 
-**Configuration:** the same environment-only `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` variables as `deploy.yml`, on the `development` and `staging` GitHub Environments, with the same checks: neither set at repository or organization level, both set on the environment and naming one account, the `account` input equal to `workload-<environment>`, the `component` input `all` or a leaf directory under it, and the assumed credential's account equal to `DEPLOY_ACCOUNT_ID`. The last matters most here: a destroy run with the state of one account and the credential of another sends the state's resource ids to the wrong account, where most of them are simply not found and dropped from state, leaving the real resources running untracked.
+**Configuration:** the same environment-only `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` secrets as `deploy.yml`, on the `development` and `staging` GitHub Environments, with the same checks and the same masking: neither set at repository or organization level, neither left as a variable anywhere, both set on the environment and naming one account, the `account` input equal to `workload-<environment>`, the `component` input `all` or a leaf directory under it, and the assumed credential's account equal to `DEPLOY_ACCOUNT_ID`. The last matters most here: a destroy run with the state of one account and the credential of another sends the state's resource ids to the wrong account, where most of them are simply not found and dropped from state, leaving the real resources running untracked.
 
 ### drift.yml -- Drift Detection
 
