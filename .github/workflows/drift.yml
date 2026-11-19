@@ -356,10 +356,13 @@ jobs:
           tofu_version: "1.13.9"
       - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
         with:
-          # terragrunt-action@v3 runs tofu inside its own container, so it needs
-          # tofu_version told to it directly — the setup-opentofu step above only
-          # installs tofu on the runner. Without this the action aborts every run
-          # ("No mise.toml found, so 'tofu_version' is required").
+          # terragrunt-action@v3 installs terragrunt and tofu on the runner
+          # through mise, and with no mise.toml in the repo it requires
+          # tofu_version told to it directly, even though the setup-opentofu
+          # step above already put tofu on PATH. Without this the action aborts
+          # every run ("No mise.toml found, so 'tofu_version' is required"). It
+          # is given no tg_command, so it only installs: the TG_NON_INTERACTIVE
+          # it sets applies to a command it runs itself, never to the Plan step.
           tofu_version: "1.13.9"
           tg_version: "1.2.2"
 
@@ -383,7 +386,7 @@ jobs:
           # so the action's own handling cannot be the one place it is not.
           mask-aws-account-id: true
 
-      # `terragrunt plan -detailed-exitcode` returns three distinct codes, and they
+      # A plan with -detailed-exitcode returns three distinct codes, and they
       # mean three different things — conflating them is how drift detection goes
       # dark on the failure mode most likely to actually occur:
       #   0 — no changes (in sync). Nothing to report.
@@ -394,7 +397,17 @@ jobs:
       #       Open/update the drift issue; the job stays green (drift is tracked,
       #       not a CI failure).
       # `set +e` keeps the step from aborting on code 1 before we can branch on it;
-      # PIPESTATUS[0] captures terragrunt's code through the `tee` pipe.
+      # PIPESTATUS[0] captures terragrunt's code through the `tee` pipe:
+      # terragrunt exits with tofu's own code, so 2 stays 2.
+      #
+      # No one is at the keyboard, so the plan runs non-interactively, the same
+      # way deploy.yml's and destroy.yml's do. --non-interactive answers
+      # terragrunt's own prompts; -input=false answers tofu's. A single unit
+      # passes the tofu command through as written, so without -input=false a
+      # leaf missing a required variable would stop at tofu's "Enter a value:"
+      # prompt and, with stdin held open, wait out the job timeout instead of
+      # failing as a drift check error. With it the plan errors at once (code 1)
+      # and is reported like any other plan error.
       #
       # A failed "Configure AWS credentials" is recorded as code 1 without running
       # terragrunt: plan.txt then holds a message naming the account directory
@@ -451,7 +464,7 @@ jobs:
           export TERRAGRUNT_ACCOUNT_ID="$ACCOUNT_ID"
 
           set +e
-          terragrunt plan -lock=false -detailed-exitcode -no-color 2>&1 | tee plan.txt
+          terragrunt run --non-interactive -- plan -input=false -lock=false -detailed-exitcode -no-color 2>&1 | tee plan.txt
           echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       # The plan output carries real account ids (the state bucket

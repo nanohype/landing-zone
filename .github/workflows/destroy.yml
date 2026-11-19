@@ -272,13 +272,33 @@ jobs:
         # TEXT, so an input carrying shell syntax becomes shell syntax. It matters
         # most here: this job already holds credentials whose whole purpose is
         # deleting infrastructure.
+        #
+        # No one is at the keyboard, so both paths run non-interactively and
+        # hand tofu the same flags. --non-interactive answers terragrunt's own
+        # prompts (the terragrunt 1.x spelling; TG_NON_INTERACTIVE as an env
+        # var). It does not answer tofu's, and tofu destroy has two: the "Enter
+        # a value:" prompt for a required variable nothing set, and the destroy
+        # confirmation. With stdin closed the variable prompt fails ("No value
+        # for required variable") and the confirmation fails ("error asking for
+        # approval: EOF"); with stdin held open either waits out the job
+        # timeout. `run --all` appends -auto-approve to destroy on its own but,
+        # unlike for plan and apply, not -input=false, and a single unit passes
+        # the tofu command through as written. So both paths spell out what
+        # terragrunt does not add: -input=false on both, -auto-approve on the
+        # single unit. A unit missing a required variable therefore fails fast
+        # on either path, and a destroy proceeds without a prompt on either.
+        # Terragrunt's automatic `tofu init` takes neither flag on either path;
+        # it has nothing to ask on a fresh checkout, where root.hcl generates a
+        # complete backend block. A human still decides before anything is
+        # deleted: the `confirm` input this job's `if:` requires, and the
+        # environment's protection rules.
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
         run: |
           if [ "$COMPONENT" = "all" ]; then
-            terragrunt run --all --non-interactive -- destroy
+            terragrunt run --all --non-interactive -- destroy -input=false
           else
             cd "$COMPONENT"
-            terragrunt destroy
+            terragrunt run --non-interactive -- destroy -input=false -auto-approve
           fi
