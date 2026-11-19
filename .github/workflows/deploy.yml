@@ -278,22 +278,24 @@ jobs:
         # under the deploy role's AWS credentials. An env var is a value bash reads,
         # not text bash parses.
         #
-        # No one is at the keyboard, so both paths run non-interactively.
-        # --non-interactive answers terragrunt's own prompts (it is the
-        # terragrunt 1.x spelling, TG_NON_INTERACTIVE as an env var). It does not
-        # answer tofu's: `run --all` appends -input=false to every tofu command
-        # and -auto-approve to apply on its own, but a single unit passes the
-        # tofu command through as written, so tofu apply stops at its "Enter a
-        # value:" confirmation with nothing to answer it: with stdin closed it
-        # fails ("error asking for approval: EOF"), with stdin held open it
-        # waits out the job timeout, and either way nothing is applied.
-        # The single-component path therefore passes -auto-approve, and only for
-        # apply: plan has no confirmation to skip. It does not pass -input=false,
-        # so the two paths still differ there: a single unit missing a required
-        # variable can still reach tofu's input prompt, where the all path fails
-        # fast. A human still decides before anything changes: the
-        # environment's protection rules hold the job before it starts
-        # (production requires approval), as on the all path.
+        # No one is at the keyboard, so both paths run non-interactively and
+        # hand tofu the same flags. --non-interactive answers terragrunt's own
+        # prompts (the terragrunt 1.x spelling; TG_NON_INTERACTIVE as an env
+        # var). It does not answer tofu's, and tofu has two: the "Enter a value:"
+        # prompt for a required variable nothing set, and apply's confirmation.
+        # With stdin closed either fails ("error asking for approval: EOF"); with
+        # stdin held open either waits out the job timeout. `run --all` appends
+        # -input=false to plan and apply, and -auto-approve to apply, on its own.
+        # A single unit passes the tofu command through as written, so the
+        # single-component path spells the same flags out: -input=false on both
+        # commands, -auto-approve on apply only (plan has nothing to confirm).
+        # A unit missing a required variable therefore fails fast on either
+        # path, and an apply proceeds without a prompt on either. Terragrunt's
+        # automatic `tofu init` takes neither flag on either path; it has
+        # nothing to ask on a fresh checkout, where root.hcl generates a
+        # complete backend block. A human still decides before anything
+        # changes: the environment's protection rules hold the job before it
+        # starts (production requires approval).
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
@@ -311,8 +313,8 @@ jobs:
           else
             cd "$COMPONENT"
             if [ "$ACTION" = "apply" ]; then
-              terragrunt run --non-interactive -- apply -auto-approve
+              terragrunt run --non-interactive -- apply -input=false -auto-approve
             else
-              terragrunt run --non-interactive -- plan
+              terragrunt run --non-interactive -- plan -input=false
             fi
           fi
