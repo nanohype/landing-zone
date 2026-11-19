@@ -104,10 +104,13 @@ jobs:
           # network, backup or shared-services leaf planned here would plan
           # against the development account — a create-everything plan fed by
           # mocks where its dependencies have no state, or a failure — which
-          # reports nothing true about the leaf it names. Those accounts are
-          # planned by drift.yml (staging and production, each with its own
-          # account's plan role) and deploy.yml (each environment's own deploy
-          # role), never from a pull request.
+          # reports nothing true about the leaf it names. Staging and
+          # production leaves, in every account, are planned by drift.yml with
+          # each account's own plan role. deploy.yml plans and applies only
+          # live/aws/workload-<env>/ leaves. The hub, org and shared leaves,
+          # and the backup and network development leaves, are run locally
+          # with their own account's credentials (docs/operations.md); no
+          # workflow plans them.
           #
           # The filter is on the ACCOUNT, not the env directory: backup,
           # network and reference-adopt each hold a `development` directory of
