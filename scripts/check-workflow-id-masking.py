@@ -113,12 +113,15 @@ WHAT IT CHECKS, in every workflow under .github/workflows
      later step that receives the secret may not run after a failure
      (`always()`, `failure()`, `cancelled()` in its `if:`): a step before the
      mask failing skips the mask, and such a step would then run unmasked.
-  6. `role-to-assume` is `${{ secrets.NAME }}` read after rule 5's mask, or
-     `${{ steps.ID.outputs.X }}` from a mask step earlier in the same job. Never
-     a variable, a matrix value, an input or a literal.
+  6. `role-to-assume` (an input name, so matched case-insensitively: the
+     runner hands an action its inputs upper-cased, and `Role-To-Assume`
+     configures it exactly as `role-to-assume` does) is `${{ secrets.NAME }}`
+     read after rule 5's mask, or `${{ steps.ID.outputs.X }}` from a mask step
+     earlier in the same job. Never a variable, a matrix value, an input or a
+     literal. Recognising an id by use reads the input name the same way.
   7. Every aws-actions/configure-aws-credentials step (owner and repository
      compared case-insensitively, as GitHub resolves them) sets
-     `mask-aws-account-id: true`.
+     `mask-aws-account-id: true` (the input name compared case-insensitively).
   8. Every job that reads an id secret from its environment compares
      `vars.NAME` against '' (the guard), itself or through a job it needs on
      the same environment, so a value left behind as a variable from before it
@@ -129,7 +132,16 @@ WHAT IT CHECKS, in every workflow under .github/workflows
      rule 4 sees repository and organization variables alone.
   9. No string in a workflow other than a `uses:` reference carries a literal
      twelve-digit account id or an ARN with one, except the tree's synthetic
-     placeholders (one digit repeated, or 123456789012).
+     placeholders (one digit repeated, or 123456789012). An unquoted number
+     counts, as a value or as a key: YAML reads `OWNER: 222233334444` as an
+     int, and the runner prints it as text.
+
+No finding repeats an account id. A finding is printed as an `::error`
+annotation, which stays on the pull request and in the public run log after
+the diff that carried the text is gone, so every message (a YAML parse error
+included) is redacted on its way out: a run of twelve or more digits other than
+a placeholder is printed as <account id>, and workflow text a finding quotes is
+redacted before it is cut to length, so no truncated head of an id survives.
 
 Rules 4 and 8 check that the comparison exists where it can see the value,
 not what the shell does with it; the workflow's step fails on `true`, and its message names the `gh` command
@@ -153,7 +165,12 @@ USAGE
   check-workflow-id-masking.py --self-test  mutate copies of the workflows in
                                             ways the rules forbid and require
                                             each to be rejected, citing the file
-                                            and the mutated line
+                                            and the mutated line, with no
+                                            account id (nor the head or tail of
+                                            one it planted) in any finding; and
+                                            apply edits the rules permit (mixed-
+                                            case input names) and require each
+                                            to be accepted
 
 Exit 0 = clean. Exit 1 = a violation, or a scan that could not see its inputs.
 """
@@ -256,22 +273,36 @@ LineLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapp
 LineLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_SEQUENCE_TAG, _sequence)
 
 
-def strings_with_lines(value, line: int, skip_keys: tuple = ()):
-    """(string, line) for every string inside a parsed value, keys included."""
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def strings_with_lines(value, line: int, skip_keys: tuple = (), numbers: bool = False):
+    """(string, line) for every string inside a parsed value, keys included.
+
+    numbers: also yield each integer and float scalar, and each such key, as
+    its text (booleans are not numbers here). An unquoted `OWNER: 222233334444`
+    is an int to YAML and a string to the runner, which prints it in the env
+    block like any other value, so the literal-id rule has to see it; the
+    expression rules have nothing to read in a number."""
     if isinstance(value, str):
         yield value, line
+    elif numbers and _number(value):
+        yield str(value), line
     elif isinstance(value, LDict):
         for k, v in value.items():
             kl = value.key_lines.get(k, value.line)
             if isinstance(k, str):
                 yield k, kl
+            elif numbers and _number(k):
+                yield str(k), kl
             if k in skip_keys:
                 continue
-            yield from strings_with_lines(v, value.value_lines.get(k, kl), skip_keys)
+            yield from strings_with_lines(v, value.value_lines.get(k, kl), skip_keys, numbers)
     elif isinstance(value, list):
         base = getattr(value, "line", line)
         for v in value:
-            yield from strings_with_lines(v, getattr(v, "line", base), skip_keys)
+            yield from strings_with_lines(v, getattr(v, "line", base), skip_keys, numbers)
 
 
 def line_in(text: str, start_line: int, needle_index: int) -> int:
@@ -297,6 +328,42 @@ def is_sink_key(key) -> bool:
 
 def placeholder(digits: str) -> bool:
     return len(set(digits)) == 1 or digits == "123456789012"
+
+
+ID_RUN = re.compile(r"(?<![0-9])[0-9]{12,}(?![0-9])")
+
+
+def redact(text: str) -> str:
+    """text with every run of twelve or more digits, other than a placeholder, replaced.
+
+    A finding quotes workflow text (an expression, an input's value, a step
+    name, a YAML parser's excerpt) and is printed as an `::error` annotation,
+    which stays on the pull request and in the public run log after the diff
+    that carried the text is gone. The gate that rejects an account id written
+    into a workflow must not be what publishes it a second time."""
+    return ID_RUN.sub(
+        lambda m: m.group(0) if len(m.group(0)) == 12 and placeholder(m.group(0))
+        else "<account id>", text)
+
+
+def quote(text, limit: int) -> str:
+    """repr of the first `limit` characters of text, redacted before it is cut.
+
+    Cutting first could leave the head of an account id under twelve digits,
+    where the redaction no longer recognises it."""
+    return repr(redact(str(text))[:limit])
+
+
+def with_key(block, key: str):
+    """(spelling, value) of `key` in a `with:` map, compared case-insensitively.
+
+    The runner hands an action its inputs as INPUT_<NAME upper-cased>, so
+    `Role-To-Assume` configures the action exactly as `role-to-assume` does."""
+    if isinstance(block, dict):
+        for k in block:
+            if isinstance(k, str) and k.lower() == key:
+                return k, block[k]
+    return None
 
 
 # --- expressions --------------------------------------------------------------
@@ -529,7 +596,7 @@ def collect_ids_by_use(docs) -> set[str]:
                     if not isinstance(block, dict):
                         continue
                     for k, v in block.items():
-                        if k == "role-to-assume" or is_sink_key(k) or (key == "env" and covers and k in covers):
+                        if str(k).lower() == "role-to-assume" or is_sink_key(k) or (key == "env" and covers and k in covers):
                             names |= named_reads(v)
         for block in blocks:
             if isinstance(block, dict):
@@ -563,7 +630,8 @@ def check(root: Path) -> Result:
         try:
             docs[p] = yaml.load(p.read_text(), Loader=LineLoader)
         except (OSError, yaml.YAMLError) as e:
-            res.findings.append((p.relative_to(root).as_posix(), 1, f"could not be parsed: {e}"))
+            res.findings.append((p.relative_to(root).as_posix(), 1,
+                                 redact(f"could not be parsed: {e}")))
     by_use = collect_ids_by_use(docs)
 
     def ident(name: str) -> bool:
@@ -585,7 +653,7 @@ def check(root: Path) -> Result:
 
 def check_workflow(root, rel, doc, ident, out, res) -> None:
     def bad(line: int, msg: str) -> None:
-        out.append((rel, line, msg))
+        out.append((rel, line, redact(msg)))
 
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
     # The job being scanned's own vars.NAME guards (None outside a job). Rule 8
@@ -595,7 +663,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
     wf_shell = shell_of(doc)
 
     def literal_ids(value, line):
-        for text, ln in strings_with_lines(value, line, skip_keys=("uses",)):
+        for text, ln in strings_with_lines(value, line, skip_keys=("uses",), numbers=True):
             for pat, what in ((ARN_LITERAL, "an ARN naming an account"), (ID_LITERAL, "an account id")):
                 for m in pat.finditer(text):
                     if not placeholder(m.group(1)):
@@ -621,7 +689,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                 if toks is None:
                     if CONTEXT_WORDS.search(expr):
                         bad(at, f"has an expression in its {where} this gate cannot read "
-                                f"({expr.strip()[:60]!r}) that mentions the secrets, vars or "
+                                f"({quote(expr.strip(), 60)}) that mentions the secrets, vars or "
                                 "inputs context. Write it in a form the gate can read, so it "
                                 "can prove it names no account id or role ARN.")
                     continue
@@ -636,7 +704,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                     if problem:
                         how = "the whole" if problem == "whole" else "a computed index or filter of the"
                         bad(at, f"reads {how} `{ctx}` context in its {where} "
-                                f"({expr.strip()[:60]!r}). This gate cannot tell what that "
+                                f"({quote(expr.strip(), 60)}). This gate cannot tell what that "
                                 "names, so it cannot prove it names no account id or role ARN; "
                                 "a whole context printed or passed on carries every id in it. "
                                 f"Read each value by its literal name (`{ctx}.NAME`).")
@@ -685,7 +753,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                         continue
                     if entry:
                         bad(at, f"computes from the id secret {name} in its {where} "
-                                f"({expr.strip()[:60]!r}). The runner masks a secret only "
+                                f"({quote(expr.strip(), 60)}). The runner masks a secret only "
                                 "whole: a value derived from it (fromJSON, toJSON, format, an "
                                 "index, a concatenation) is printed in the clear in this step's "
                                 "env block, before its first command can mask it. Pass "
@@ -715,7 +783,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                     "only the guard form (a secret or a mask-step output cannot be here)"
                 bad(line_in(text, ln, idx),
                     f"sets {key}, which by its name carries an account id or role ARN, from "
-                    f"{expr.strip()[:60]!r} in its {where}. Such a key takes {allowed}: a "
+                    f"{quote(expr.strip(), 60)} in its {where}. Such a key takes {allowed}: a "
                     "variable, an input, a matrix value or another job's output is printed "
                     "unmasked in this step's env block or inputs, whatever it is called.")
 
@@ -827,7 +895,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                                          (wf_shell, "workflow's `defaults.run`", doc.key_lines.get("defaults"))):
                     if shell is not None and str(shell).strip() != "bash":
                         bad(ln or step.line, f"job '{job_id}', mask step '{step_name}' runs under "
-                            f"the {where} shell {str(shell)[:30]!r}. The mask command is bash, "
+                            f"the {where} shell {quote(str(shell), 30)}. The mask command is bash, "
                             "and only the default shell or `bash` (both `-e`) stops the step "
                             "when it fails; another shell runs on with nothing masked.")
                         ok = False
@@ -843,7 +911,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                     elif whole_read_name(env[k]) is None:
                         bad(env.key_lines.get(k, env.line),
                             f"job '{job_id}', mask step '{step_name}' masks {k}, which holds "
-                            f"{str(env[k])[:60]!r}. What a mask step masks, and what it hands on "
+                            f"{quote(str(env[k]), 60)}. What a mask step masks, and what it hands on "
                             "as step outputs, is a secret read whole: anything else was printed "
                             "unmasked in this step's env block before the mask ran.")
                         ok = False
@@ -854,7 +922,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                 if name in masked:
                     if AFTER_FAILURE.search(str(step.get("if", ""))):
                         bad(step.key_lines["if"], f"job '{job_id}', step '{step_name}' receives "
-                            f"{name} and runs after a failure ({str(step['if'])[:50]!r}). If a "
+                            f"{name} and runs after a failure ({quote(str(step['if']), 50)}). If a "
                             "step ahead of the mask step fails, the mask step is skipped and "
                             "this one runs with nothing masked.")
                     continue
@@ -870,7 +938,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                             f'{name}`; an action prints its inputs before it runs.')
                 elif covers is None:
                     bad(cmd_line, f"job '{job_id}', step '{step_name}' is the first to "
-                                  f"receive {name}, and its first command is {cmd[:70]!r}, "
+                                  f"receive {name}, and its first command is {quote(cmd, 70)}, "
                                   'not `bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" '
                                   f'[--optional] {" ".join(env_keys)}`. Masks take effect from '
                                   "the line after `::add-mask::`, so anything before it can "
@@ -884,19 +952,20 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                                       "never masked.")
 
             w = step.get("with")
-            if isinstance(w, LDict) and "role-to-assume" in w:
-                v = w["role-to-assume"]
-                ln = w.key_lines.get("role-to-assume", w.line)
+            role = with_key(w, "role-to-assume") if isinstance(w, LDict) else None
+            if role is not None and isinstance(w, LDict):
+                spelt, v = role
+                ln = w.key_lines.get(spelt, w.line)
                 sid = step_output_whole(v)
                 if not (whole_read_name(v) is not None or (sid is not None and sid in mask_step_ids)):
-                    bad(ln, f"job '{job_id}': role-to-assume is {str(v)[:60]!r}. It must be "
+                    bad(ln, f"job '{job_id}': role-to-assume is {quote(str(v), 60)}. It must be "
                             "`${{ secrets.NAME }}`, read after the job's mask step, or "
                             "`${{ steps.ID.outputs.X }}` from that mask step. The action "
                             "prints this input, so a variable, matrix value, input or literal "
                             "here publishes the role ARN and its account id.")
             if uses_configure_aws(step):
-                mask = w.get("mask-aws-account-id") if isinstance(w, dict) else None
-                if str(mask).lower() != "true":
+                found = with_key(w, "mask-aws-account-id")
+                if found is None or str(found[1]).lower() != "true":
                     bad(step.key_lines.get("uses", step.line),
                         f"job '{job_id}': {CONFIGURE_AWS} without `mask-aws-account-id: "
                         "true`. The job's mask step registers the id already; stating it "
@@ -1046,6 +1115,13 @@ MUTATIONS = [
      DEPLOY_MASK_STEP,
      ("      - name: Early\n        env:\n          EARLY: ${{ Secrets.DEPLOY_ROLE_ARN }}\n"
       "        run: echo \"${EARLY#arn:aws:iam::}\"\n" + DEPLOY_MASK_STEP), None),
+    # The finding names the step, and the step's name carries an id: every
+    # message is redacted, not only the text it quotes.
+    ("an early step named with an account id reads the secret", "deploy.yml",
+     DEPLOY_MASK_STEP,
+     ("      - name: Early 222233334444\n        env:\n"
+      "          EARLY: ${{ secrets.DEPLOY_ROLE_ARN }}\n"
+      "        run: echo early\n" + DEPLOY_MASK_STEP), None),
     ("an early step reads every variable at once", "deploy.yml", DEPLOY_MASK_STEP,
      ("      - name: Early\n        env:\n          ALL: ${{ toJSON(vars) }}\n"
       "        run: echo early\n" + DEPLOY_MASK_STEP), None),
@@ -1098,6 +1174,25 @@ MUTATIONS = [
     ("role-to-assume from the matrix", "ci.yml",
      "role-to-assume: ${{ secrets.AWS_ROLE_ARN }}",
      "role-to-assume: ${{ matrix.role_arn }}", None),
+    # The finding quotes the value; the self-test fails it unless it says
+    # <account id> where the digits were.
+    ("role-to-assume as a literal ARN", "destroy.yml",
+     "role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}",
+     "role-to-assume: arn:aws:iam::222233334444:role/deploy", None),
+    # The id starts inside the 60 characters the finding quotes and ends past
+    # them: cut before redacting, the quote would keep its first ten digits.
+    ("role-to-assume as a literal whose id straddles the quoted length", "destroy.yml",
+     "role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}",
+     "role-to-assume: role-padded-so-that-the-account-id-crosses-the-cut 222233334444",
+     None),
+    ("role-to-assume spelt in mixed case, from the matrix", "ci.yml",
+     "role-to-assume: ${{ secrets.AWS_ROLE_ARN }}",
+     "Role-To-Assume: ${{ matrix.role_arn }}", None),
+    # The runner reads action inputs upper-cased, so this configures the action:
+    # PULL_ROLE is an id by use, and an action is the first step to receive it.
+    ("role-to-assume spelt in mixed case, from a secret named outside the rule", "destroy.yml",
+     "role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}",
+     "Role-To-Assume: ${{ secrets.PULL_ROLE }}", None),
     ("an id-named key fed from a variable of another name", "ci.yml",
      "          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}\n        run: terragrunt plan",
      "          TERRAGRUNT_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT }}\n        run: terragrunt plan", None),
@@ -1137,6 +1232,23 @@ MUTATIONS = [
      r"^\s+role-to-assume: \$\{\{ secrets\.E2E_AWS_ROLE_ARN \}\}"),
     ("a literal account id", "deploy.yml", DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", '"222233334444"'), None),
+    ("a literal account id YAML reads as a number, as an env value", "deploy.yml",
+     DEPLOY_RUN_TG_ENV,
+     DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", "222233334444"), None),
+    ("a literal account id YAML reads as a number, as an action input", "destroy.yml",
+     "          aws-region: ${{ inputs.region }}\n",
+     "          aws-region: ${{ inputs.region }}\n          role-session-name: 222233334444\n",
+     None),
+    ("a literal account id YAML reads as a number, as an env key", "deploy.yml",
+     DEPLOY_RUN_TG_ENV,
+     DEPLOY_RUN_TG_ENV.replace("          ACTION", "          222233334444: x\n          ACTION"),
+     None),
+    # The parser's own message quotes the line it stopped at; the finding is
+    # at line 1 and must say <account id>, not the digits.
+    ("a workflow that does not parse, at a line carrying an account id", "deploy.yml",
+     DEPLOY_RUN_TG_ENV,
+     DEPLOY_RUN_TG_ENV.replace("          ACTION", "          OWNER: 222233334444: x\n          ACTION"),
+     r"^name: Deploy$"),
     ("a variable of a name outside the rule in an AWS job", "deploy.yml", DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("          ACTION",
                                "          BUCKET: ${{ vars.TF_BUCKET }}\n          ACTION"), None),
@@ -1191,6 +1303,29 @@ DRIFT_MUTATIONS = [
 ]
 
 
+# (name, file, old, new): edits the rules permit, each of which must leave the
+# workflows accepted. An input name is matched as the runner reads it, upper-cased.
+ACCEPTED = [
+    ("mask-aws-account-id spelt in mixed case", "deploy.yml",
+     "          mask-aws-account-id: true\n", "          Mask-AWS-Account-Id: true\n"),
+    ("role-to-assume spelt in mixed case, from the masked secret", "destroy.yml",
+     "role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}",
+     "Role-To-Assume: ${{ secrets.DEPLOY_ROLE_ARN }}"),
+]
+
+
+def leaked_ids(findings, planted: set[str] = frozenset()) -> list[tuple[str, int]]:
+    """(file, line) of each finding whose message carries an account id.
+
+    That is a non-placeholder run of twelve or more digits, or the first or
+    last six digits of an id the mutation planted: a quote cut before it is
+    redacted keeps a head too short to look like an id, and still publishes it."""
+    def leaks(msg: str) -> bool:
+        return any(not (len(run) == 12 and placeholder(run)) for run in ID_RUN.findall(msg)) \
+            or any(i[:6] in msg or i[-6:] in msg for i in planted)
+    return sorted({(r, ln) for r, ln, msg in findings if leaks(msg)})
+
+
 def self_test() -> int:
     failures = 0
     ran = 0
@@ -1236,6 +1371,16 @@ def self_test() -> int:
                 res = check(base)
             finally:
                 target.write_text(text)
+            planted = {m.group(1) for m in ID_LITERAL.finditer(mutated)
+                       if not placeholder(m.group(1))} - set(ID_LITERAL.findall(text))
+            leaked = leaked_ids(res.findings, planted)
+            if leaked:
+                # The messages are not printed: the point is that they carry an id.
+                print(f"FAIL [{name}]: {len(leaked)} finding(s) quote an account id, at "
+                      f"{leaked}; a finding is published as an annotation and must say "
+                      "<account id> instead", file=sys.stderr)
+                failures += 1
+                continue
             rel = f"{WORKFLOWS_REL}/{fname}"
             lines = mutated.splitlines()
             if expect is None:
@@ -1260,16 +1405,38 @@ def self_test() -> int:
             else:
                 hit = next(f for f in res.findings if f[0] == rel and f[1] in wanted)
                 print(f"ok [{name}]: {hit[0]}:{hit[1]}: {hit[2][:90]}")
+        for name, fname, old, new in ACCEPTED:
+            ran += 1
+            target = base / WORKFLOWS_REL / fname
+            text = target.read_text()
+            if text.count(old) != 1:
+                print(f"FAIL [accepted: {name}]: anchor {old[:50]!r} found {text.count(old)} "
+                      f"time(s) in {fname}", file=sys.stderr)
+                failures += 1
+                continue
+            target.write_text(text.replace(old, new))
+            try:
+                res = check(base)
+            finally:
+                target.write_text(text)
+            if res.findings:
+                print(f"FAIL [accepted: {name}]: rejected:", file=sys.stderr)
+                for r, ln, msg in res.findings:
+                    print(f"    {r}:{ln}: {msg[:110]}", file=sys.stderr)
+                failures += 1
+            else:
+                print(f"ok [accepted: {name}]")
     if failures:
-        print(f"check-workflow-id-masking self-test FAILED: {failures} of {ran} mutation(s)",
+        print(f"check-workflow-id-masking self-test FAILED: {failures} of {ran} case(s)",
               file=sys.stderr)
         return 1
-    if ran < len(MUTATIONS) + len(DRIFT_MUTATIONS):
+    if ran < len(MUTATIONS) + len(DRIFT_MUTATIONS) + len(ACCEPTED):
         print("self-test ran fewer mutations than it lists; refusing to report a pass",
               file=sys.stderr)
         return 1
-    print(f"check-workflow-id-masking self-test passed ({ran} mutations rejected at the "
-          "mutated line, unmutated workflows accepted).")
+    print(f"check-workflow-id-masking self-test passed ({ran - len(ACCEPTED)} mutations "
+          "rejected at the mutated line with no account id in any finding, "
+          f"{len(ACCEPTED)} permitted edits and the unmutated workflows accepted).")
     return 0
 
 
