@@ -189,8 +189,14 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   the repository could read and the job would fall back to. Held by
   `scripts/check-workflow-id-masking.py` (which tokenises expressions, so a
   read in another case or index spelling, a whole-context read or a computed
-  name is caught; and which recognises an id by its name, by the keys it is
-  fed into and, in a job holding AWS credentials, refuses every variable) and
+  name is caught; which recognises an id by its name, by the keys it is
+  fed into and, in a job holding AWS credentials, refuses every variable;
+  which reads `role-to-assume` and `mask-aws-account-id` case-insensitively,
+  as the runner reads action inputs, and an unquoted number YAML parses as an
+  int as a literal id, by the text it was written as; and which prints
+  `<account id>` in place of any id a finding would otherwise quote, since a
+  finding is a public annotation, as does `scripts/check-drift-workflow.py`
+  beside it) and
   the mask script's self-test (synthetic ids only) on every pull request.
   Residual: (a) with step debug
   logging on, the runner traces the value it reads for a variable before the
