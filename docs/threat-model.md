@@ -117,9 +117,11 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   plan output it publishes can name its account (the state bucket, role ARNs).
   Mitigated in the logs: the role map is `DRIFT_PLAN_ROLE_ARNS`, a secret on the
   `drift` environment, so the runner prints it as `***` wherever it appears
-  whole, and every job that reads it runs `scripts/mask-drift-role-map.sh` as
-  the first command of the first step that receives it, registering every
-  twelve-digit run and every role ARN in it with `::add-mask::`. From that line
+  whole, and every job that reads it runs `scripts/mask-aws-ids.sh` (the mask
+  script every workflow uses) on `DRIFT_PLAN_ROLE_ARNS` as the first command
+  of the first step that receives it,
+  registering every twelve-digit window and every IAM ARN in it with
+  `::add-mask::`. From that line
   on nothing the job prints carries one: not the role step's output, not the
   credential step's `role-to-assume` input, not any later step's env block, and
   not the raw plan output. No job output carries a role value (the runner drops
@@ -133,8 +135,9 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   and every other standalone twelve-digit run before an issue step reads the
   output, and the issue step applies the same rules to the title and body.
   The masking script carries a self-test (synthetic ids) that runs on every
-  pull request, and `scripts/check-drift-workflow.py` fails a drift.yml in which
-  a job reads the secret before the step that masks it.
+  pull request, and `scripts/check-workflow-id-masking.py` fails a drift.yml in
+  which a job reads the secret before the step that masks it, as it does for
+  every workflow.
   Residual: masking is by value. An account id that is not in the secret (a
   cross-account reference in plan output) prints in the job log; the issue
   redaction's standalone-twelve-digit pass still removes it from the issue. A

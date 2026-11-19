@@ -16,12 +16,15 @@ branch policy without touching it:
     it would present `environment:drift` and receive the role map.
   - drift.yml itself gaining one of those triggers.
 
-And the role map, a secret holding every account's id, is masked in the logs
-only because each job's first step that receives it runs
-`scripts/mask-drift-role-map.sh` before anything else. The masks are per job
-and take effect from the line after each `::add-mask::`, so a later edit that
-reads the secret in an earlier step, or prints something ahead of the mask
-script, would put ids in a public log while every other gate stays green.
+The role map itself, a secret holding every account's id, must also stay out
+of drift.yml's guard job as anything but a presence test, since that job
+declares no environment.
+
+Where and when drift.yml masks the map (`scripts/mask-aws-ids.sh
+DRIFT_PLAN_ROLE_ARNS` as the first command of each job's first step that
+receives it) is not checked here: scripts/check-workflow-id-masking.py owns
+that rule for every workflow, drift.yml included, and one owner keeps the two
+gates from disagreeing about it.
 
 WHAT IT CHECKS
 
@@ -34,9 +37,9 @@ WHAT IT CHECKS
      declares `environment: drift`; the one job that declares no environment
      (refuse-inherited-config) may only compare each against '' so that only
      `true` or `false` reaches its step.
-  4. In each job declaring `environment: drift` that reads the secret, the first
-     step that receives it is a `run` step whose first command runs
-     scripts/mask-drift-role-map.sh, and no earlier step in that job reads it.
+  4. Floor: at least two jobs declaring `environment: drift` read the secret,
+     and at least one no-environment guard job compares it, so a scan that
+     stopped recognising drift.yml's shape cannot report a pass.
 
 Parsed with a real YAML parser, with line numbers kept, so a finding names the
 file and line.
@@ -70,9 +73,6 @@ VARIABLE = re.compile(r"\bvars\.DRIFT_PLAN_ROLE_ARNS\b")
 # true or false, never the value.
 PRESENCE_ONLY = re.compile(
     r"^\$\{\{\s*(?:secrets|vars)\.DRIFT_PLAN_ROLE_ARNS\s*!=\s*''\s*\}\}$"
-)
-MASK_COMMAND = re.compile(
-    r'^bash\s+"?\$(?:\{GITHUB_WORKSPACE\}|GITHUB_WORKSPACE)/scripts/mask-drift-role-map\.sh"?$'
 )
 ALLOWED_TRIGGERS = {"schedule", "workflow_dispatch"}
 
@@ -132,14 +132,6 @@ def environment_name(job: dict):
 
 def line_of(obj, default: int = 1) -> int:
     return getattr(obj, "line", 0) or default
-
-
-def first_command(run: str) -> str:
-    for raw in run.splitlines():
-        line = raw.strip()
-        if line and not line.startswith("#"):
-            return line
-    return ""
 
 
 def key_line(path: Path, start: int, key: str) -> int:
@@ -225,8 +217,8 @@ def main() -> int:
             "issue_comment runs with ref main for whoever caused it.",
         )
 
-    # 3 and 4, per job.
-    masked_jobs = 0
+    # 3, per job, and the counts the floor reads.
+    drift_jobs = 0
     guard_jobs = 0
     for job_id, job in jobs.items():
         if not isinstance(job, dict):
@@ -245,7 +237,7 @@ def main() -> int:
                 DRIFT,
                 line_of(job),
                 f"job '{job_id}' names DRIFT_PLAN_ROLE_ARNS outside a step's env map "
-                "(a job-level env reaches steps that run before the mask script).",
+                "(a job-level env reaches steps that run before the mask step).",
             )
         steps = job.get("steps") or []
         for step in steps:
@@ -297,34 +289,16 @@ def main() -> int:
                 f"job '{job_id}' reads vars.DRIFT_PLAN_ROLE_ARNS. The map is a secret; "
                 "a variable is never masked.",
             )
-        if not reads_secret:
-            continue
+        if reads_secret:
+            drift_jobs += 1
 
-        first = next(
-            (s for s in steps if isinstance(s, dict) and mentions(s.get("env") or {}, SECRET)),
-            None,
-        )
-        if first is None:
-            continue
-        cmd = first_command(first.get("run") or "")
-        if not MASK_COMMAND.match(cmd):
-            bad(
-                DRIFT,
-                line_of(first),
-                f"job '{job_id}': the first step that receives DRIFT_PLAN_ROLE_ARNS "
-                f"('{first.get('name', '?')}') must run "
-                '`bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"` as its first '
-                f"command; it starts with {cmd[:80]!r}. Masks are per job and take effect "
-                "from the next line, so anything before it can print an account id.",
-            )
-        else:
-            masked_jobs += 1
-
-    if not findings and (masked_jobs < 2 or guard_jobs < 1):
+    # 4. The floor.
+    if not findings and (drift_jobs < 2 or guard_jobs < 1):
         print(
-            f"::error::drift.yml has {masked_jobs} job(s) masking DRIFT_PLAN_ROLE_ARNS "
-            f"first and {guard_jobs} presence-only guard job(s) (expected at least 2 "
-            "and 1). The scan did not see what it checks and refuses to report a pass."
+            f"::error::drift.yml has {drift_jobs} job(s) on the drift environment reading "
+            f"DRIFT_PLAN_ROLE_ARNS and {guard_jobs} presence-only guard job(s) (expected "
+            "at least 2 and 1). The scan did not see what it checks and refuses to report "
+            "a pass."
         )
         return 1
 
@@ -339,8 +313,9 @@ def main() -> int:
     print(
         f"OK: {len(workflows)} workflow(s) read; only drift.yml declares the drift "
         f"environment; drift.yml triggers on {sorted(map(str, triggers))}; "
-        f"{masked_jobs} job(s) mask DRIFT_PLAN_ROLE_ARNS before anything else reads "
-        f"it; {guard_jobs} guard job(s) see presence only."
+        f"{drift_jobs} job(s) on the drift environment read DRIFT_PLAN_ROLE_ARNS from "
+        f"step env maps only; {guard_jobs} guard job(s) see presence only (where each "
+        "job masks it is check-workflow-id-masking.py's to hold)."
     )
     return 0
 

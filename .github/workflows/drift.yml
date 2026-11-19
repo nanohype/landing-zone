@@ -132,9 +132,9 @@ jobs:
   # The repository is public, and the role ARNs carry real account ids. The
   # secret reaches this step through its env block, which the runner prints as
   # `***` (a secret is masked whole). The step's first command,
-  # scripts/mask-drift-role-map.sh, registers every account id and every role
-  # ARN in it with ::add-mask::, so nothing this step prints afterwards can
-  # carry one either. The matrix this job hands on carries account directory
+  # scripts/mask-aws-ids.sh DRIFT_PLAN_ROLE_ARNS, registers every account id
+  # and every role ARN in it with ::add-mask::, so nothing this step prints
+  # afterwards can carry one either. The matrix this job hands on carries account directory
   # names and no role value: the runner drops any job output containing a
   # masked value ("Skip output ... since it may contain secret"), so detect-drift
   # reads its role from the secret itself. Everything this job writes to an
@@ -167,7 +167,7 @@ jobs:
         run: |
           # First: mask every id and role ARN, and refuse an unset or multi-line
           # value, before anything else can print.
-          bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS
           ROLE_ARNS="$DRIFT_PLAN_ROLE_ARNS"
 
           if ! printf '%s' "$ROLE_ARNS" | jq -e 'type == "object"' >/dev/null 2>&1; then
@@ -320,7 +320,7 @@ jobs:
           DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}
           ACCOUNT_DIR: ${{ matrix.account }}
         run: |
-          bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS
 
           # The same role-ARN shape select-accounts accepted. select-accounts only
           # put this leaf in the matrix because its entry had one, so a miss here

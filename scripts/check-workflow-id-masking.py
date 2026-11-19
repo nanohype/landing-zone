@@ -103,10 +103,9 @@ WHAT IT CHECKS, in every workflow under .github/workflows
      script's own grammar, naming every env key in that step that carries the
      secret:
        bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" [--optional] NAME...
-     with --optional only first and each NAME an environment variable name; or,
-     for drift.yml's role map until drift is folded onto the shared script (see
-     docs/threat-model.md), `bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"`,
-     which covers DRIFT_PLAN_ROLE_ARNS. The named script must be tracked, and
+     with --optional only first and each NAME an environment variable name
+     (drift.yml's role map included: `mask-aws-ids.sh DRIFT_PLAN_ROLE_ARNS`;
+     there is no second mask script). The named script must be tracked, and
      every key it names must be in the step's env holding `${{ secrets.X }}`.
      A mask step must run whenever the job does and stop it on failure: no
      `if:`, no `continue-on-error`, and a shell (the step's, else the job's
@@ -132,28 +131,13 @@ Rules 4 and 8 check that the comparison exists, not what the shell does with
 it; the workflow's step fails on `true`, and its message names the `gh` command
 that removes the value.
 
-OVERLAP WITH scripts/check-drift-workflow.py (once that lands with the drift
-environment change)
+OVERLAP WITH scripts/check-drift-workflow.py
 
 That gate owns who may use the `drift` environment (only drift.yml, on
 `schedule` and `workflow_dispatch` only) and the shape of drift.yml's guard
 job. This one owns where and when an id is read and masked, in every workflow,
-drift.yml included. Both currently require drift.yml's first DRIFT_PLAN_ROLE_ARNS
-receiver to run mask-drift-role-map.sh; when drift is folded onto
-mask-aws-ids.sh that requirement leaves the drift gate and stays here.
-
-EXEMPTION
-
-drift.yml as it is on main before the drift-environment change reads the role
-map from a repository VARIABLE and passes role ARNs through the matrix. That
-change replaces the file, and it is the change that fixes it, so this gate
-exempts drift.yml while its bytes are exactly that file's (pinned by SHA-256).
-The exempt findings are still printed, as notices. Any edit to drift.yml, the
-drift-environment change included, lapses the exemption and the file is held
-to every rule above, so an action-pin bump touching drift.yml before that
-change lands fails here by design. A lapsed exemption is reported, not failed,
-so this change and the drift change merge in either order; delete the entry
-when drift is folded onto the shared script.
+drift.yml included: the mask-first rule for DRIFT_PLAN_ROLE_ARNS lives here
+alone. No workflow is exempt.
 
 USAGE
 
@@ -168,7 +152,6 @@ Exit 0 = clean. Exit 1 = a violation, or a scan that could not see its inputs.
 
 from __future__ import annotations
 
-import hashlib
 import re
 import shutil
 import sys
@@ -203,7 +186,6 @@ WS = r'"?\$(?:\{GITHUB_WORKSPACE\}|GITHUB_WORKSPACE)'
 # The script's own grammar: --optional only first, then environment variable names.
 MASK_AWS = re.compile(
     rf"^bash\s+{WS}/(scripts/mask-aws-ids\.sh)\"?(\s+--optional)?((?:\s+[A-Za-z_][A-Za-z0-9_]*)+)\s*$")
-MASK_DRIFT = re.compile(rf"^bash\s+{WS}/(scripts/mask-drift-role-map\.sh)\"?\s*$")
 CONFIGURE_AWS = "aws-actions/configure-aws-credentials"
 AFTER_FAILURE = re.compile(r"\b(?:always|failure|cancelled)\s*\(", re.IGNORECASE)
 ARN_LITERAL = re.compile(r"arn:aws[a-z-]*:[a-z0-9-]*:[a-z0-9-]*:([0-9]{12})(?![0-9])")
@@ -215,17 +197,13 @@ VARS_ALLOWED: set[str] = set()
 # each one read as a secret, so a tokeniser that stops recognising reads cannot
 # report a clean tree.
 KNOWN_ID_READS = {"DEPLOY_ROLE_ARN", "DEPLOY_ACCOUNT_ID", "AWS_ROLE_ARN",
-                      "TERRAGRUNT_ACCOUNT_ID", "E2E_AWS_ROLE_ARN"}
-
-# drift.yml exactly as on main at 52233f8 (the last commit before the
-# drift-environment change); see EXEMPTION above.
-EXEMPT = {
-    ".github/workflows/drift.yml": (
-        "b84cd061c0ff4a09d51184ec2f77d5f84cee6620ae3dd04131aac5aeff5f0af1",
-        ("reads DRIFT_PLAN_ROLE_ARNS from a repository variable and role ARNs "
-         "through the matrix; the drift-environment change replaces the file"),
-    ),
-}
+                      "TERRAGRUNT_ACCOUNT_ID", "E2E_AWS_ROLE_ARN", "DRIFT_PLAN_ROLE_ARNS"}
+# The workflows and mask steps there are today (deploy, destroy, ci's plan job,
+# e2e, and drift's two jobs that read the role map). Fewer means the scan
+# stopped seeing them, or a workflow stopped masking; lower these only with the
+# change that removes one.
+MIN_WORKFLOWS = 5
+MIN_MASK_STEPS = 6
 
 
 # --- YAML with line numbers ---------------------------------------------------
@@ -496,9 +474,6 @@ def mask_command(step) -> tuple[str | None, set[str] | None, int]:
     m = MASK_AWS.match(cmd)
     if m:
         return m.group(1), set(m.group(3).split()), offset
-    m = MASK_DRIFT.match(cmd)
-    if m:
-        return m.group(1), {"DRIFT_PLAN_ROLE_ARNS"}, offset
     return None, None, offset
 
 
@@ -562,7 +537,6 @@ def collect_ids_by_use(docs) -> set[str]:
 class Result:
     def __init__(self):
         self.findings: list[tuple[str, int, str]] = []
-        self.exempt_notes: list[str] = []
         self.mask_steps = 0
         self.id_reads = 0
         self.id_names: set[str] = set()
@@ -594,20 +568,6 @@ def check(root: Path) -> Result:
         out: list[tuple[str, int, str]] = []
         sub = Result()
         check_workflow(root, rel, doc, ident, out, sub)
-        exempt = EXEMPT.get(rel)
-        if exempt:
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            if digest == exempt[0]:
-                res.exempt_notes.append(
-                    f"{rel} is exempt while it is byte-identical to the pre-drift-"
-                    f"environment file ({exempt[1]}); {len(out)} finding(s) not failing:"
-                )
-                res.exempt_notes.extend(f"  {r}:{ln}: {msg}" for r, ln, msg in out)
-                continue
-            res.exempt_notes.append(
-                f"{rel} no longer matches its exemption (sha256 {digest[:12]}), so it is "
-                "held to every rule. Delete its EXEMPT entry."
-            )
         res.findings.extend(out)
         res.mask_steps += sub.mask_steps
         res.id_reads += sub.id_reads
@@ -977,8 +937,6 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
 
 
 def report(res: Result) -> int:
-    for note in res.exempt_notes:
-        print(f"::notice::{note}" if not note.startswith("  ") else note)
     if res.findings:
         for rel, line, msg in res.findings:
             print(f"::error file={rel},line={line}::{rel}:{line}: {msg}")
@@ -998,9 +956,10 @@ def main_check() -> int:
         return 1
     res = check(ROOT)
     unseen = sorted(KNOWN_ID_READS - res.id_names)
-    if res.workflows < 4 or res.mask_steps < 4 or unseen:
+    if res.workflows < MIN_WORKFLOWS or res.mask_steps < MIN_MASK_STEPS or unseen:
         print(f"::error::read {res.workflows} workflow(s) and {res.mask_steps} mask step(s) "
-              "under .github/workflows (expected at least 4 of each), and saw no read of "
+              f"under .github/workflows (expected at least {MIN_WORKFLOWS} and "
+              f"{MIN_MASK_STEPS}), and saw no read of "
               f"{', '.join(unseen) or 'nothing missing'} among the id secrets the workflows "
               "read today. This gate did not see what it checks and refuses to report a pass.")
         return 1
@@ -1156,10 +1115,25 @@ MUTATIONS = [
 ]
 
 
-# drift.yml once the drift-environment change has replaced it: the role map is
-# a secret on the drift environment, masked by mask-drift-role-map.sh. Applied
-# whenever drift.yml reads that secret, and then every one must apply.
+# drift.yml: the role map is a secret on the drift environment, masked by
+# `mask-aws-ids.sh DRIFT_PLAN_ROLE_ARNS` in each of the two jobs that read it.
+# Always applied: drift.yml is held to every rule like the other workflows.
 DRIFT_MUTATIONS = [
+    ("drift: the role map masked by a script other than mask-aws-ids.sh", "drift.yml",
+     '          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS\n\n'
+     '          # The same role-ARN shape',
+     '          bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"\n\n'
+     '          # The same role-ARN shape', None),
+    ("drift: the mask step names a variable other than the role map", "drift.yml",
+     '          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS\n\n'
+     '          # The same role-ARN shape',
+     '          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" ACCOUNT_DIR\n\n'
+     '          # The same role-ARN shape', None),
+    ("drift: the role map reaches a step before the mask step", "drift.yml",
+     "          persist-credentials: false\n\n      # The first step that receives the secret.",
+     "          persist-credentials: false\n        env:\n"
+     "          DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}\n\n"
+     "      # The first step that receives the secret.", None),
     ("drift: something prints ahead of the role-map mask", "drift.yml",
      "        run: |\n          # First: mask every id and role ARN",
      "        run: |\n          echo \"selecting\"\n          # First: mask every id and role ARN", None),
@@ -1181,9 +1155,7 @@ def self_test() -> int:
         for p in (ROOT / WORKFLOWS_REL).glob("*.y*ml"):
             shutil.copy(p, base / WORKFLOWS_REL / p.name)
         (base / "scripts").mkdir()
-        for s in ("mask-aws-ids.sh", "mask-drift-role-map.sh"):
-            if (ROOT / "scripts" / s).is_file():
-                shutil.copy(ROOT / "scripts" / s, base / "scripts" / s)
+        shutil.copy(ROOT / "scripts" / "mask-aws-ids.sh", base / "scripts" / "mask-aws-ids.sh")
 
         clean = check(base)
         if clean.findings:
@@ -1197,35 +1169,23 @@ def self_test() -> int:
                   file=sys.stderr)
             return 1
 
-        mutations = list(MUTATIONS)
-        # The exemption is pinned to bytes: one appended line lapses it.
-        drift = base / WORKFLOWS_REL / "drift.yml"
-        rel_drift = f"{WORKFLOWS_REL}/drift.yml"
-        if drift.is_file() and rel_drift in EXEMPT and \
-                hashlib.sha256(drift.read_bytes()).hexdigest() == EXEMPT[rel_drift][0]:
-            mutations.append(("an edit lapses drift.yml's exemption", "drift.yml",
-                              "jobs:\n", "jobs:\n", r"vars\.DRIFT_PLAN_ROLE_ARNS"))
-        elif drift.is_file() and "secrets.DRIFT_PLAN_ROLE_ARNS" in drift.read_text():
-            mutations.extend(DRIFT_MUTATIONS)
+        mutations = MUTATIONS + DRIFT_MUTATIONS
         for name, fname, old, new, expect in mutations:
             ran += 1
             target = base / WORKFLOWS_REL / fname
             text = target.read_text()
-            if fname == "drift.yml" and old == new:
-                mutated = text + "# an unrelated edit\n"
-            else:
-                pairs = list(zip(old, new)) if isinstance(old, tuple) else [(old, new)]
-                mutated, missing = text, None
-                for o, n in pairs:
-                    if mutated.count(o) != 1:
-                        missing = (o, mutated.count(o))
-                        break
-                    mutated = mutated.replace(o, n)
-                if missing:
-                    print(f"FAIL [{name}]: anchor {missing[0][:50]!r} found {missing[1]} "
-                          f"time(s) in {fname}", file=sys.stderr)
-                    failures += 1
-                    continue
+            pairs = list(zip(old, new)) if isinstance(old, tuple) else [(old, new)]
+            mutated, missing = text, None
+            for o, n in pairs:
+                if mutated.count(o) != 1:
+                    missing = (o, mutated.count(o))
+                    break
+                mutated = mutated.replace(o, n)
+            if missing:
+                print(f"FAIL [{name}]: anchor {missing[0][:50]!r} found {missing[1]} "
+                      f"time(s) in {fname}", file=sys.stderr)
+                failures += 1
+                continue
             target.write_text(mutated)
             try:
                 res = check(base)
@@ -1259,7 +1219,7 @@ def self_test() -> int:
         print(f"check-workflow-id-masking self-test FAILED: {failures} of {ran} mutation(s)",
               file=sys.stderr)
         return 1
-    if ran < len(MUTATIONS):
+    if ran < len(MUTATIONS) + len(DRIFT_MUTATIONS):
         print("self-test ran fewer mutations than it lists; refusing to report a pass",
               file=sys.stderr)
         return 1
