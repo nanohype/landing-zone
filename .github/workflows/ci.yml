@@ -980,10 +980,14 @@ jobs:
   # DRIFT_PLAN_ROLE_ARNS, every account's id. A branch policy admits by ref, so
   # another workflow on main naming the environment (a pull_request_target,
   # workflow_run or issue_comment trigger runs with ref main) would get past it.
-  # This holds in the workflow text that only drift.yml names the environment,
-  # on schedule and workflow_dispatch only, and that drift.yml's guard job sees
-  # presence only. Where drift.yml masks the map is held by workflow-id-masking,
-  # with every other workflow's ids.
+  # This holds in the workflow text that only drift.yml names the environment
+  # (literally or through a computed name: outside drift.yml an environment may
+  # come only from a workflow_dispatch choice input whose options exclude
+  # drift), on schedule and workflow_dispatch only, and that no other workflow
+  # reads the map. How drift.yml reads and masks the map is held by
+  # workflow-id-masking, with every other workflow's ids. The self-test mutates
+  # the workflows each way the gate forbids and requires each rejected at the
+  # mutated line.
   drift-workflow:
     name: Drift Environment Stays In drift.yml
     runs-on: ubuntu-latest
@@ -997,6 +1001,7 @@ jobs:
           python-version: "3.12"
       - run: pip install pyyaml==6.0.3
       - run: python3 scripts/check-drift-workflow.py
+      - run: python3 scripts/check-drift-workflow.py --self-test
 
   # Every teardown gate on a component must open on the same lever. AWS spreads the
   # protections across unrelated resources and nothing in the dependency graph joins

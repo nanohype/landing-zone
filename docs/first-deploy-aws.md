@@ -435,9 +435,9 @@ holds as `account_environments`): in an account holding `staging` or
 a leaf under that account's `development` directory; `environment:plan` is
 refused outside the development-only account; and an account holding neither
 (management, fleet, shared-services) takes `create_plan_role = false`. Delete
-any repository-level `DRIFT_PLAN_ROLE_ARNS` variable before the drift change
-merges, and never run drift.yml with debug logging while one exists: a debug
-run traces the value of a variable, unmasked. The full checklist is in
+any `DRIFT_PLAN_ROLE_ARNS` variable, at repository level or on the `drift`
+environment, before the drift change merges, and never run drift.yml with debug
+logging while one exists: a debug run traces the value of a variable, unmasked. The full checklist is in
 [operations.md](operations.md#required-before-any-staging-or-production-plan-role).
 
 ## End-to-end validation (`task e2e`)

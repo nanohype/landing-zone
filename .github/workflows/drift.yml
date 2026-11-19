@@ -163,12 +163,23 @@ jobs:
         id: select
         env:
           DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}
+          ROLE_MAP_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}
           LEAVES: ${{ needs.discover.outputs.matrix }}
         run: |
           # First: mask every id and role ARN, and refuse an unset or multi-line
           # value, before anything else can print.
           bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS
           ROLE_ARNS="$DRIFT_PLAN_ROLE_ARNS"
+
+          # A variable of the same name on the drift environment itself, which
+          # refuse-inherited-config cannot see (it declares no environment).
+          # Only `true` or `false` reaches the step; the debug-logging residual
+          # is the one refuse-inherited-config documents. detect-drift declares
+          # the same environment and needs this job, so one check covers both.
+          if [ "$ROLE_MAP_VARIABLE" != "false" ]; then
+            echo "::error title=DRIFT_PLAN_ROLE_ARNS is still a variable::DRIFT_PLAN_ROLE_ARNS is set as a variable on the drift environment, the repository or the organization. Variables are never masked, so its account ids could reach the public Actions logs. Delete it: gh variable delete DRIFT_PLAN_ROLE_ARNS --env drift --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable. Keep the map only as a secret on the drift environment (see docs/operations.md)."
+            exit 1
+          fi
 
           if ! printf '%s' "$ROLE_ARNS" | jq -e 'type == "object"' >/dev/null 2>&1; then
             echo "::error title=DRIFT_PLAN_ROLE_ARNS is not a JSON object::Drift detection cannot run: DRIFT_PLAN_ROLE_ARNS must be a JSON object mapping account directory to plan role ARN, for example {\"workload-staging\":\"arn:aws:iam::<account>:role/github-actions-plan\"}."

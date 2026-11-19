@@ -119,25 +119,33 @@ WHAT IT CHECKS, in every workflow under .github/workflows
   7. Every aws-actions/configure-aws-credentials step (owner and repository
      compared case-insensitively, as GitHub resolves them) sets
      `mask-aws-account-id: true`.
-  8. For every id a workflow reads as a secret, the workflow also compares
-     `vars.NAME` against '' (the guard), so a value left behind as a variable
-     from before it became a secret fails the run instead of sitting there
-     until the next edit prints it.
+  8. Every job that reads an id secret from its environment compares
+     `vars.NAME` against '' (the guard), itself or through a job it needs on
+     the same environment, so a value left behind as a variable from before it
+     became a secret fails the run instead of sitting there until the next edit
+     prints it. In that job, not elsewhere in the workflow: variables resolve
+     from the environment first, and a variable on the environment itself is
+     visible only to a job that declares it, so the no-environment guard job of
+     rule 4 sees repository and organization variables alone.
   9. No string in a workflow other than a `uses:` reference carries a literal
      twelve-digit account id or an ARN with one, except the tree's synthetic
      placeholders (one digit repeated, or 123456789012).
 
-Rules 4 and 8 check that the comparison exists, not what the shell does with
-it; the workflow's step fails on `true`, and its message names the `gh` command
+Rules 4 and 8 check that the comparison exists where it can see the value,
+not what the shell does with it; the workflow's step fails on `true`, and its message names the `gh` command
 that removes the value.
 
 OVERLAP WITH scripts/check-drift-workflow.py
 
-That gate owns who may use the `drift` environment (only drift.yml, on
-`schedule` and `workflow_dispatch` only) and the shape of drift.yml's guard
-job. This one owns where and when an id is read and masked, in every workflow,
-drift.yml included: the mask-first rule for DRIFT_PLAN_ROLE_ARNS lives here
-alone. No workflow is exempt.
+That gate owns which workflows and jobs may touch the `drift` environment and
+its role map: only drift.yml, on `schedule` and `workflow_dispatch` only, no
+other workflow naming the environment literally or through a computed name,
+and no drift.yml job reading the map under another environment. It reads
+expressions with this gate's tokeniser, imported. This one owns how an id is
+read and masked, in every workflow, drift.yml included: whole into a step's
+env, the mask-first rule, the guard job's presence-only form and the
+in-environment variable guard for DRIFT_PLAN_ROLE_ARNS live here alone. No
+workflow is exempt.
 
 USAGE
 
@@ -580,7 +588,9 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
         out.append((rel, line, msg))
 
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
-    guarded_vars: set[str] = set()     # vars.NAME compared against ''
+    # The job being scanned's own vars.NAME guards (None outside a job). Rule 8
+    # reads these: only a job declaring the environment sees its variables.
+    job_vars: dict[str, set[str] | None] = {"current": None}
     id_reads: dict[str, tuple[str, int]] = {}  # NAME -> (spelling, first line)
     wf_shell = shell_of(doc)
 
@@ -634,7 +644,8 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                     key = name.upper()
                     if r is g and len(r.path) == 1 and ctx in ("secrets", "vars"):
                         if ctx == "vars":
-                            guarded_vars.add(key)
+                            if job_vars["current"] is not None:
+                                job_vars["current"].add(key)
                         elif guards is not None:
                             guards.add(key)
                         continue
@@ -736,12 +747,14 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
 
     no_env_guards: dict[str, set[str]] = {}  # job without environment -> secrets guarded
     env_reads: dict[str, tuple[str, int]] = {}  # job with environment -> (first id, line)
+    var_guards: dict[str, set[str]] = {}  # job -> vars it compares against ''
     for job_id, job in jobs.items():
         if not isinstance(job, LDict):
             continue
         job_line = jobs.key_lines.get(job_id, job.line)
         aws_job = holds_aws(doc, job)
         guards: set[str] = set()
+        var_guards[job_id] = job_vars["current"] = set()
         reads_value: dict[str, int] = {}  # id secret name -> first line in this job
         job_shell = shell_of(job)
         for key in job:
@@ -902,6 +915,7 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                 env_reads.setdefault(f"{job_id}\0{name}", (name, ln))
         else:
             no_env_guards[job_id] = guards
+        job_vars["current"] = None
 
     # Rule 4: a no-environment job this one needs refuses the inherited secret.
     def needs_of(job_id: str) -> set[str]:
@@ -927,13 +941,30 @@ def check_workflow(root, rel, doc, ident, out, res) -> None:
                     "environment and `permissions: {}` that fails when "
                     f"`${{{{ secrets.{name} != '' }}}}`, and make this job need it.")
 
-    for key, (name, ln) in sorted(id_reads.items(), key=lambda kv: kv[1][1]):
-        if key not in guarded_vars:
-            bad(ln, f"reads the id secret {name}, and nothing in this workflow compares "
-                    f"`vars.{name}` against ''. A value left behind as a variable from before "
-                    "it became a secret must fail the run (it is never masked, and the next "
-                    f"edit that reads it prints it): add `${{{{ vars.{name} != '' }}}}` to "
-                    "the env of the first step that receives the secret, and fail on true.")
+    # Rule 8: the job reading the secret from its environment, or a job it needs
+    # on the same environment, compares vars.NAME against ''. Variables resolve
+    # like secrets (environment, then repository, then organization), and a job
+    # declaring no environment sees only the last two: a variable left on the
+    # environment itself is visible only to a job that declares it.
+    def env_key(job_id: str) -> str:
+        e = jobs[job_id].get("environment") if isinstance(jobs.get(job_id), dict) else None
+        if isinstance(e, dict):
+            e = e.get("name")
+        return str(e).strip().lower() if e is not None else ""
+
+    for key, (name, ln) in sorted(env_reads.items(), key=lambda kv: kv[1][1]):
+        job_id = key.split("\0", 1)[0]
+        env = env_key(job_id)
+        if name in var_guards.get(job_id, ()) or any(
+                name in var_guards.get(dep, ()) and env_key(dep) == env for dep in needs_of(job_id)):
+            continue
+        bad(ln, f"job '{job_id}' reads the id secret {name} from its environment, and neither "
+                f"it nor a job it needs on the same environment compares `vars.{name}` against "
+                "''. A value left behind as a variable from before it became a secret must fail "
+                "the run (it is never masked, and the next edit that reads it prints it), and a "
+                "variable on the environment itself is visible only to a job declaring that "
+                f"environment: add `${{{{ vars.{name} != '' }}}}` to the env of this job's mask "
+                "step, and fail on true.")
 
 
 def report(res: Result) -> int:
@@ -956,14 +987,20 @@ def main_check() -> int:
         return 1
     res = check(ROOT)
     unseen = sorted(KNOWN_ID_READS - res.id_names)
-    if res.workflows < MIN_WORKFLOWS or res.mask_steps < MIN_MASK_STEPS or unseen:
+    vacuous = res.workflows < MIN_WORKFLOWS or res.mask_steps < MIN_MASK_STEPS or unseen
+    # Findings first: a removed mask command both drops the mask-step count below
+    # the floor and leaves a step receiving the secret unmasked, and the line
+    # that names is what the reader needs.
+    code = report(res) if res.findings else 0
+    if vacuous:
         print(f"::error::read {res.workflows} workflow(s) and {res.mask_steps} mask step(s) "
               f"under .github/workflows (expected at least {MIN_WORKFLOWS} and "
-              f"{MIN_MASK_STEPS}), and saw no read of "
-              f"{', '.join(unseen) or 'nothing missing'} among the id secrets the workflows "
-              "read today. This gate did not see what it checks and refuses to report a pass.")
+              f"{MIN_MASK_STEPS})"
+              + (f", and saw no read of {', '.join(unseen)} among the id secrets the "
+                 "workflows read today" if unseen else "")
+              + ". This gate did not see what it checks and refuses to report a pass.")
         return 1
-    return report(res)
+    return code if res.findings else report(res)
 
 
 # --- self-test ----------------------------------------------------------------
@@ -1140,6 +1177,14 @@ DRIFT_MUTATIONS = [
     ("drift: role-to-assume from the matrix", "drift.yml",
      "role-to-assume: ${{ steps.role.outputs.role_arn }}",
      "role-to-assume: ${{ matrix.role_arn }}", None),
+    ("drift: the in-environment variable guard removed", "drift.yml",
+     "          ROLE_MAP_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}\n", "",
+     r"^\s+DRIFT_PLAN_ROLE_ARNS: \$\{\{ secrets\.DRIFT_PLAN_ROLE_ARNS \}\}"),
+    ("the deploy job's in-environment variable guard removed", "deploy.yml",
+     "          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}\n"
+     "          ROLE_ARN_VARIABLE: ${{ vars.DEPLOY_ROLE_ARN != '' }}\n",
+     "          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}\n",
+     r"^\s+DEPLOY_ROLE_ARN: \$\{\{ secrets\.DEPLOY_ROLE_ARN \}\}"),
     ("drift: the guard job reads the variable's value", "drift.yml",
      "INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}",
      "INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS }}", None),

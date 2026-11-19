@@ -109,9 +109,12 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `environment: drift` passes the policy whoever triggered it, which
   `pull_request_target`, `workflow_run` and `issue_comment` triggers would make
   reachable from a pull request or a comment; `scripts/check-drift-workflow.py`
-  refuses `environment: drift` in any workflow but drift.yml and any drift.yml
-  trigger other than `schedule` and `workflow_dispatch`, so that path needs a
-  pull request that fails CI.
+  refuses the `drift` environment in any workflow but drift.yml, named
+  literally or computed (an expression is accepted only as a
+  `workflow_dispatch` choice input whose options exclude drift, because
+  `${{ github.event.pull_request.head.ref }}` is `drift` for a branch of that
+  name), and any drift.yml trigger other than `schedule` and
+  `workflow_dispatch`, so that path needs a pull request that fails CI.
 - **Information disclosure** — account ids in drift logs and issues. drift.yml
   holds one plan role ARN per account, each carrying a real account id, and the
   plan output it publishes can name its account (the state bucket, role ARNs).
@@ -144,9 +147,11 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   secret stored across several lines would have each line masked separately,
   so the masking script refuses one and the docs require single-line JSON. With
   step debug logging on, the runner traces each expression's value: a secret is
-  masked there, a variable is not, so `refuse-inherited-config` would print a
-  repository-level `DRIFT_PLAN_ROLE_ARNS` variable in a debug run; the old
-  variable must be deleted, and drift.yml never run with debug logging while
+  masked there, a variable is not, so a debug run would print a
+  `DRIFT_PLAN_ROLE_ARNS` variable left at repository level (in
+  `refuse-inherited-config`) or on the drift environment (in
+  `select-accounts`, which refuses one there); the old variable must be
+  deleted, and drift.yml never run with debug logging while
   one exists. The other workflows' ids are held the same way; see
   "account ids and role ARNs in the Actions logs" below.
 - **Spoofing** — a workflow assuming the ECR Public pull role. Accepted within a
@@ -168,7 +173,7 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   ARN a workflow reads is a secret on the GitHub Environment its job declares
   (`DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` on `development`, `staging` and
   `production`; `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` on `plan`;
-  `E2E_AWS_ROLE_ARN` on `e2e`), which the runner masks whole from the job's
+  `E2E_AWS_ROLE_ARN` on `e2e`; `DRIFT_PLAN_ROLE_ARNS` on `drift`), which the runner masks whole from the job's
   first line; and the first step in each job that receives one runs
   `scripts/mask-aws-ids.sh` as its first command, registering every
   twelve-digit window of every digit run and every IAM ARN in it, so the
