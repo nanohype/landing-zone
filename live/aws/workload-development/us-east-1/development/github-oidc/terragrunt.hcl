@@ -48,12 +48,17 @@ include "envcommon" {
 #
 # `plan` is the trust for THIS account only. ci.yml declares it from any branch,
 # including a same-repository pull request's, which is acceptable for the
-# development account and nowhere else: the component's validation reads
-# `environment` and refuses "environment:plan" outside development, and requires
-# a staging or production leaf to trust exactly "environment:drift" (drift.yml,
-# whose `drift` environment admits main only). So this leaf is not the pattern to
-# copy for a staging or production plan role; see docs/operations.md, "Required
-# before any staging or production plan role".
+# development account and nowhere else. The component's validation reads
+# `account_environments` — every environment this ACCOUNT holds, which
+# live/_envcommon/aws/github-oidc.hcl computes from the tree — and accepts
+# "environment:plan" only in an account holding development alone, as this one
+# does. In an account holding staging or production it requires exactly
+# "environment:drift" (drift.yml, whose `drift` environment admits main only)
+# with github_repos exactly ["landing-zone"], whichever environment directory
+# the leaf sits in: network and backup hold development directories beside their
+# production ones, and the role reads the same account-wide state either way.
+# So this leaf is not the pattern to copy for any other account's plan role; see
+# docs/operations.md, "Required before any staging or production plan role".
 #
 # This leaf moved to us-east-1 before the rest of the estate followed, and the
 # reason it moved first is worth keeping: the OIDC provider and both roles are

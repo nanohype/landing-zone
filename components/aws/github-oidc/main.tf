@@ -119,12 +119,17 @@ resource "aws_iam_role_policy_attachment" "deploy" {
 # repo:<org>/<repo>:environment:plan, never a bare branch or pull_request claim.
 #
 # That holds for the development account only. ci.yml's PR plan job declares
-# `plan` from any branch, so in staging and production the plan role trusts
-# exactly environment:drift instead: drift.yml declares it, and its
-# deployment-branch policy admits main only, so no pull request reaches a
-# staging or production account's state. plan_allowed_subject_claims' validation
-# ties the claim to var.environment, so a staging or production leaf cannot ship
-# the development trust.
+# `plan` from any branch, so in an account holding staging or production the
+# plan role trusts exactly environment:drift, from landing-zone alone, instead:
+# drift.yml declares it, and landing-zone's drift environment admits main only,
+# so no pull request reaches a staging or production account's state. The
+# validations tie the claim to var.account_environments — every environment the
+# ACCOUNT holds, computed from the tree by envcommon — rather than to the leaf's
+# own environment, because the role is account-global and the account's one
+# state bucket holds every environment's state: a leaf in the development
+# directory of the network or backup account cannot ship the development trust
+# either. An account holding neither (management, fleet, shared-services) gets
+# no plan role.
 #
 # READ SCOPE, stated rather than discovered: ReadOnlyAccess is account-wide read,
 # and that includes the Terraform state bucket. State holds plaintext values for
