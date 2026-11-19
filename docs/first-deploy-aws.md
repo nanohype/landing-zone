@@ -320,30 +320,50 @@ The repo also ships GitHub Actions workflows (`deploy.yml`, `destroy.yml`,
 `e2e.yml`) for an **optional** CI path. Those assume a GitHub→AWS OIDC role,
 which the `github-oidc` component provisions (the OIDC provider + a repo-scoped
 deploy role). Apply it once per account with your admin/SSO creds, then wire its
-output into GitHub Actions *variables*:
+output into GitHub Actions *secrets* on the environment each workflow declares
+(never variables: the repository is public, and a variable is printed unmasked
+in the log of every step that reads it):
 
 ```bash
 task apply ACCOUNT=workload-<env> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=github-oidc
 cd live/aws/workload-<env>/us-east-1/<env>/github-oidc && terragrunt output -raw deploy_role_arn
-# deploy.yml / destroy.yml: on the <env> GitHub Environment (Settings >
-# Environments > <env> > Environment variables) set DEPLOY_ROLE_ARN to the
-# printed ARN and DEPLOY_ACCOUNT_ID to the workload-<env> account's 12-digit id.
-# e2e.yml: set E2E_AWS_ROLE_ARN. Local exec does not need any of this.
+# deploy.yml / destroy.yml: secrets on the <env> GitHub Environment
+# (Settings > Environments > <env> > Environment secrets). gh reads each value
+# from stdin, so neither lands in shell history:
+gh secret set DEPLOY_ROLE_ARN   --env <env> --repo nanohype/landing-zone   # the printed ARN
+gh secret set DEPLOY_ACCOUNT_ID --env <env> --repo nanohype/landing-zone   # the workload-<env> account's 12-digit id
+# e2e.yml: a secret on the e2e environment. The run targets this role's account,
+# whatever the account_dir input says: nothing else states the target in CI.
+gh secret set E2E_AWS_ROLE_ARN  --env e2e   --repo nanohype/landing-zone
+# Local exec does not need any of this.
 ```
+
+Each workflow masks these before anything prints: the first step that receives
+one runs `scripts/mask-aws-ids.sh`, which registers the account id and the ARN
+with the runner's log masker, so the log shows `***` wherever either appears.
+Each also fails while one of its names is still set as a variable, or is set as
+a repository or organization secret (`--env` left off `gh secret set`); if you
+set these as variables before, delete them (`gh variable delete <NAME> --env <env>`,
+or without `--env` for a repository variable; an organization-level name is
+fixed by narrowing its repository access, or `--org <org>` if nothing else uses
+it). The migration steps and what
+stays visible are in
+[operations.md](operations.md#account-ids-in-the-actions-logs).
 
 Only `workload-development` has a `github-oidc` leaf today. For staging and
 production, create the `live/aws/workload-<env>/us-east-1/<env>/github-oidc/`
 leaf first; the `task apply` above has nothing to run until it exists.
 
-`deploy.yml` and `destroy.yml` declare `environment: <env>` and read
-`DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID`, which are set on GitHub Environments
-only, so each of `development`, `staging` and `production` carries its own
-account's role and id. A GitHub variable an environment does not set falls back
-to the repository's and then the organization's, which is why these are not
-`AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` (the repository-level plan-role
-pair): with those names, an environment that forgot its own would silently use
-the plan role and the repository's account id. Both workflows refuse to run while
-either `DEPLOY_*` name is set at repository or organization level, fail before
+`deploy.yml` and `destroy.yml` declare `environment: <env>` and read the
+`DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` secrets, which are set on GitHub
+Environments only, so each of `development`, `staging` and `production` carries
+its own account's role and id. A GitHub secret an environment does not set falls
+back to the repository's and then the organization's, which is why these are not
+`AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` (the plan-role pair on the `plan`
+environment): a shared name invites setting it once at repository level, where an
+environment that forgot its own would silently use the plan role and that
+account's id. Both workflows refuse to run while either `DEPLOY_*` name is set at
+repository or organization level, or as a variable anywhere, fail before
 assuming anything when the environment does not set either one, and fail after
 assuming the role when its account is not `DEPLOY_ACCOUNT_ID`. They run only the
 `workload-<env>` leaves; see
@@ -369,14 +389,14 @@ presents the same `sub` from any branch, and `deploy.yml`, `destroy.yml` and
 `e2e.yml` can be dispatched from any branch. An environment that does not exist
 yet is created unprotected the first time a workflow names it.
 
-The repository-level `AWS_ROLE_ARN` variable is the development account's
-**plan** role (`plan_role_arn`), which ci.yml's plan job assumes from
+The `AWS_ROLE_ARN` secret on the `plan` environment is the development
+account's **plan** role (`plan_role_arn`), which ci.yml's plan job assumes from
 `environment: plan`. drift.yml assumes each staging or production account's own
 plan role from a different environment, `drift`, which admits `main` only, and
 reads it from `DRIFT_PLAN_ROLE_ARNS`, a secret on that environment mapping
 account directory to `plan_role_arn` (see
 [operations.md](operations.md#driftyml----drift-detection)). The deploy role
-trusts neither environment, so a `deploy_role_arn` in either place makes PR
+trusts neither environment, so a `deploy_role_arn` in either secret makes PR
 plans or drift detection fail at the credential step; in drift.yml that failure
 files a `drift-error` issue for each of the account's leaves and turns the run
 red.

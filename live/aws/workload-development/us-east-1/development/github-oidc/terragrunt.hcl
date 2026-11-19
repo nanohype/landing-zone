@@ -9,9 +9,12 @@ include "envcommon" {
 
 # Apply ONCE per account (the OIDC provider is account-global). Run locally with
 # admin/SSO creds when/if the GitHub Actions CI path is adopted. Outputs:
-#   - deploy_role_arn: DEPLOY_ROLE_ARN on the `development` GitHub Environment
-#     (deploy.yml/destroy.yml), and E2E_AWS_ROLE_ARN for e2e.yml.
-#   - plan_role_arn: the repository-level AWS_ROLE_ARN (see THE PLAN ROLE below).
+#   - deploy_role_arn: the DEPLOY_ROLE_ARN secret on the `development` GitHub
+#     Environment (deploy.yml/destroy.yml), and the E2E_AWS_ROLE_ARN secret on
+#     `e2e` for e2e.yml.
+#   - plan_role_arn: the AWS_ROLE_ARN secret on the `plan` environment (see THE
+#     PLAN ROLE below). Secrets, never variables: the repository's Actions logs
+#     are public, and a variable is printed unmasked.
 #
 # Trust is narrowed from the component default (all four workload environments,
 # the union across accounts) to the environments that deploy into THIS account:
@@ -43,7 +46,7 @@ include "envcommon" {
 # declares `environment: plan`, so its token presents the environment claim and
 # never a branch or pull_request one. Adding required reviewers to the `plan`
 # environment in repo settings gates it on a human; the trust scoping holds either
-# way. plan_role_arn is what goes in the AWS_ROLE_ARN repo variable — NOT
+# way. plan_role_arn is what goes in the AWS_ROLE_ARN secret on `plan` — NOT
 # deploy_role_arn.
 #
 # `plan` is the trust for THIS account only. ci.yml declares it from any branch,

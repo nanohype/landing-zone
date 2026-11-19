@@ -57,16 +57,18 @@ zones. See each component's `route53-tags.tf`.
 |-----|---------|
 | `TERRAGRUNT_ACCOUNT_ID` | real AWS account id (overrides the `account.hcl` placeholder) |
 | `GITHUB_SHA` | short commit → the `Revision` tag; `"local"` off-CI |
-| `AWS_ROLE_ARN` | the read-only OIDC plan role (`github-oidc`'s `plan_role_arn`, not `deploy_role_arn`) that ci.yml's plan job assumes from `environment: plan` (repo Variable; unset ⇒ PR Plan jobs skip green) |
+| `AWS_ROLE_ARN` | the read-only OIDC plan role (`github-oidc`'s `plan_role_arn`, not `deploy_role_arn`) that ci.yml's plan job assumes from `environment: plan` (a secret on the `plan` environment, beside `TERRAGRUNT_ACCOUNT_ID`; either unset ⇒ PR Plan jobs skip green; either still a variable ⇒ they fail) |
 | `DRIFT_PLAN_ROLE_ARNS` | drift.yml only: a single-line JSON object mapping each account directory to the plan role (`plan_role_arn`) in that account; each drift leaf assumes its account's role and passes the ARN's account id as `TERRAGRUNT_ACCOUNT_ID`. A **secret on the `drift` GitHub Environment** (main-only branch policy, no reviewers) and nowhere else: a repository- or organization-level secret or variable of that name fails the run (`refuse-inherited-config`). Every account id and role ARN in it is masked in the job logs and redacted from drift issues. Unset ⇒ scheduled drift detection fails; an account directory with no entry is skipped and listed in the run summary; see [operations.md](operations.md#driftyml----drift-detection) and its per-account bring-up list |
 
-`deploy.yml` and `destroy.yml` do not read the repository Variables `AWS_ROLE_ARN` and
-`TERRAGRUNT_ACCOUNT_ID`. They read `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` from the GitHub Environment they declare (`development`, `staging`,
+`deploy.yml` and `destroy.yml` do not read the `plan` environment's `AWS_ROLE_ARN` and
+`TERRAGRUNT_ACCOUNT_ID`. They read the `DEPLOY_ROLE_ARN` and `DEPLOY_ACCOUNT_ID` secrets from the GitHub Environment they declare (`development`, `staging`,
 `production`) and pass the id to terragrunt as `TERRAGRUNT_ACCOUNT_ID`, so each environment
-names its own `workload-<environment>` account. A variable an environment does not set
+names its own `workload-<environment>` account. A secret an environment does not set
 inherits the repository's (then the organization's) value, so the names differ from the
-repository-level pair on purpose, and both workflows refuse to run while either `DEPLOY_*`
-name is set at repository or organization level. Both jobs fail when the environment leaves
+plan-role pair on purpose, and both workflows refuse to run while either `DEPLOY_*`
+name is set at repository or organization level, or as a variable anywhere. Every
+account id and role ARN a workflow reads is a secret, masked before anything prints (see
+[operations.md](operations.md#account-ids-in-the-actions-logs)). Both jobs fail when the environment leaves
 either one unset rather than falling back to the `account.hcl` placeholder, and fail when
 the assumed credential's account is not `DEPLOY_ACCOUNT_ID` (see
 [operations.md](operations.md#deployyml----manual-deploy)).
@@ -238,7 +240,7 @@ Leave them unset for a private endpoint.
 1. Create `account.hcl` (placeholder id), `region.hcl`, `env.hcl` under a new
    `live/aws/<account>/<region>/<env>/` path.
 2. Fill the six required `env.hcl` locals above.
-3. Set `AWS_ROLE_ARN` (repo Variable) and the OIDC trust for the new repo/env.
+3. Set `AWS_ROLE_ARN` and `TERRAGRUNT_ACCOUNT_ID` (secrets on the `plan` environment) and the OIDC trust for the new repo/env.
    For a `staging` or `production` env in a new account directory, add that
    directory and the account's `github-oidc` plan role to the
    `DRIFT_PLAN_ROLE_ARNS` secret on the `drift` GitHub Environment once the

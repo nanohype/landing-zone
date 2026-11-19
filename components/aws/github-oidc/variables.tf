@@ -316,8 +316,9 @@ variable "plan_allowed_subject_claims" {
 
   validation {
     # environment:plan belongs to the development account's plan role alone (the
-    # repository-level AWS_ROLE_ARN ci.yml's PR plan job assumes), in any casing,
-    # because GitHub environment names are case-insensitive.
+    # AWS_ROLE_ARN secret on the plan environment, which ci.yml's PR plan job
+    # assumes), in any casing, because GitHub environment names are
+    # case-insensitive.
     condition = (!var.create_plan_role || toset(var.account_environments) == toset(["development"]) ||
     alltrue([for c in var.plan_allowed_subject_claims : lower(c) != "environment:plan"]))
     error_message = "plan_allowed_subject_claims may contain \"environment:plan\" (in any letter case) only in an account holding development and nothing else: ci.yml's PR plan job declares that environment from any branch, and only the development account's plan role may be reachable from a pull request."

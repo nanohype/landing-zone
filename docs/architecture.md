@@ -343,7 +343,7 @@ After `cluster-bootstrap` deploys Cilium and ArgoCD, ArgoCD watches the GitOps r
 
 ### CI/CD Authentication
 
-GitHub Actions assumes its roles via OIDC federation -- no long-lived credentials. ci.yml's plan job assumes the `AWS_ROLE_ARN` repo variable, drift.yml the plan role of each leaf's account from `DRIFT_PLAN_ROLE_ARNS`, a secret on the main-only `drift` GitHub Environment, deploy.yml and destroy.yml `DEPLOY_ROLE_ARN` from the GitHub Environment they declare, and e2e.yml `E2E_AWS_ROLE_ARN`. Each role's trust policy is scoped to the repository.
+GitHub Actions assumes its roles via OIDC federation -- no long-lived credentials. ci.yml's plan job assumes the `AWS_ROLE_ARN` secret on the `plan` environment, drift.yml the plan role of each leaf's account from `DRIFT_PLAN_ROLE_ARNS`, a secret on the main-only `drift` GitHub Environment, deploy.yml and destroy.yml the `DEPLOY_ROLE_ARN` secret on the GitHub Environment they declare, and e2e.yml the `E2E_AWS_ROLE_ARN` secret on `e2e`. Each role's trust policy is scoped to the repository.
 
 ### Pod Authentication (EKS Pod Identity)
 

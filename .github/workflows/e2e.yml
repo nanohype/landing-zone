@@ -5,10 +5,14 @@
 # billable AWS. scripts/e2e.sh always tears down (EXIT trap), so a failed run
 # does not leave billing on.
 #
-# Requires:
-#   vars.E2E_AWS_ROLE_ARN   — an OIDC role in the target account with rights to
+# Requires, on the `e2e` GitHub Environment:
+#   secrets.E2E_AWS_ROLE_ARN — an OIDC role in the target account with rights to
 #                             provision/destroy the substrate + IAM (the operator
 #                             installs via GitOps from ghcr, so no ECR needed).
+#                             A secret, not a variable: the repository is public,
+#                             and a variable is printed unmasked in the env block
+#                             of every step that reads it. The target account is
+#                             this role's account; there is no account input.
 #   secrets.E2E_GITHUB_TOKEN — a token (PAT or App) with read on
 #                             eks-agent-platform + cloudgov and write on the
 #                             tenants repo (deploy-key admin + push).
@@ -17,9 +21,6 @@ name: e2e (manual)
 on:
   workflow_dispatch:
     inputs:
-      account_id:
-        description: "Target AWS account ID (12 digits)"
-        required: true
       region:
         description: "Region"
         default: "us-east-1"
@@ -42,7 +43,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # secrets.X and vars.X resolve from the job's environment first, then the
+  # repository, then the organization. This job declares no environment, so it
+  # sees only the repository and organization values. E2E_AWS_ROLE_ARN must
+  # exist on the `e2e` GitHub Environment alone, as a secret: a repository or
+  # organization SECRET of that name is what the e2e job would read if the
+  # environment had none of its own (`gh secret set` without `--env e2e`), and
+  # every workflow in the repository can read it; a repository or organization
+  # VARIABLE of that name is how it used to be stored, and a variable is never
+  # masked. Only whether each is set reaches the step, as `true` or `false`.
+  # With step debug logging on, the runner traces the value it reads for the
+  # variable before the comparison, unmasked, so never run this workflow with
+  # debug logging while the old variable exists. Failing here costs no
+  # environment approval.
+  refuse-inherited-config:
+    name: Refuse a repository-level E2E_AWS_ROLE_ARN
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require E2E_AWS_ROLE_ARN to be an e2e-environment secret only
+        # secrets-outside-env is this job's purpose, not a leak: reading the
+        # secret with no environment is the only way to see whether a
+        # repository- or organization-level one exists (listing secrets needs an
+        # admin token), and only the comparison's true/false reaches the step.
+        env:
+          INHERITED_SECRET: ${{ secrets.E2E_AWS_ROLE_ARN != '' }} # zizmor: ignore[secrets-outside-env]
+          INHERITED_VARIABLE: ${{ vars.E2E_AWS_ROLE_ARN != '' }}
+        run: |
+          failed=0
+          if [ "$INHERITED_SECRET" != "false" ]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is a repository or organization secret::E2E_AWS_ROLE_ARN is set as a repository or organization secret, which every workflow in the repository can read and which the e2e job would fall back to. Delete a repository secret (gh secret delete E2E_AWS_ROLE_ARN --repo <owner>/<repo>); for an organization secret, narrow its repository access so this repository no longer sees it, or delete it (gh secret delete E2E_AWS_ROLE_ARN --org <org>) if nothing else uses it. Keep it only on the e2e environment (see docs/first-deploy-aws.md)."
+            failed=1
+          fi
+          if [ "$INHERITED_VARIABLE" != "false" ]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is a repository or organization variable::E2E_AWS_ROLE_ARN is set as a repository or organization variable. Variables are never masked, so its value would reach the public Actions logs. Delete a repository variable (gh variable delete E2E_AWS_ROLE_ARN --repo <owner>/<repo>); for an organization variable, narrow its repository access so this repository no longer sees it, or delete it (gh variable delete E2E_AWS_ROLE_ARN --org <org>) if nothing else uses it. It is a secret on the e2e environment now (see docs/first-deploy-aws.md)."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "E2E_AWS_ROLE_ARN is set at neither repository nor organization level, as a secret or as a variable."
+
   e2e:
+    needs: refuse-inherited-config
     permissions:
       # Scoped to this job rather than the workflow: a job added here later
       # would otherwise inherit the right to mint an OIDC token and assume
@@ -62,6 +106,62 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      # The first step that receives E2E_AWS_ROLE_ARN, and its first command masks
+      # it. The runner masks the secret's value whole (its env block prints
+      # `***`), but not the account id inside it, which e2e.sh prints, names the
+      # state bucket and the S3 buckets after, and which every terragrunt error
+      # and AWS AccessDenied repeats. scripts/mask-aws-ids.sh registers the id and
+      # the ARN with ::add-mask:: before anything else in this job can print, so
+      # from here on the log shows `***` in their place. Masks are per job.
+      #
+      # The target account is the role's own: the ARN's account segment, handed
+      # to e2e.sh as E2E_ACCOUNT_ID through a step output (which stays inside the
+      # job and prints as `***`; the runner would drop a JOB output carrying a
+      # masked value). It used to be a dispatch input, which no step can mask
+      # before it is printed: an input is typed into the dispatch form, kept in
+      # the run's event payload, and printed in the env block of the first step
+      # that reads it. So in this workflow nothing independent states the target:
+      # whatever account the role lives in is the account that is built in and
+      # billed, and nothing ties it to the account_dir input. What binds it is
+      # who may set the e2e environment's secret and its required reviewers.
+      # e2e.sh's preflight comparison of the credential's account
+      # (sts get-caller-identity) with E2E_ACCOUNT_ID is a real check on a local
+      # `task e2e`, where the operator states the id and an SSO profile supplies
+      # the credential; here both come from the same role, so it only confirms
+      # the credential in use is that role's.
+      #
+      # It also fails when E2E_AWS_ROLE_ARN is still a VARIABLE at any level the
+      # e2e environment resolves (the environment, the repository, the
+      # organization): only `true` or `false` reaches the step. With step debug
+      # logging on, the runner traces the value it reads for that variable before
+      # the comparison, unmasked, so never run this workflow with debug logging
+      # while the old variable exists.
+      - name: Mask and check E2E_AWS_ROLE_ARN
+        id: role
+        env:
+          E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}
+          ROLE_ARN_VARIABLE: ${{ vars.E2E_AWS_ROLE_ARN != '' }}
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional E2E_AWS_ROLE_ARN
+          failed=0
+          if [ "$ROLE_ARN_VARIABLE" != "false" ]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is still a variable::E2E_AWS_ROLE_ARN is set as a variable on the e2e environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it: gh variable delete E2E_AWS_ROLE_ARN --env e2e --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable; for an organization variable, narrow its repository access so this repository no longer sees it, or gh variable delete E2E_AWS_ROLE_ARN --org <org> if nothing else uses it. It is a secret on the e2e environment now (see docs/first-deploy-aws.md)."
+            failed=1
+          fi
+          if [ -z "$E2E_AWS_ROLE_ARN" ]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is not set::The e2e environment has no E2E_AWS_ROLE_ARN secret (Settings > Environments > e2e > Environment secrets). Set it to the github-oidc deploy role in the target account (see docs/first-deploy-aws.md)."
+            failed=1
+          elif ! [[ "$E2E_AWS_ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/.+$ ]]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is not a role ARN::The e2e environment's E2E_AWS_ROLE_ARN is not an IAM role ARN (arn:aws:iam::<account>:role/<name>)."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "account_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "E2E_AWS_ROLE_ARN is an environment secret naming a role; its account is the e2e target."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: nanohype/eks-agent-platform
@@ -107,8 +207,11 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
-          role-to-assume: ${{ vars.E2E_AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.E2E_AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
+          # Already masked by the step above; stated so the action's own handling
+          # of the account id it reads back cannot be the one place it is not.
+          mask-aws-account-id: true
 
       # Let the tenants-repo clone/push (and the bootstrap deploy key) use the
       # token over https, transparently rewriting the SSH URL.
@@ -118,7 +221,7 @@ jobs:
 
       - name: run e2e (provision → tenant → validate → teardown)
         env:
-          E2E_ACCOUNT_ID: ${{ inputs.account_id }}
+          E2E_ACCOUNT_ID: ${{ steps.role.outputs.account_id }}
           E2E_REGION: ${{ inputs.region }}
           E2E_ENV: ${{ inputs.environment }}
           E2E_ACCOUNT_DIR: ${{ inputs.account_dir }}
