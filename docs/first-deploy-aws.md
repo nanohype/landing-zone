@@ -332,7 +332,8 @@ cd live/aws/workload-<env>/us-east-1/<env>/github-oidc && terragrunt output -raw
 # from stdin, so neither lands in shell history:
 gh secret set DEPLOY_ROLE_ARN   --env <env> --repo nanohype/landing-zone   # the printed ARN
 gh secret set DEPLOY_ACCOUNT_ID --env <env> --repo nanohype/landing-zone   # the workload-<env> account's 12-digit id
-# e2e.yml: a secret on the e2e environment. The run targets this role's account.
+# e2e.yml: a secret on the e2e environment. The run targets this role's account,
+# whatever the account_dir input says: nothing else states the target in CI.
 gh secret set E2E_AWS_ROLE_ARN  --env e2e   --repo nanohype/landing-zone
 # Local exec does not need any of this.
 ```
@@ -340,9 +341,12 @@ gh secret set E2E_AWS_ROLE_ARN  --env e2e   --repo nanohype/landing-zone
 Each workflow masks these before anything prints: the first step that receives
 one runs `scripts/mask-aws-ids.sh`, which registers the account id and the ARN
 with the runner's log masker, so the log shows `***` wherever either appears.
-Each also fails while one of its names is still set as a variable; if you set
-these as variables before, delete them (`gh variable delete <NAME> --env <env>`,
-or without `--env` for a repository variable). The migration steps and what
+Each also fails while one of its names is still set as a variable, or is set as
+a repository or organization secret (`--env` left off `gh secret set`); if you
+set these as variables before, delete them (`gh variable delete <NAME> --env <env>`,
+or without `--env` for a repository variable; an organization-level name is
+fixed by narrowing its repository access, or `--org <org>` if nothing else uses
+it). The migration steps and what
 stays visible are in
 [operations.md](operations.md#account-ids-in-the-actions-logs).
 

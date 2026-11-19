@@ -14,6 +14,6 @@ output "plan_role_arn" {
 }
 
 output "ecr_public_pull_role_arn" {
-  description = "ARN of the GitHub Actions ECR Public pull role. Set as the repo variable the pulling workflows read the role from. Null when create_ecr_public_pull_role is false."
+  description = "ARN of the GitHub Actions ECR Public pull role. Set as a repository secret (never a variable: it carries the account id, and a variable is printed unmasked) that the pulling workflows read the role from and mask before use. Null when create_ecr_public_pull_role is false."
   value       = var.create_ecr_public_pull_role ? aws_iam_role.ecr_public_pull[0].arn : null
 }
