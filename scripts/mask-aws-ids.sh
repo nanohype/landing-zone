@@ -33,7 +33,8 @@
 #   - every IAM ARN (arn:aws:iam::<twelve digits>:<resource>), whole.
 #   - when the value is JSON (drift.yml's role map), the same two in every key
 #     and string after JSON decoding, so an ARN written with escapes is masked
-#     in the form an action prints it.
+#     in the form an action prints it. Only this pass needs jq: without it the
+#     raw-text masks are registered and then the script refuses (exit 1).
 #
 # All of it happens before any refusal below is printed. It prints nothing but
 # `::add-mask::` commands and, on refusal, `::error` annotations that name the
@@ -268,6 +269,19 @@ self_test() {
   expect_absent never-echoed-refusal SENTINEL
   expect_count never-echoed-refusal '^::error' 1
 
+  # Without jq, the raw-text masks are still registered, before the refusal.
+  local nojq="$tmp/nojq-bin" tool
+  mkdir -p "$nojq"
+  for tool in bash grep sort; do
+    ln -s "$(command -v "$tool")" "$nojq/$tool"
+  done
+  run_case no-jq 1 "PATH=$nojq" "DEPLOY_ROLE_ARN=$arn1" "DEPLOY_ACCOUNT_ID=$id1" -- DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID
+  expect_mask no-jq "$id1"
+  expect_mask no-jq "$arn1"
+  expect_count no-jq '^::add-mask::' 2
+  expect_count no-jq '^::error' 1
+  expect_masks_then_error no-jq
+
   # Usage errors.
   run_case no-names 2 --
   run_case only-flag 2 -- --optional
@@ -301,13 +315,35 @@ for name in "$@"; do
   [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || usage
 done
 
-if ! command -v jq >/dev/null 2>&1; then
-  echo "::error title=jq is not installed::mask-aws-ids.sh needs jq to read JSON values; nothing was masked, so this step stops here."
-  exit 1
-fi
+# The masks for one text: every twelve-digit window of every run of twelve or
+# more digits, and every IAM ARN whole, one per line.
+masks_in() {
+  {
+    printf '%s' "$1" | grep -oE '[0-9]{12,}' | while IFS= read -r run; do
+      for ((i = 0; i + 12 <= ${#run}; i++)); do
+        printf '%s\n' "${run:i:12}"
+      done
+    done
+    printf '%s' "$1" | grep -oE "$ARN_PATTERN"
+  } | sort -u
+}
 
-# Every value, trimmed of leading and trailing whitespace, and for JSON its
-# decoded keys and strings as well: one text the two patterns run over.
+# Registers each line of $1 not registered already.
+registered=""
+register() {
+  local mask
+  [ -n "$1" ] || return 0
+  while IFS= read -r mask; do
+    case $'\n'"$registered" in
+      *$'\n'"$mask"$'\n'*) continue ;;
+    esac
+    echo "::add-mask::${mask}"
+    registered+="$mask"$'\n'
+  done <<<"$1"
+}
+
+# Every value, trimmed of leading and trailing whitespace: one text the two
+# patterns run over.
 corpus=""
 for name in "$@"; do
   raw="${!name-}"
@@ -315,28 +351,29 @@ for name in "$@"; do
   raw="${raw%"${raw##*[![:space:]]}"}"
   [ -n "$raw" ] || continue
   corpus+="$raw"$'\n'
-  if decoded=$(printf '%s' "$raw" | jq -r '.. | (strings, (objects | keys[]))' 2>/dev/null); then
-    corpus+="$decoded"$'\n'
-  fi
 done
 
-# Masks first: they need no parse and no validity, and they must all be
-# registered before any refusal is printed.
-masks=$(
-  {
-    printf '%s' "$corpus" | grep -oE '[0-9]{12,}' | while IFS= read -r run; do
-      for ((i = 0; i + 12 <= ${#run}; i++)); do
-        printf '%s\n' "${run:i:12}"
-      done
-    done
-    printf '%s' "$corpus" | grep -oE "$ARN_PATTERN"
-  } | sort -u
-) || true
-if [ -n "$masks" ]; then
-  while IFS= read -r mask; do
-    echo "::add-mask::${mask}"
-  done <<<"$masks"
+# Masks first: they need no parse, no validity and nothing but grep, and they
+# must all be registered before any refusal is printed.
+register "$(masks_in "$corpus")"
+
+# Then the same over every key and string of each value that is JSON, after
+# decoding, so an ARN written with escapes is masked in the form an action
+# prints it. This pass alone needs jq; without it the step stops, with every
+# mask above already registered.
+if ! command -v jq >/dev/null 2>&1; then
+  echo "::error title=jq is not installed::mask-aws-ids.sh needs jq to read JSON values. Every account id and ARN in their raw text is masked; their JSON-decoded forms are not, so this step stops here."
+  exit 1
 fi
+decoded_corpus=""
+for name in "$@"; do
+  raw="${!name-}"
+  [ -n "${raw//[[:space:]]/}" ] || continue
+  if decoded=$(printf '%s' "$raw" | jq -r '.. | (strings, (objects | keys[]))' 2>/dev/null); then
+    decoded_corpus+="$decoded"$'\n'
+  fi
+done
+register "$(masks_in "$decoded_corpus")"
 
 # Then the refusals, every one of them, naming the variable and nothing of its
 # value.

@@ -43,7 +43,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # secrets.X and vars.X resolve from the job's environment first, then the
+  # repository, then the organization. This job declares no environment, so it
+  # sees only the repository and organization values. E2E_AWS_ROLE_ARN must
+  # exist on the `e2e` GitHub Environment alone, as a secret: a repository or
+  # organization SECRET of that name is what the e2e job would read if the
+  # environment had none of its own (`gh secret set` without `--env e2e`), and
+  # every workflow in the repository can read it; a repository or organization
+  # VARIABLE of that name is how it used to be stored, and a variable is never
+  # masked. Only whether each is set reaches the step, as `true` or `false`.
+  # With step debug logging on, the runner traces the value it reads for the
+  # variable before the comparison, unmasked, so never run this workflow with
+  # debug logging while the old variable exists. Failing here costs no
+  # environment approval.
+  refuse-inherited-config:
+    name: Refuse a repository-level E2E_AWS_ROLE_ARN
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require E2E_AWS_ROLE_ARN to be an e2e-environment secret only
+        # secrets-outside-env is this job's purpose, not a leak: reading the
+        # secret with no environment is the only way to see whether a
+        # repository- or organization-level one exists (listing secrets needs an
+        # admin token), and only the comparison's true/false reaches the step.
+        env:
+          INHERITED_SECRET: ${{ secrets.E2E_AWS_ROLE_ARN != '' }} # zizmor: ignore[secrets-outside-env]
+          INHERITED_VARIABLE: ${{ vars.E2E_AWS_ROLE_ARN != '' }}
+        run: |
+          failed=0
+          if [ "$INHERITED_SECRET" != "false" ]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is a repository or organization secret::E2E_AWS_ROLE_ARN is set as a repository or organization secret, which every workflow in the repository can read and which the e2e job would fall back to. Delete a repository secret (gh secret delete E2E_AWS_ROLE_ARN --repo <owner>/<repo>); for an organization secret, narrow its repository access so this repository no longer sees it, or delete it (gh secret delete E2E_AWS_ROLE_ARN --org <org>) if nothing else uses it. Keep it only on the e2e environment (see docs/first-deploy-aws.md)."
+            failed=1
+          fi
+          if [ "$INHERITED_VARIABLE" != "false" ]; then
+            echo "::error title=E2E_AWS_ROLE_ARN is a repository or organization variable::E2E_AWS_ROLE_ARN is set as a repository or organization variable. Variables are never masked, so its value would reach the public Actions logs. Delete a repository variable (gh variable delete E2E_AWS_ROLE_ARN --repo <owner>/<repo>); for an organization variable, narrow its repository access so this repository no longer sees it, or delete it (gh variable delete E2E_AWS_ROLE_ARN --org <org>) if nothing else uses it. It is a secret on the e2e environment now (see docs/first-deploy-aws.md)."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "E2E_AWS_ROLE_ARN is set at neither repository nor organization level, as a secret or as a variable."
+
   e2e:
+    needs: refuse-inherited-config
     permissions:
       # Scoped to this job rather than the workflow: a job added here later
       # would otherwise inherit the right to mint an OIDC token and assume
@@ -78,8 +121,15 @@ jobs:
       # masked value). It used to be a dispatch input, which no step can mask
       # before it is printed: an input is typed into the dispatch form, kept in
       # the run's event payload, and printed in the env block of the first step
-      # that reads it. e2e.sh still checks the assumed credential's account
-      # (sts get-caller-identity) against it before it touches anything.
+      # that reads it. So in this workflow nothing independent states the target:
+      # whatever account the role lives in is the account that is built in and
+      # billed, and nothing ties it to the account_dir input. What binds it is
+      # who may set the e2e environment's secret and its required reviewers.
+      # e2e.sh's preflight comparison of the credential's account
+      # (sts get-caller-identity) with E2E_ACCOUNT_ID is a real check on a local
+      # `task e2e`, where the operator states the id and an SSO profile supplies
+      # the credential; here both come from the same role, so it only confirms
+      # the credential in use is that role's.
       #
       # It also fails when E2E_AWS_ROLE_ARN is still a VARIABLE at any level the
       # e2e environment resolves (the environment, the repository, the
@@ -96,7 +146,7 @@ jobs:
           bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional E2E_AWS_ROLE_ARN
           failed=0
           if [ "$ROLE_ARN_VARIABLE" != "false" ]; then
-            echo "::error title=E2E_AWS_ROLE_ARN is still a variable::E2E_AWS_ROLE_ARN is set as a variable on the e2e environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it (gh variable delete E2E_AWS_ROLE_ARN --env e2e --repo <owner>/<repo>, or without --env for a repository variable); it is a secret on the e2e environment now (see docs/first-deploy-aws.md)."
+            echo "::error title=E2E_AWS_ROLE_ARN is still a variable::E2E_AWS_ROLE_ARN is set as a variable on the e2e environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it: gh variable delete E2E_AWS_ROLE_ARN --env e2e --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable; for an organization variable, narrow its repository access so this repository no longer sees it, or gh variable delete E2E_AWS_ROLE_ARN --org <org> if nothing else uses it. It is a secret on the e2e environment now (see docs/first-deploy-aws.md)."
             failed=1
           fi
           if [ -z "$E2E_AWS_ROLE_ARN" ]; then

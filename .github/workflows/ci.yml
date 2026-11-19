@@ -1062,9 +1062,65 @@ jobs:
           shellcheck scripts/mask-aws-ids.sh
           bash scripts/mask-aws-ids.sh --self-test
 
+  # secrets.X and vars.X resolve from the job's environment first, then the
+  # repository, then the organization. This job declares no environment, so it
+  # sees only the repository and organization values. AWS_ROLE_ARN and
+  # TERRAGRUNT_ACCOUNT_ID must exist on the `plan` GitHub Environment alone, as
+  # secrets:
+  #   - a repository or organization SECRET of either name is what the plan job
+  #     would read if the environment had none of its own (the likeliest
+  #     migration slip is `gh secret set` without `--env plan`), and it is
+  #     readable by every workflow in the repository, including pull_request
+  #     jobs that never pass the plan environment's gate, any of which can print
+  #     a piece of it.
+  #   - a repository or organization VARIABLE of either name is how these used
+  #     to be stored, and a variable is never masked.
+  # Only whether each is set reaches the step, as `true` or `false`. The
+  # debug-logging residual is the one deploy.yml's refuse-inherited-config
+  # documents: with step debug logging on, the runner traces the value it reads
+  # for each variable before the comparison, unmasked. A pull request from a fork
+  # receives no secrets and its comparisons are `false`, so it passes here. The
+  # plan job needs this one, so a failure costs no environment approval.
+  refuse-inherited-config:
+    name: Refuse repository-level plan secrets and any plan variable
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID to be plan-environment secrets only
+        # secrets-outside-env is this job's purpose, not a leak: reading the
+        # secrets with no environment is the only way to see whether a
+        # repository- or organization-level one exists (listing secrets needs an
+        # admin token), and only each comparison's true/false reaches the step.
+        env:
+          INHERITED_ROLE_ARN_SECRET: ${{ secrets.AWS_ROLE_ARN != '' }} # zizmor: ignore[secrets-outside-env]
+          INHERITED_ACCOUNT_ID_SECRET: ${{ secrets.TERRAGRUNT_ACCOUNT_ID != '' }} # zizmor: ignore[secrets-outside-env]
+          ROLE_ARN_VARIABLE: ${{ vars.AWS_ROLE_ARN != '' }}
+          ACCOUNT_ID_VARIABLE: ${{ vars.TERRAGRUNT_ACCOUNT_ID != '' }}
+        run: |
+          failed=0
+          for name in AWS_ROLE_ARN TERRAGRUNT_ACCOUNT_ID; do
+            case "$name" in
+              AWS_ROLE_ARN) secret="$INHERITED_ROLE_ARN_SECRET" variable="$ROLE_ARN_VARIABLE" ;;
+              TERRAGRUNT_ACCOUNT_ID) secret="$INHERITED_ACCOUNT_ID_SECRET" variable="$ACCOUNT_ID_VARIABLE" ;;
+            esac
+            if [ "$secret" != "false" ]; then
+              echo "::error title=${name} is a repository or organization secret::${name} is set as a repository or organization secret, which every workflow in the repository can read and which the plan job would fall back to. Delete a repository secret (gh secret delete ${name} --repo <owner>/<repo>); for an organization secret, narrow its repository access so this repository no longer sees it, or delete it (gh secret delete ${name} --org <org>) if nothing else uses it. Keep it only on the plan environment (see docs/operations.md)."
+              failed=1
+            fi
+            if [ "$variable" != "false" ]; then
+              echo "::error title=${name} is a repository or organization variable::${name} is set as a repository or organization variable. Variables are never masked, so its value would reach the public Actions logs. Delete a repository variable (gh variable delete ${name} --repo <owner>/<repo>); for an organization variable, narrow its repository access so this repository no longer sees it, or delete it (gh variable delete ${name} --org <org>) if nothing else uses it. It is a secret on the plan environment now (see docs/operations.md)."
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN and TERRAGRUNT_ACCOUNT_ID are set at neither repository nor organization level, as a secret or as a variable."
+
   plan:
     name: Plan (${{ matrix.cloud }}/${{ matrix.env }}/${{ matrix.component }})
-    needs: [discover, validate]
+    needs: [discover, validate, refuse-inherited-config]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # The credential this job assumes is the READ-ONLY plan role, and the
@@ -1080,6 +1136,9 @@ jobs:
     environment: plan
     # The plan jobs need AWS credentials: the AWS_ROLE_ARN and
     # TERRAGRUNT_ACCOUNT_ID secrets on the `plan` environment this job declares.
+    # refuse-inherited-config, which this job needs, refuses either name at
+    # repository or organization level, so what is read here can only be the
+    # environment's own.
     # The first step after checkout decides whether they are there:
     #   - neither or only one set (a fork, whose pull requests receive no
     #     secrets, or a repository that never armed plans): every later step
@@ -1151,7 +1210,7 @@ jobs:
               TERRAGRUNT_ACCOUNT_ID) variable="$ACCOUNT_ID_VARIABLE" ;;
             esac
             if [ "$variable" != "false" ]; then
-              echo "::error title=${name} is still a variable::${name} is set as a variable on the plan environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it (gh variable delete ${name} --repo <owner>/<repo>, adding --env plan for an environment variable); it is a secret on the plan environment now (see docs/operations.md)."
+              echo "::error title=${name} is still a variable::${name} is set as a variable on the plan environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it: gh variable delete ${name} --env plan --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable; for an organization variable, narrow its repository access so this repository no longer sees it, or gh variable delete ${name} --org <org> if nothing else uses it. It is a secret on the plan environment now (see docs/operations.md)."
               failed=1
             fi
           done
@@ -1266,6 +1325,7 @@ jobs:
         tenant-schema-readers,
         e2e-covers-leaves,
         workflow-id-masking,
+        refuse-inherited-config,
         plan,
       ]
     # always() is load-bearing: without it a failed dependency SKIPS this job,

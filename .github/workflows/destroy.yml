@@ -89,11 +89,11 @@ jobs:
               DEPLOY_ACCOUNT_ID) secret="$INHERITED_ACCOUNT_ID_SECRET" variable="$ACCOUNT_ID_VARIABLE" ;;
             esac
             if [ "$secret" != "false" ]; then
-              echo "::error title=${name} is a repository or organization secret::${name} is set as a repository or organization secret, which every GitHub Environment without its own would inherit and every workflow in the repository can read. Delete it there (gh secret delete ${name} --repo <owner>/<repo>) and set it on each of the development and staging environments instead (see docs/operations.md)."
+              echo "::error title=${name} is a repository or organization secret::${name} is set as a repository or organization secret, which every GitHub Environment without its own would inherit and every workflow in the repository can read. Delete a repository secret (gh secret delete ${name} --repo <owner>/<repo>); for an organization secret, narrow its repository access so this repository no longer sees it, or delete it (gh secret delete ${name} --org <org>) if nothing else uses it. Set it on each of the development and staging environments instead (see docs/operations.md)."
               failed=1
             fi
             if [ "$variable" != "false" ]; then
-              echo "::error title=${name} is a repository or organization variable::${name} is set as a repository or organization variable. Variables are never masked, so its value would reach the public Actions logs. Delete it (gh variable delete ${name} --repo <owner>/<repo>); it is a secret on each environment now (see docs/operations.md)."
+              echo "::error title=${name} is a repository or organization variable::${name} is set as a repository or organization variable. Variables are never masked, so its value would reach the public Actions logs. Delete a repository variable (gh variable delete ${name} --repo <owner>/<repo>); for an organization variable, narrow its repository access so this repository no longer sees it, or delete it (gh variable delete ${name} --org <org>) if nothing else uses it. It is a secret on each environment now (see docs/operations.md)."
               failed=1
             fi
           done
@@ -176,11 +176,11 @@ jobs:
           bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID
           failed=0
           if [ "$ROLE_ARN_VARIABLE" != "false" ]; then
-            echo "::error title=DEPLOY_ROLE_ARN is still a variable::DEPLOY_ROLE_ARN is set as a variable on the ${TARGET_ENV} environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it (gh variable delete DEPLOY_ROLE_ARN --env ${TARGET_ENV} --repo <owner>/<repo>); it is a secret on the environment now (see docs/operations.md)."
+            echo "::error title=DEPLOY_ROLE_ARN is still a variable::DEPLOY_ROLE_ARN is set as a variable on the ${TARGET_ENV} environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it: gh variable delete DEPLOY_ROLE_ARN --env ${TARGET_ENV} --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable; for an organization variable, narrow its repository access so this repository no longer sees it, or gh variable delete DEPLOY_ROLE_ARN --org <org> if nothing else uses it. It is a secret on the environment now (see docs/operations.md)."
             failed=1
           fi
           if [ "$ACCOUNT_ID_VARIABLE" != "false" ]; then
-            echo "::error title=DEPLOY_ACCOUNT_ID is still a variable::DEPLOY_ACCOUNT_ID is set as a variable on the ${TARGET_ENV} environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it (gh variable delete DEPLOY_ACCOUNT_ID --env ${TARGET_ENV} --repo <owner>/<repo>); it is a secret on the environment now (see docs/operations.md)."
+            echo "::error title=DEPLOY_ACCOUNT_ID is still a variable::DEPLOY_ACCOUNT_ID is set as a variable on the ${TARGET_ENV} environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it: gh variable delete DEPLOY_ACCOUNT_ID --env ${TARGET_ENV} --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable; for an organization variable, narrow its repository access so this repository no longer sees it, or gh variable delete DEPLOY_ACCOUNT_ID --org <org> if nothing else uses it. It is a secret on the environment now (see docs/operations.md)."
             failed=1
           fi
           if [ -z "$DEPLOY_ACCOUNT_ID" ]; then
