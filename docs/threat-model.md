@@ -193,8 +193,10 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   fed into and, in a job holding AWS credentials, refuses every variable;
   which reads `role-to-assume` and `mask-aws-account-id` case-insensitively,
   as the runner reads action inputs, and an unquoted number YAML parses as an
-  int as a literal id; and which prints `<account id>` in place of any id a
-  finding would otherwise quote, since a finding is a public annotation) and
+  int as a literal id, by the text it was written as; and which prints
+  `<account id>` in place of any id a finding would otherwise quote, since a
+  finding is a public annotation, as does `scripts/check-drift-workflow.py`
+  beside it) and
   the mask script's self-test (synthetic ids only) on every pull request.
   Residual: (a) with step debug
   logging on, the runner traces the value it reads for a variable before the

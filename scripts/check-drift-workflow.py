@@ -53,13 +53,23 @@ WHAT IT CHECKS
 Parsed with a real YAML parser, with line numbers kept, so a finding names the
 file and line.
 
+A finding is printed as an `::error` annotation, which stays on the pull
+request and in the public run log, and ci.yml runs this gate beside the
+masking gate on every pull request. So every message goes through that gate's
+redact() (a run of twelve or more digits other than a placeholder prints as
+<account id>), workflow text it quotes is redacted before it is cut, and a
+parse error is that gate's parse_error(), without PyYAML's pre-cut excerpt.
+One gate redacting what the other prints in full would publish it all the same.
+
 USAGE
 
   check-drift-workflow.py              check .github/workflows
   check-drift-workflow.py --self-test  mutate copies of the workflows in ways
                                        the rules forbid and require each to be
                                        rejected, citing the file and the
-                                       mutated line
+                                       mutated line, with no account id (nor
+                                       the head or tail of one it planted)
+                                       in any finding
 
 Exit 0 = clean. Exit 1 = a violation, or a scan that could not see its inputs.
 """
@@ -224,13 +234,14 @@ def check(root: Path) -> Result:
     res.drift_present = drift_path.is_file()
 
     def bad(path: Path, line: int, msg: str) -> None:
-        res.findings.append((path.relative_to(root).as_posix(), line, msg))
+        res.findings.append((path.relative_to(root).as_posix(), line, masking.redact(msg)))
 
     drift = None
     for path in paths:
         doc = load(path)
         if not isinstance(doc, dict):
-            bad(path, 1, f"could not be parsed: {doc}")
+            bad(path, 1, masking.parse_error(doc) if isinstance(doc, Exception)
+                else f"could not be parsed: {doc}")
             continue
         if path == drift_path:
             drift = doc
@@ -250,7 +261,7 @@ def check(root: Path) -> Result:
                 why = bounded_input(doc, text)
                 if why:
                     bad(path, ln,
-                        f"job '{job_id}' declares its environment from {text[:70]!r}, and "
+                        f"job '{job_id}' declares its environment from {masking.quote(text, 70)}, and "
                         f"{why}. A computed name can evaluate to `drift`, whose branch "
                         "policy admits by ref: a workflow on main that a pull request, "
                         "comment or other run can trigger (pull_request_target, "
@@ -404,6 +415,23 @@ MUTATIONS = [
      "on:\n  pull_request_target:\n  schedule:\n", r"^on:$"),
     ("a drift.yml job reads the map on another environment", "drift.yml", DRIFT_SELECT_ENV,
      DRIFT_SELECT_ENV.replace("    environment: drift\n", "    environment: plan\n"), None),
+    # The findings below quote workflow text carrying an account id, and must
+    # print <account id> in its place (the self-test fails any that does not).
+    ("a workflow that does not parse, at a line carrying an account id", "ci.yml",
+     CI_PLAN_ENV, CI_PLAN_ENV + "    env:\n      OWNER: 222233334444: x\n", r"^name: "),
+    ("a workflow that does not parse, with an account id at the parser's excerpt cut",
+     "ci.yml", CI_PLAN_ENV,
+     CI_PLAN_ENV + "    env:\n      OWNER: x 222233334444 qqqqqqqqqqqqqqqqqqqqqqq: y\n",
+     r"^name: "),
+    ("a computed environment quoting an account id across the quote's cut", "deploy.yml",
+     DEPLOY_JOB_ENV,
+     ("    environment: ${{ format('{0}-{1}', inputs.environment, 'qqqqqqqqqqqqqqqqqq-"
+      "222233334444') }}\n"), None),
+    ("a dispatch choice input offers drift beside an account id", "deploy.yml",
+     DEPLOY_ENV_CHOICE,
+     DEPLOY_ENV_CHOICE.replace("          - production\n",
+                               "          - production\n          - drift-222233334444\n"),
+     r"^\s+environment: \$\{\{ inputs\.environment \}\}"),
 ]
 
 
@@ -441,6 +469,17 @@ def self_test() -> int:
                     target.unlink()
                 else:
                     target.write_text(text)
+            planted = {m.group(1) for m in masking.ID_LITERAL.finditer(mutated)
+                       if not masking.placeholder(m.group(1))} \
+                - set(masking.ID_LITERAL.findall(text or ""))
+            leaked = masking.leaked_ids(res.findings, planted)
+            if leaked:
+                # The messages are not printed: the point is that they carry an id.
+                print(f"FAIL [{name}]: {len(leaked)} finding(s) quote an account id, at "
+                      f"{leaked}; a finding is published as an annotation and must say "
+                      "<account id> instead", file=sys.stderr)
+                failures += 1
+                continue
             rel = f"{WORKFLOWS_REL}/{fname}"
             lines = mutated.splitlines()
             if expect is None:
@@ -472,7 +511,7 @@ def self_test() -> int:
               file=sys.stderr)
         return 1
     print(f"check-drift-workflow self-test passed ({ran} mutations rejected at the "
-          "mutated line, unmutated workflows accepted).")
+          "mutated line with no account id in any finding, unmutated workflows accepted).")
     return 0
 
 

@@ -134,14 +134,20 @@ WHAT IT CHECKS, in every workflow under .github/workflows
      twelve-digit account id or an ARN with one, except the tree's synthetic
      placeholders (one digit repeated, or 123456789012). An unquoted number
      counts, as a value or as a key: YAML reads `OWNER: 222233334444` as an
-     int, and the runner prints it as text.
+     int, and the runner prints it as text. It is read as the text it was
+     written as, so an id YAML 1.1 takes for octal (digits 0-7 behind a
+     leading 0) is still seen.
 
 No finding repeats an account id. A finding is printed as an `::error`
 annotation, which stays on the pull request and in the public run log after
 the diff that carried the text is gone, so every message (a YAML parse error
 included) is redacted on its way out: a run of twelve or more digits other than
 a placeholder is printed as <account id>, and workflow text a finding quotes is
-redacted before it is cut to length, so no truncated head of an id survives.
+redacted before it is cut to length, so no truncated head of an id survives. A
+parse error is reported as the parser's problem, context, line and column,
+without the excerpt PyYAML quotes, which it has already cut to length before
+this gate sees it. scripts/check-drift-workflow.py prints its findings through
+the same redaction.
 
 Rules 4 and 8 check that the comparison exists where it can see the value,
 not what the shell does with it; the workflow's step fails on `true`, and its message names the `gh` command
@@ -273,29 +279,71 @@ LineLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapp
 LineLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_SEQUENCE_TAG, _sequence)
 
 
+class LInt(int):
+    """An int that keeps the text YAML read it from, in `raw`."""
+    raw = ""
+
+
+class LFloat(float):
+    """A float that keeps the text YAML read it from, in `raw`."""
+    raw = ""
+
+
+def _int(loader, node):
+    v = LInt(loader.construct_yaml_int(node))
+    v.raw = node.value
+    return v
+
+
+def _float(loader, node):
+    v = LFloat(loader.construct_yaml_float(node))
+    v.raw = node.value
+    return v
+
+
+# The loader resolves YAML 1.1, where an unquoted run of digits 0-7 with a
+# leading 0 is octal: `012345670123` constructs as 1402433619, and its decimal
+# text no longer looks like an account id. Keeping the source text lets the
+# literal-id rule read what the file says.
+LineLoader.add_constructor("tag:yaml.org,2002:int", _int)
+LineLoader.add_constructor("tag:yaml.org,2002:float", _float)
+
+
 def _number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def number_texts(value) -> list[str]:
+    """The text a number was written as, then its value's text where that differs.
+
+    The source text is what the public file carries (`012345670123`, octal to
+    YAML 1.1); the value's text covers a spelling the source text hides
+    (`222_233_334_444`, which YAML 1.1 reads as 222233334444)."""
+    return list(dict.fromkeys(t for t in (getattr(value, "raw", ""), str(value)) if t))
 
 
 def strings_with_lines(value, line: int, skip_keys: tuple = (), numbers: bool = False):
     """(string, line) for every string inside a parsed value, keys included.
 
     numbers: also yield each integer and float scalar, and each such key, as
-    its text (booleans are not numbers here). An unquoted `OWNER: 222233334444`
-    is an int to YAML and a string to the runner, which prints it in the env
-    block like any other value, so the literal-id rule has to see it; the
-    expression rules have nothing to read in a number."""
+    the text it was written as and as its value's text (booleans are not
+    numbers here). An unquoted `OWNER: 222233334444` is an int to YAML and a
+    string to the runner, which prints it in the env block like any other
+    value, so the literal-id rule has to see it; the expression rules have
+    nothing to read in a number."""
     if isinstance(value, str):
         yield value, line
     elif numbers and _number(value):
-        yield str(value), line
+        for t in number_texts(value):
+            yield t, line
     elif isinstance(value, LDict):
         for k, v in value.items():
             kl = value.key_lines.get(k, value.line)
             if isinstance(k, str):
                 yield k, kl
             elif numbers and _number(k):
-                yield str(k), kl
+                for t in number_texts(k):
+                    yield t, kl
             if k in skip_keys:
                 continue
             yield from strings_with_lines(v, value.value_lines.get(k, kl), skip_keys, numbers)
@@ -337,7 +385,7 @@ def redact(text: str) -> str:
     """text with every run of twelve or more digits, other than a placeholder, replaced.
 
     A finding quotes workflow text (an expression, an input's value, a step
-    name, a YAML parser's excerpt) and is printed as an `::error` annotation,
+    name, a YAML parser's message) and is printed as an `::error` annotation,
     which stays on the pull request and in the public run log after the diff
     that carried the text is gone. The gate that rejects an account id written
     into a workflow must not be what publishes it a second time."""
@@ -352,6 +400,27 @@ def quote(text, limit: int) -> str:
     Cutting first could leave the head of an account id under twelve digits,
     where the redaction no longer recognises it."""
     return repr(redact(str(text))[:limit])
+
+
+def parse_error(e) -> str:
+    """A YAML load failure as a finding: what the parser objected to and where.
+
+    Not str(e): PyYAML's message for a marked error quotes the offending line,
+    already cut to about 75 characters around the column with ` ... `. That
+    cut happens before redact() sees the text, so the head or tail of an id at
+    the cut is too short to recognise and is published. The problem, its
+    context and their line and column say everything the excerpt does; the
+    line itself is in the file."""
+    if isinstance(e, yaml.MarkedYAMLError):
+        parts = [what + (f" (line {mark.line + 1}, column {mark.column + 1})" if mark else "")
+                 for what, mark in ((e.context, e.context_mark), (e.problem, e.problem_mark))
+                 if what]
+        if e.note:
+            parts.append(e.note)
+        text = "; ".join(parts) or type(e).__name__
+    else:
+        text = str(e)
+    return redact(f"could not be parsed: {text}")
 
 
 def with_key(block, key: str):
@@ -630,8 +699,7 @@ def check(root: Path) -> Result:
         try:
             docs[p] = yaml.load(p.read_text(), Loader=LineLoader)
         except (OSError, yaml.YAMLError) as e:
-            res.findings.append((p.relative_to(root).as_posix(), 1,
-                                 redact(f"could not be parsed: {e}")))
+            res.findings.append((p.relative_to(root).as_posix(), 1, parse_error(e)))
     by_use = collect_ids_by_use(docs)
 
     def ident(name: str) -> bool:
@@ -1243,11 +1311,28 @@ MUTATIONS = [
      DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("          ACTION", "          222233334444: x\n          ACTION"),
      None),
+    # Digits 0-7 behind a leading 0 are octal to YAML 1.1: the value is
+    # 1402433619, and only the source text still reads as an account id.
+    ("a literal account id YAML reads as octal, as an env value", "deploy.yml",
+     DEPLOY_RUN_TG_ENV,
+     DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", "012345670123"), None),
+    ("a literal account id YAML reads as octal, as an env key", "deploy.yml",
+     DEPLOY_RUN_TG_ENV,
+     DEPLOY_RUN_TG_ENV.replace("          ACTION", "          012345670123: x\n          ACTION"),
+     None),
     # The parser's own message quotes the line it stopped at; the finding is
     # at line 1 and must say <account id>, not the digits.
     ("a workflow that does not parse, at a line carrying an account id", "deploy.yml",
      DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("          ACTION", "          OWNER: 222233334444: x\n          ACTION"),
+     r"^name: Deploy$"),
+    # PyYAML cuts its excerpt to about 75 characters around the column; here
+    # the cut falls inside the id, leaving a tail too short to redact.
+    ("a workflow that does not parse, with an account id at the parser's excerpt cut",
+     "deploy.yml", DEPLOY_RUN_TG_ENV,
+     DEPLOY_RUN_TG_ENV.replace(
+         "          ACTION",
+         "          OWNER: x 222233334444 qqqqqqqqqqqqqqqqqqqqq: y\n          ACTION"),
      r"^name: Deploy$"),
     ("a variable of a name outside the rule in an AWS job", "deploy.yml", DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("          ACTION",
