@@ -170,21 +170,37 @@ USAGE
   check-workflow-id-masking.py              check .github/workflows
   check-workflow-id-masking.py --self-test  mutate copies of the workflows in
                                             ways the rules forbid and require
-                                            each to be rejected, citing the file
-                                            and the mutated line, with no
-                                            account id (nor the head or tail of
-                                            one it planted) in any finding; and
+                                            each to be rejected by the rule it
+                                            plants (its must_say words), citing
+                                            the file and the mutated line, with
+                                            no account id (nor the head or tail
+                                            of one it planted) in any finding;
                                             apply edits the rules permit (mixed-
                                             case input names) and require each
-                                            to be accepted
+                                            to be accepted; require the floor to
+                                            refuse each shortfall alone and a
+                                            scan of no workflows, and main to
+                                            refuse each tree git does not track
+                                            as this repository; and require the
+                                            self-test's own checks to report a
+                                            case that would pass vacuously (an
+                                            anchor that no longer occurs, a
+                                            mutation the gate accepts, a
+                                            rejection at another line or by
+                                            another rule, a finding quoting an
+                                            id, a baseline the gate rejects)
 
 Exit 0 = clean. Exit 1 = a violation, or a scan that could not see its inputs.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
+import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -1117,25 +1133,31 @@ def report(res: Result) -> int:
     return 0
 
 
-def main_check() -> int:
-    ok, why = repo_is_visible(ROOT)
+def floor_problem(res: Result) -> str | None:
+    """Why a scan did not see what this gate checks, or None when it met the floor."""
+    unseen = sorted(KNOWN_ID_READS - res.id_names)
+    if res.workflows >= MIN_WORKFLOWS and res.mask_steps >= MIN_MASK_STEPS and not unseen:
+        return None
+    return (f"read {res.workflows} workflow(s) and {res.mask_steps} mask step(s) under "
+            f"{WORKFLOWS_REL} (expected at least {MIN_WORKFLOWS} and {MIN_MASK_STEPS})"
+            + (f", and saw no read of {', '.join(unseen)}, which KNOWN_ID_READS lists as an "
+               "id secret the workflows read" if unseen else "")
+            + ". This gate did not see what it checks and refuses to report a pass.")
+
+
+def main_check(root: Path = ROOT) -> int:
+    ok, why = repo_is_visible(root)
     if not ok:
         print(f"::error::{why} Refusing to report a pass.")
         return 1
-    res = check(ROOT)
-    unseen = sorted(KNOWN_ID_READS - res.id_names)
-    vacuous = res.workflows < MIN_WORKFLOWS or res.mask_steps < MIN_MASK_STEPS or unseen
+    res = check(root)
+    problem = floor_problem(res)
     # Findings first: a removed mask command both drops the mask-step count below
     # the floor and leaves a step receiving the secret unmasked, and the line
     # that names is what the reader needs.
     code = report(res) if res.findings else 0
-    if vacuous:
-        print(f"::error::read {res.workflows} workflow(s) and {res.mask_steps} mask step(s) "
-              f"under .github/workflows (expected at least {MIN_WORKFLOWS} and "
-              f"{MIN_MASK_STEPS})"
-              + (f", and saw no read of {', '.join(unseen)} among the id secrets the "
-                 "workflows read today" if unseen else "")
-              + ". This gate did not see what it checks and refuses to report a pass.")
+    if problem:
+        print(f"::error::{problem}")
         return 1
     return code if res.findings else report(res)
 
@@ -1155,177 +1177,202 @@ CI_DETECT_ENV = ("          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}\n"
 DEPLOY_RUN_TG_ENV = ("          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}\n"
                      "          COMPONENT: ${{ inputs.component }}\n          ACTION")
 
-# (name, file, old, new, expected line: None = a changed line inside `new`, or
-# a regex naming the line in the mutated file the finding must cite). old and
-# new may be tuples of the same length, each pair applied once, with a regex.
+# (name, file, old, new, expected line, must_say). expected line: None = a changed
+# line inside `new`, or a regex naming the line in the mutated file the finding
+# must cite. old and new may be tuples of the same length, each pair applied once,
+# with a regex. must_say: words of the rule the case plants, which a finding at
+# that line must carry, so a case is not passed by another rule firing there.
 MUTATIONS = [
     ("role-to-assume from a variable", "deploy.yml",
      "role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}",
-     "role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}", None),
+     "role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}", None, "It must be `${{ secrets.NAME }}`"),
     ("a variable in a later step's env", "deploy.yml", DEPLOY_VERIFY_ENV,
-     DEPLOY_VERIFY_ENV.replace("secrets.DEPLOY_ACCOUNT_ID", "vars.DEPLOY_ACCOUNT_ID"), None),
+     DEPLOY_VERIFY_ENV.replace("secrets.DEPLOY_ACCOUNT_ID", "vars.DEPLOY_ACCOUNT_ID"), None,
+     "A variable is never masked"),
     ("a variable read with index syntax", "deploy.yml", DEPLOY_VERIFY_ENV,
-     DEPLOY_VERIFY_ENV.replace("secrets.DEPLOY_ACCOUNT_ID", "vars['DEPLOY_ACCOUNT_ID']"), None),
+     DEPLOY_VERIFY_ENV.replace("secrets.DEPLOY_ACCOUNT_ID", "vars['DEPLOY_ACCOUNT_ID']"), None,
+     "A variable is never masked"),
     ("a variable read through a mixed-case context name", "deploy.yml", DEPLOY_VERIFY_ENV,
-     DEPLOY_VERIFY_ENV.replace("secrets.DEPLOY_ACCOUNT_ID", "Vars.DEPLOY_ACCOUNT_ID"), None),
+     DEPLOY_VERIFY_ENV.replace("secrets.DEPLOY_ACCOUNT_ID", "Vars.DEPLOY_ACCOUNT_ID"), None,
+     "A variable is never masked"),
     ("a variable read through a computed index", "deploy.yml",
      "          aws-region: ${{ inputs.region }}\n          # Already masked by the guard step",
      ("          aws-region: ${{ inputs.region }}\n"
       "          role-session-name: ${{ vars[format('DEPLOY_{0}', 'ACCOUNT_ID')] }}\n"
-      "          # Already masked by the guard step"), None),
+      "          # Already masked by the guard step"), None,
+     "a computed index or filter of the `vars` context"),
     ("a step receives the secret before the mask step", "deploy.yml", DEPLOY_MASK_STEP,
      ("      - name: Early\n        env:\n          EARLY: ${{ secrets.DEPLOY_ACCOUNT_ID }}\n"
-      "        run: echo early\n" + DEPLOY_MASK_STEP), None),
+      "        run: echo early\n" + DEPLOY_MASK_STEP), None,
+     "is the first to receive DEPLOY_ACCOUNT_ID"),
     ("an early step reads the secret with index syntax", "deploy.yml", DEPLOY_MASK_STEP,
      ("      - name: Early\n        env:\n          EARLY: ${{ secrets['DEPLOY_ROLE_ARN'] }}\n"
-      "        run: echo \"${EARLY#arn:aws:iam::}\"\n" + DEPLOY_MASK_STEP), None),
+      "        run: echo \"${EARLY#arn:aws:iam::}\"\n" + DEPLOY_MASK_STEP), None,
+     "is the first to receive DEPLOY_ROLE_ARN"),
     ("an early step reads the secret through a mixed-case context name", "deploy.yml",
      DEPLOY_MASK_STEP,
      ("      - name: Early\n        env:\n          EARLY: ${{ Secrets.DEPLOY_ROLE_ARN }}\n"
-      "        run: echo \"${EARLY#arn:aws:iam::}\"\n" + DEPLOY_MASK_STEP), None),
+      "        run: echo \"${EARLY#arn:aws:iam::}\"\n" + DEPLOY_MASK_STEP), None,
+     "is the first to receive DEPLOY_ROLE_ARN"),
     # The finding names the step, and the step's name carries an id: every
     # message is redacted, not only the text it quotes.
     ("an early step named with an account id reads the secret", "deploy.yml",
      DEPLOY_MASK_STEP,
      ("      - name: Early 222233334444\n        env:\n"
       "          EARLY: ${{ secrets.DEPLOY_ROLE_ARN }}\n"
-      "        run: echo early\n" + DEPLOY_MASK_STEP), None),
+      "        run: echo early\n" + DEPLOY_MASK_STEP), None, "step 'Early <account id>'"),
     ("an early step reads every variable at once", "deploy.yml", DEPLOY_MASK_STEP,
      ("      - name: Early\n        env:\n          ALL: ${{ toJSON(vars) }}\n"
-      "        run: echo early\n" + DEPLOY_MASK_STEP), None),
+      "        run: echo early\n" + DEPLOY_MASK_STEP), None, "the whole `vars` context"),
     ("every secret in a job-level env", "e2e.yml",
      "    environment: e2e\n", "    environment: e2e\n    env:\n      ALL: ${{ toJSON(secrets) }}\n",
-     None),
+     None, "the whole `secrets` context"),
     ("the mask is not the first command", "destroy.yml",
      '        run: |\n          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID\n',
      '        run: |\n          echo "starting"\n          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID\n',
-     None),
+     None, "and its first command is"),
     ("the mask step is conditional", "deploy.yml", DEPLOY_MASK_STEP_ENV,
-     DEPLOY_MASK_STEP + "        if: github.event_name == 'push'\n        env:\n", None),
+     DEPLOY_MASK_STEP + "        if: github.event_name == 'push'\n        env:\n", None,
+     "has an `if:`"),
     ("the mask step continues on error", "deploy.yml", DEPLOY_MASK_STEP_ENV,
-     DEPLOY_MASK_STEP + "        continue-on-error: true\n        env:\n", None),
+     DEPLOY_MASK_STEP + "        continue-on-error: true\n        env:\n", None,
+     "sets `continue-on-error`"),
     ("the mask step runs under pwsh", "e2e.yml", E2E_MASK_STEP,
-     E2E_MASK_STEP + "        shell: pwsh\n", None),
+     E2E_MASK_STEP + "        shell: pwsh\n", None, "runs under the step shell 'pwsh'"),
     ("the job's default shell does not stop on failure", "e2e.yml",
      "    environment: e2e\n", "    environment: e2e\n    defaults:\n      run:\n        shell: bash {0}\n",
-     None),
+     None, "runs under the job's `defaults.run` shell"),
     ("the mask command carries an argument the script refuses", "e2e.yml", E2E_MASK_CMD,
-     E2E_MASK_CMD.replace("E2E_AWS_ROLE_ARN\n", "E2E_AWS_ROLE_ARN --bogus\n"), None),
+     E2E_MASK_CMD.replace("E2E_AWS_ROLE_ARN\n", "E2E_AWS_ROLE_ARN --bogus\n"), None,
+     "and its first command is"),
     ("--optional after a name", "e2e.yml", E2E_MASK_CMD,
-     E2E_MASK_CMD.replace("--optional E2E_AWS_ROLE_ARN", "E2E_AWS_ROLE_ARN --optional"), None),
+     E2E_MASK_CMD.replace("--optional E2E_AWS_ROLE_ARN", "E2E_AWS_ROLE_ARN --optional"), None,
+     "and its first command is"),
     ("a receiving step runs after a failure", "deploy.yml",
      "      - name: Verify the credential is in DEPLOY_ACCOUNT_ID's account\n",
      "      - name: Verify the credential is in DEPLOY_ACCOUNT_ID's account\n        if: always()\n",
-     None),
+     None, "runs after a failure"),
     ("the guard job reads the secret's value", "destroy.yml",
      "INHERITED_ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN != '' }}",
-     "INHERITED_ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}", None),
+     "INHERITED_ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}", None, "declares no environment"),
     ("the repository-level secret guard removed", "ci.yml",
      "INHERITED_ROLE_ARN_SECRET: ${{ secrets.AWS_ROLE_ARN != '' }}",
      "INHERITED_ROLE_ARN_SECRET: \"false\"",
-     r"^\s+AWS_ROLE_ARN: \$\{\{ secrets\.AWS_ROLE_ARN \}\}"),
+     r"^\s+AWS_ROLE_ARN: \$\{\{ secrets\.AWS_ROLE_ARN \}\}",
+     "but no job it needs, with no environment, compares"),
     ("the mask command omits a secret the step receives", "ci.yml",
      "--optional AWS_ROLE_ARN TERRAGRUNT_ACCOUNT_ID\n",
-     "--optional AWS_ROLE_ARN\n", None),
+     "--optional AWS_ROLE_ARN\n", None, "the mask command does not name"),
     ("a piece of the secret computed in the mask step's env", "ci.yml", CI_DETECT_ENV,
      CI_DETECT_ENV.replace("          ROLE_ARN_VARIABLE",
                            "          DEV_ROLE_ARN: ${{ fromJSON(secrets.AWS_ROLE_ARN).development }}\n"
-                           "          ROLE_ARN_VARIABLE"), None),
+                           "          ROLE_ARN_VARIABLE"), None, "computes from the id secret"),
     ("the secret re-serialised in a later step's env", "ci.yml",
      "          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}\n          TF_INPUT",
      "          TERRAGRUNT_ACCOUNT_ID: ${{ toJSON(secrets.TERRAGRUNT_ACCOUNT_ID) }}\n          TF_INPUT",
-     None),
+     None, "computes from the id secret"),
     ("the secret expanded into run text", "ci.yml",
      "        run: terragrunt run --non-interactive -- plan -input=false -lock=false -no-color\n",
      "        run: terragrunt run --non-interactive -- plan -input=false -lock=false -no-color -var account=${{ secrets.TERRAGRUNT_ACCOUNT_ID }}\n",
-     None),
+     None, "through its step `run`"),
     ("role-to-assume from the matrix", "ci.yml",
      "role-to-assume: ${{ secrets.AWS_ROLE_ARN }}",
-     "role-to-assume: ${{ matrix.role_arn }}", None),
+     "role-to-assume: ${{ matrix.role_arn }}", None, "It must be `${{ secrets.NAME }}`"),
     # The finding quotes the value; the self-test fails it unless it says
     # <account id> where the digits were.
     ("role-to-assume as a literal ARN", "destroy.yml",
      "role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}",
-     "role-to-assume: arn:aws:iam::222233334444:role/deploy", None),
+     "role-to-assume: arn:aws:iam::222233334444:role/deploy", None,
+     "carries an ARN naming an account as a literal"),
     # The id starts inside the 60 characters the finding quotes and ends past
     # them: cut before redacting, the quote would keep its first ten digits.
     ("role-to-assume as a literal whose id straddles the quoted length", "destroy.yml",
      "role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}",
      "role-to-assume: role-padded-so-that-the-account-id-crosses-the-cut 222233334444",
-     None),
+     None, "crosses-the-cut <account"),
     ("role-to-assume spelt in mixed case, from the matrix", "ci.yml",
      "role-to-assume: ${{ secrets.AWS_ROLE_ARN }}",
-     "Role-To-Assume: ${{ matrix.role_arn }}", None),
+     "Role-To-Assume: ${{ matrix.role_arn }}", None, "It must be `${{ secrets.NAME }}`"),
     # The runner reads action inputs upper-cased, so this configures the action:
     # PULL_ROLE is an id by use, and an action is the first step to receive it.
     ("role-to-assume spelt in mixed case, from a secret named outside the rule", "destroy.yml",
      "role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}",
-     "Role-To-Assume: ${{ secrets.PULL_ROLE }}", None),
+     "Role-To-Assume: ${{ secrets.PULL_ROLE }}", None, "is the first to receive PULL_ROLE"),
     ("an id-named key fed from a variable of another name", "ci.yml",
      "          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}\n          TF_INPUT",
-     "          TERRAGRUNT_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT }}\n          TF_INPUT", None),
+     "          TERRAGRUNT_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT }}\n          TF_INPUT", None,
+     "which by its name carries an account id or role ARN"),
     ("the secret in a workflow-level env", "ci.yml",
      "permissions:\n  contents: read\n\njobs:\n",
      "permissions:\n  contents: read\n\nenv:\n  TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}\n\njobs:\n",
-     None),
+     None, "through its workflow-level `env`"),
     ("the secret in a job-level env", "e2e.yml",
      "    environment: e2e\n",
-     "    environment: e2e\n    env:\n      E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}\n", None),
+     "    environment: e2e\n    env:\n      E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}\n", None,
+     "through its job-level `env`"),
     ("the mask step masks a variable it hands on as an output", "e2e.yml",
      "          E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}\n          ROLE_ARN_VARIABLE",
-     "          E2E_AWS_ROLE_ARN: ${{ vars.E2E_ROLE }}\n          ROLE_ARN_VARIABLE", None),
+     "          E2E_AWS_ROLE_ARN: ${{ vars.E2E_ROLE }}\n          ROLE_ARN_VARIABLE", None,
+     "What a mask step masks"),
     ("an account id as a dispatch input", "e2e.yml",
      "      region:\n        description: \"Region\"\n",
      ("      account_id:\n        description: \"Target AWS account ID\"\n"
-      "      region:\n        description: \"Region\"\n"), None),
+      "      region:\n        description: \"Region\"\n"), None,
+     "declares the workflow_dispatch input"),
     ("an account as a dispatch input under another name", "e2e.yml",
      "      region:\n        description: \"Region\"\n",
      ("      aws_account:\n        description: \"Target AWS account (12 digits)\"\n"
-      "      region:\n        description: \"Region\"\n"), None),
+      "      region:\n        description: \"Region\"\n"), None,
+     "declares the workflow_dispatch input"),
     ("an id input read through github.event.inputs with index syntax", "e2e.yml",
      "          E2E_REGION: ${{ inputs.region }}\n",
      "          E2E_REGION: ${{ inputs.region }}\n          ACCT: ${{ github.event.inputs['account_id'] }}\n",
-     None),
+     None, "reads the input account_id"),
     ("an id input read through an upper-case context name", "e2e.yml",
      "          E2E_REGION: ${{ inputs.region }}\n",
-     "          E2E_REGION: ${{ inputs.region }}\n          ACCT: ${{ INPUTS.account_id }}\n", None),
+     "          E2E_REGION: ${{ inputs.region }}\n          ACCT: ${{ INPUTS.account_id }}\n", None,
+     "reads the input account_id"),
     ("every leftover-variable guard removed", "e2e.yml",
      ("ROLE_ARN_VARIABLE: ${{ vars.E2E_AWS_ROLE_ARN != '' }}",
       "INHERITED_VARIABLE: ${{ vars.E2E_AWS_ROLE_ARN != '' }}"),
      ("ROLE_ARN_VARIABLE: \"false\"", "INHERITED_VARIABLE: \"false\""),
-     r"^\s+E2E_AWS_ROLE_ARN: \$\{\{ secrets\.E2E_AWS_ROLE_ARN \}\}"),
+     r"^\s+E2E_AWS_ROLE_ARN: \$\{\{ secrets\.E2E_AWS_ROLE_ARN \}\}",
+     "neither it nor a job it needs on the same environment compares"),
     ("an action is the first step to receive the secret", "e2e.yml",
      "          E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}\n          ROLE_ARN_VARIABLE",
      "          E2E_AWS_ROLE_ARN: ${{ steps.none.outputs.none }}\n          ROLE_ARN_VARIABLE",
-     r"^\s+role-to-assume: \$\{\{ secrets\.E2E_AWS_ROLE_ARN \}\}"),
+     r"^\s+role-to-assume: \$\{\{ secrets\.E2E_AWS_ROLE_ARN \}\}", "and it is not a mask step"),
     ("a literal account id", "deploy.yml", DEPLOY_RUN_TG_ENV,
-     DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", '"222233334444"'), None),
+     DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", '"222233334444"'), None,
+     "carries an account id as a literal"),
     ("a literal account id YAML reads as a number, as an env value", "deploy.yml",
      DEPLOY_RUN_TG_ENV,
-     DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", "222233334444"), None),
+     DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", "222233334444"), None,
+     "carries an account id as a literal"),
     ("a literal account id YAML reads as a number, as an action input", "destroy.yml",
      "          aws-region: ${{ inputs.region }}\n",
      "          aws-region: ${{ inputs.region }}\n          role-session-name: 222233334444\n",
-     None),
+     None, "carries an account id as a literal"),
     ("a literal account id YAML reads as a number, as an env key", "deploy.yml",
      DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("          ACTION", "          222233334444: x\n          ACTION"),
-     None),
+     None, "carries an account id as a literal"),
     # Digits 0-7 behind a leading 0 are octal to YAML 1.1: the value is
     # 1402433619, and only the source text still reads as an account id.
     ("a literal account id YAML reads as octal, as an env value", "deploy.yml",
      DEPLOY_RUN_TG_ENV,
-     DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", "012345670123"), None),
+     DEPLOY_RUN_TG_ENV.replace("${{ secrets.DEPLOY_ACCOUNT_ID }}", "012345670123"), None,
+     "carries an account id as a literal"),
     ("a literal account id YAML reads as octal, as an env key", "deploy.yml",
      DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("          ACTION", "          012345670123: x\n          ACTION"),
-     None),
+     None, "carries an account id as a literal"),
     # The parser's own message quotes the line it stopped at; the finding is
     # at line 1 and must say <account id>, not the digits.
     ("a workflow that does not parse, at a line carrying an account id", "deploy.yml",
      DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("          ACTION", "          OWNER: 222233334444: x\n          ACTION"),
-     r"^name: Deploy$"),
+     r"^name: Deploy$", "could not be parsed"),
     # PyYAML cuts its excerpt to about 75 characters around the column; here
     # the cut falls inside the id, leaving a tail too short to redact.
     ("a workflow that does not parse, with an account id at the parser's excerpt cut",
@@ -1333,19 +1380,48 @@ MUTATIONS = [
      DEPLOY_RUN_TG_ENV.replace(
          "          ACTION",
          "          OWNER: x 222233334444 qqqqqqqqqqqqqqqqqqqqq: y\n          ACTION"),
-     r"^name: Deploy$"),
+     r"^name: Deploy$", "could not be parsed"),
     ("a variable of a name outside the rule in an AWS job", "deploy.yml", DEPLOY_RUN_TG_ENV,
      DEPLOY_RUN_TG_ENV.replace("          ACTION",
-                               "          BUCKET: ${{ vars.TF_BUCKET }}\n          ACTION"), None),
+                               "          BUCKET: ${{ vars.TF_BUCKET }}\n          ACTION"), None,
+     "in a job that can hold AWS credentials"),
     ("configure-aws-credentials without mask-aws-account-id", "deploy.yml",
      "          mask-aws-account-id: true\n", "",
-     r"^\s+uses: aws-actions/configure-aws-credentials@"),
+     r"^\s+uses: aws-actions/configure-aws-credentials@", "without `mask-aws-account-id: true`"),
     ("configure-aws-credentials spelt in mixed case, unmasked", "destroy.yml",
      ("        uses: aws-actions/configure-aws-credentials@", "          mask-aws-account-id: true\n"),
      ("        uses: Aws-Actions/Configure-AWS-Credentials@", ""),
-     r"^\s+uses: Aws-Actions/Configure-AWS-Credentials@"),
+     r"^\s+uses: Aws-Actions/Configure-AWS-Credentials@", "without `mask-aws-account-id: true`"),
     ("secrets: inherit", "e2e.yml",
-     "    environment: e2e\n", "    environment: e2e\n    secrets: inherit\n", None),
+     "    environment: e2e\n", "    environment: e2e\n    secrets: inherit\n", None,
+     "passes `secrets: inherit`"),
+    # Shapes only one rule sees: each case is rejected by that rule and by no other.
+    ("an expression the gate cannot read names a secret", "deploy.yml", DEPLOY_VERIFY_ENV,
+     DEPLOY_VERIFY_ENV.replace(
+         "        run: |\n",
+         '          FALLBACK: ${{ secrets.DEPLOY_ACCOUNT_ID || "unset" }}\n        run: |\n'),
+     None, "that mentions the secrets, vars or inputs context"),
+    ("every secret read through a `*` filter", "deploy.yml", DEPLOY_VERIFY_ENV,
+     DEPLOY_VERIFY_ENV.replace(
+         "        run: |\n", "          EVERY: ${{ toJSON(secrets.*) }}\n        run: |\n"),
+     None, "a computed index or filter of the `secrets` context"),
+    ("a job granted write-all reads a variable", "ci.yml",
+     ("    name: Workflows Mask Account Ids\n    runs-on: ubuntu-latest\n",
+      "      - run: python3 scripts/check-workflow-id-masking.py\n"),
+     ("    name: Workflows Mask Account Ids\n    runs-on: ubuntu-latest\n"
+      "    permissions: write-all\n",
+      "      - run: python3 scripts/check-workflow-id-masking.py\n"
+      "        env:\n          PIP_INDEX: ${{ vars.PIP_INDEX }}\n"),
+     r"^\s+PIP_INDEX: \$\{\{ vars\.PIP_INDEX \}\}", "in a job that can hold AWS credentials"),
+    ("an id-named key in the workflow-level env", "ci.yml",
+     "permissions:\n  contents: read\n\njobs:\n",
+     "permissions:\n  contents: read\n\nenv:\n"
+     "  TF_STATE_BUCKET: ${{ github.repository_owner }}-tfstate\n\njobs:\n",
+     None, "in its workflow-level `env`. Such a key takes only the guard form"),
+    ("a job that reads an environment's secret needs no job refusing it", "deploy.yml",
+     "    needs: refuse-inherited-config\n", "",
+     r"^\s+DEPLOY_ROLE_ARN: \$\{\{ secrets\.DEPLOY_ROLE_ARN \}\}",
+     "but no job it needs, with no environment, compares"),
 ]
 
 
@@ -1357,34 +1433,38 @@ DRIFT_MUTATIONS = [
      '          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS\n\n'
      '          # The same role-ARN shape',
      '          bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"\n\n'
-     '          # The same role-ARN shape', None),
+     '          # The same role-ARN shape', None, "and its first command is"),
     ("drift: the mask step names a variable other than the role map", "drift.yml",
      '          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS\n\n'
      '          # The same role-ARN shape',
      '          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" ACCOUNT_DIR\n\n'
-     '          # The same role-ARN shape', None),
+     '          # The same role-ARN shape', None, "the mask command does not name"),
     ("drift: the role map reaches a step before the mask step", "drift.yml",
      "          persist-credentials: false\n\n      # The first step that receives the secret.",
      "          persist-credentials: false\n        env:\n"
      "          DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}\n\n"
-     "      # The first step that receives the secret.", None),
+     "      # The first step that receives the secret.", None,
+     "is the first to receive DRIFT_PLAN_ROLE_ARNS"),
     ("drift: something prints ahead of the role-map mask", "drift.yml",
      "        run: |\n          # First: mask every id and role ARN",
-     "        run: |\n          echo \"selecting\"\n          # First: mask every id and role ARN", None),
+     "        run: |\n          echo \"selecting\"\n          # First: mask every id and role ARN", None,
+     "and its first command is"),
     ("drift: role-to-assume from the matrix", "drift.yml",
      "role-to-assume: ${{ steps.role.outputs.role_arn }}",
-     "role-to-assume: ${{ matrix.role_arn }}", None),
+     "role-to-assume: ${{ matrix.role_arn }}", None, "It must be `${{ secrets.NAME }}`"),
     ("drift: the in-environment variable guard removed", "drift.yml",
      "          ROLE_MAP_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}\n", "",
-     r"^\s+DRIFT_PLAN_ROLE_ARNS: \$\{\{ secrets\.DRIFT_PLAN_ROLE_ARNS \}\}"),
+     r"^\s+DRIFT_PLAN_ROLE_ARNS: \$\{\{ secrets\.DRIFT_PLAN_ROLE_ARNS \}\}",
+     "neither it nor a job it needs on the same environment compares"),
     ("the deploy job's in-environment variable guard removed", "deploy.yml",
      "          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}\n"
      "          ROLE_ARN_VARIABLE: ${{ vars.DEPLOY_ROLE_ARN != '' }}\n",
      "          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}\n",
-     r"^\s+DEPLOY_ROLE_ARN: \$\{\{ secrets\.DEPLOY_ROLE_ARN \}\}"),
+     r"^\s+DEPLOY_ROLE_ARN: \$\{\{ secrets\.DEPLOY_ROLE_ARN \}\}",
+     "neither it nor a job it needs on the same environment compares"),
     ("drift: the guard job reads the variable's value", "drift.yml",
      "INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}",
-     "INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS }}", None),
+     "INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS }}", None, "A variable is never masked"),
 ]
 
 
@@ -1411,93 +1491,182 @@ def leaked_ids(findings, planted: set[str] = frozenset()) -> list[tuple[str, int
     return sorted({(r, ln) for r, ln, msg in findings if leaks(msg)})
 
 
+def _tree(root: Path) -> Path:
+    """A copy of the workflows and the mask script at root, the tree check() reads."""
+    (root / WORKFLOWS_REL).mkdir(parents=True)
+    for p in (ROOT / WORKFLOWS_REL).glob("*.y*ml"):
+        shutil.copy(p, root / WORKFLOWS_REL / p.name)
+    (root / "scripts").mkdir()
+    shutil.copy(ROOT / "scripts" / "mask-aws-ids.sh", root / "scripts" / "mask-aws-ids.sh")
+    return root
+
+
+def _apply(text: str, old, new) -> tuple[str | None, str]:
+    """The mutated text, or None and the anchor that does not occur exactly once."""
+    pairs = list(zip(old, new, strict=True)) if isinstance(old, tuple) else [(old, new)]
+    for o, n in pairs:
+        if text.count(o) != 1:
+            return None, f"anchor {o[:50]!r} found {text.count(o)} time(s)"
+        text = text.replace(o, n)
+    return text, ""
+
+
+def _wanted_lines(mutated: str, old, new, expect) -> set[int]:
+    """The lines of the mutated file a finding must cite."""
+    if expect is not None:
+        return {i + 1 for i, ln in enumerate(mutated.splitlines()) if re.search(expect, ln)}
+    # The lines of `new` that differ from `old` (a tuple case names its line by regex).
+    start = mutated.index(new) if new else 0
+    first = mutated.count("\n", 0, start) + 1
+    old_lines = set(old.splitlines())
+    return {first + i for i, ln in enumerate(new.splitlines()) if ln not in old_lines} or {first}
+
+
+def run_case(base: Path, case) -> tuple[str | None, list[str]]:
+    """(None, [the finding that proves it]) when a mutation is rejected as it must be:
+    at the mutated line, by the rule it names, with no account id in any finding.
+    Otherwise (why not, the findings to show)."""
+    _, fname, old, new, expect, must_say = case
+    rel = f"{WORKFLOWS_REL}/{fname}"
+    target = base / rel
+    text = target.read_text()
+    mutated, missing = _apply(text, old, new)
+    if mutated is None:
+        return f"{missing} in {fname}", []
+    target.write_text(mutated)
+    try:
+        res = check(base)
+    finally:
+        target.write_text(text)
+    planted = {m.group(1) for m in ID_LITERAL.finditer(mutated)
+               if not placeholder(m.group(1))} - set(ID_LITERAL.findall(text))
+    leaked = leaked_ids(res.findings, planted)
+    if leaked:
+        # The messages are not shown: the point is that they carry an id.
+        return (f"{len(leaked)} finding(s) quote an account id, at {leaked}; a finding is "
+                "published as an annotation and must say <account id> instead"), []
+    shown = [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings]
+    if not res.findings:
+        return "not rejected", []
+    wanted = _wanted_lines(mutated, old, new, expect)
+    at_line = [f for f in res.findings if f[0] == rel and f[1] in wanted]
+    if not at_line:
+        cited = sorted({ln for r, ln, _ in res.findings if r == rel}) or "no line"
+        return f"rejected, but cited {cited} in {rel}, not the mutated line(s) {sorted(wanted)}", shown
+    said = [f for f in at_line if must_say in f[2]]
+    if not said:
+        return (f"rejected at the mutated line, but by another rule: no finding there says "
+                f"{must_say!r}"), shown
+    r, ln, msg = said[0]
+    return None, [f"{r}:{ln}: {msg[:90]}"]
+
+
+def unmutated_problem(base: Path) -> str | None:
+    """Why a copy of the workflows as they are cannot be the self-test's baseline, or None."""
+    clean = check(base)
+    if clean.findings:
+        return "the gate rejects the workflows as they are: " + "; ".join(
+            f"{rel}:{ln}: {msg[:120]}" for rel, ln, msg in clean.findings)
+    return floor_problem(clean)
+
+
+def floor_shortfalls(met: Result) -> list[tuple[str, Result, str]]:
+    """Each way a scan falls below the floor, planted alone in a copy of a scan that met it,
+    with the words floor_problem must refuse it in."""
+    def short(**over) -> Result:
+        r = Result()
+        r.workflows, r.mask_steps = met.workflows, met.mask_steps
+        r.id_reads, r.id_names = met.id_reads, set(met.id_names)
+        for key, value in over.items():
+            setattr(r, key, value)
+        return r
+    gone = sorted(KNOWN_ID_READS)[0]
+    return [
+        ("one workflow fewer than the floor", short(workflows=MIN_WORKFLOWS - 1),
+         f"read {MIN_WORKFLOWS - 1} workflow(s)"),
+        ("one mask step fewer than the floor", short(mask_steps=MIN_MASK_STEPS - 1),
+         f"and {MIN_MASK_STEPS - 1} mask step(s)"),
+        (f"no read of {gone}", short(id_names=set(met.id_names) - {gone}),
+         f"saw no read of {gone}"),
+    ]
+
+
+# Trees on disk that git does not track as this repository, each refused by
+# main_check in the words repo_is_visible gives for it: (name, what git tracks,
+# what the refusal says). Each holds the real workflows, so a main_check that
+# skipped the refusal would scan them, find them clean and exit 0.
+VISIBILITY_CASES = [
+    ("a directory that is not a git checkout", None, "`git ls-files` failed"),
+    ("a checkout that tracks nothing", (), "the tracked set is empty"),
+    ("a checkout that tracks only the gate scripts", ("scripts",), "is under scripts/"),
+]
+
+
+def _named(name: str):
+    """The mutation of that name. A renamed case is a self-test failure, not a pass."""
+    found = [c for c in MUTATIONS + DRIFT_MUTATIONS if c[0] == name]
+    if len(found) != 1:
+        raise LookupError(f"the self-test names the mutation {name!r}, which MUTATIONS and "
+                          f"DRIFT_MUTATIONS hold {len(found)} time(s)")
+    return found[0]
+
+
+def meta_cases(planted) -> list[tuple[str, tuple, str]]:
+    """The self-test's own refusals, each a case vacuous in one way, which run_case must
+    report rather than pass: (name, case, what the report says). planted is a mutation
+    the gate rejects at its own line."""
+    return [
+        ("an anchor that no longer occurs",
+         ("meta", "deploy.yml", "this text is in no workflow", "", None, "-"), "found 0 time(s)"),
+        ("a mutation the gate accepts", ("meta",) + ACCEPTED[0][1:] + (None, "-"), "not rejected"),
+        ("a rejection at another line", planted[:4] + (r"^name:", planted[5]),
+         "not the mutated line"),
+        ("a rejection by another rule", planted[:5] + ("passes `secrets: inherit`",),
+         "by another rule"),
+    ]
+
+
+def _main_check_output(root: Path) -> tuple[int, str]:
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = main_check(root)
+    return code, out.getvalue()
+
+
 def self_test() -> int:
     failures = 0
     ran = 0
+
+    def fail(name: str, why: str, shown=()) -> None:
+        nonlocal failures
+        failures += 1
+        print(f"FAIL [{name}]: {why}", file=sys.stderr)
+        for line in shown:
+            print(f"    {line}", file=sys.stderr)
+
     with tempfile.TemporaryDirectory(prefix="id-masking-") as tmp:
-        base = Path(tmp) / "base"
-        (base / WORKFLOWS_REL).mkdir(parents=True)
-        for p in (ROOT / WORKFLOWS_REL).glob("*.y*ml"):
-            shutil.copy(p, base / WORKFLOWS_REL / p.name)
-        (base / "scripts").mkdir()
-        shutil.copy(ROOT / "scripts" / "mask-aws-ids.sh", base / "scripts" / "mask-aws-ids.sh")
-
-        clean = check(base)
-        if clean.findings:
-            print("FAIL [unmutated]: the gate rejects the workflows as they are:", file=sys.stderr)
-            for rel, ln, msg in clean.findings:
-                print(f"  {rel}:{ln}: {msg[:120]}", file=sys.stderr)
-            return 1
-        unseen = KNOWN_ID_READS - clean.id_names
-        if unseen:
-            print(f"FAIL [unmutated]: no read of {', '.join(sorted(unseen))} was seen",
-                  file=sys.stderr)
+        base = _tree(Path(tmp) / "base")
+        problem = unmutated_problem(base)
+        if problem:
+            print(f"FAIL [unmutated]: {problem}", file=sys.stderr)
             return 1
 
-        mutations = MUTATIONS + DRIFT_MUTATIONS
-        for name, fname, old, new, expect in mutations:
+        cases = MUTATIONS + DRIFT_MUTATIONS
+        for case in cases:
             ran += 1
-            target = base / WORKFLOWS_REL / fname
-            text = target.read_text()
-            pairs = list(zip(old, new)) if isinstance(old, tuple) else [(old, new)]
-            mutated, missing = text, None
-            for o, n in pairs:
-                if mutated.count(o) != 1:
-                    missing = (o, mutated.count(o))
-                    break
-                mutated = mutated.replace(o, n)
-            if missing:
-                print(f"FAIL [{name}]: anchor {missing[0][:50]!r} found {missing[1]} "
-                      f"time(s) in {fname}", file=sys.stderr)
-                failures += 1
-                continue
-            target.write_text(mutated)
-            try:
-                res = check(base)
-            finally:
-                target.write_text(text)
-            planted = {m.group(1) for m in ID_LITERAL.finditer(mutated)
-                       if not placeholder(m.group(1))} - set(ID_LITERAL.findall(text))
-            leaked = leaked_ids(res.findings, planted)
-            if leaked:
-                # The messages are not printed: the point is that they carry an id.
-                print(f"FAIL [{name}]: {len(leaked)} finding(s) quote an account id, at "
-                      f"{leaked}; a finding is published as an annotation and must say "
-                      "<account id> instead", file=sys.stderr)
-                failures += 1
-                continue
-            rel = f"{WORKFLOWS_REL}/{fname}"
-            lines = mutated.splitlines()
-            if expect is None:
-                # The lines of `new` that differ from `old`.
-                start = mutated.index(new) if new else 0
-                first = mutated.count("\n", 0, start) + 1
-                old_lines = set(old.splitlines())
-                wanted = {first + i for i, ln in enumerate(new.splitlines()) if ln not in old_lines} \
-                    or {first}
+            why, shown = run_case(base, case)
+            if why:
+                fail(case[0], why, shown)
             else:
-                wanted = {i + 1 for i, ln in enumerate(lines) if re.search(expect, ln)}
-            cited = {ln for r, ln, _ in res.findings if r == rel}
-            if not res.findings:
-                print(f"FAIL [{name}]: not rejected", file=sys.stderr)
-                failures += 1
-            elif not (cited & wanted):
-                print(f"FAIL [{name}]: rejected, but cited {sorted(cited) or 'no line'} in "
-                      f"{rel}, not the mutated line(s) {sorted(wanted)}", file=sys.stderr)
-                for r, ln, msg in res.findings:
-                    print(f"    {r}:{ln}: {msg[:110]}", file=sys.stderr)
-                failures += 1
-            else:
-                hit = next(f for f in res.findings if f[0] == rel and f[1] in wanted)
-                print(f"ok [{name}]: {hit[0]}:{hit[1]}: {hit[2][:90]}")
+                print(f"ok [{case[0]}]: {shown[0]}")
+
         for name, fname, old, new in ACCEPTED:
             ran += 1
             target = base / WORKFLOWS_REL / fname
             text = target.read_text()
             if text.count(old) != 1:
-                print(f"FAIL [accepted: {name}]: anchor {old[:50]!r} found {text.count(old)} "
-                      f"time(s) in {fname}", file=sys.stderr)
-                failures += 1
+                fail(f"accepted: {name}", f"anchor {old[:50]!r} found {text.count(old)} "
+                                          f"time(s) in {fname}")
                 continue
             target.write_text(text.replace(old, new))
             try:
@@ -1505,23 +1674,117 @@ def self_test() -> int:
             finally:
                 target.write_text(text)
             if res.findings:
-                print(f"FAIL [accepted: {name}]: rejected:", file=sys.stderr)
-                for r, ln, msg in res.findings:
-                    print(f"    {r}:{ln}: {msg[:110]}", file=sys.stderr)
-                failures += 1
+                fail(f"accepted: {name}", "rejected:",
+                     [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings])
             else:
                 print(f"ok [accepted: {name}]")
+
+        # The floor: each shortfall alone, then a scan that read no workflow at all.
+        shortfalls = floor_shortfalls(check(base))
+        for name, res, says in shortfalls:
+            ran += 1
+            problem = floor_problem(res)
+            if problem is None or says not in problem:
+                fail(f"floor: {name}", f"floor_problem returned {problem!r}, not a refusal "
+                                       f"saying {says!r}")
+            else:
+                print(f"ok [floor: {name}]")
+        ran += 1
+        bare = Path(tmp) / "bare"
+        (bare / WORKFLOWS_REL).mkdir(parents=True)
+        problem = floor_problem(check(bare))
+        if problem is None or "read 0 workflow(s)" not in problem:
+            fail("floor: no workflows", f"floor_problem returned {problem!r} for a scan of none")
+        else:
+            print("ok [floor: no workflows]")
+
+        # The visible tree: main_check refuses a tree git does not track, before
+        # scanning it. GIT_CEILING_DIRECTORIES keeps git from reading a repository
+        # that contains the temporary directory as the one under test.
+        git = shutil.which("git")
+        saved = os.environ.get("GIT_CEILING_DIRECTORIES")
+        os.environ["GIT_CEILING_DIRECTORIES"] = tmp
+        try:
+            for n, (name, tracks, says) in enumerate(VISIBILITY_CASES):
+                ran += 1
+                if git is None:
+                    fail(f"visible tree: {name}", "git is not installed, so the case cannot "
+                                                  "be built")
+                    continue
+                root = _tree(Path(tmp) / f"visible-{n}")
+                if tracks is not None:
+                    subprocess.run([git, "-C", str(root), "init", "-q"], check=True,
+                                   capture_output=True)
+                    if tracks:
+                        subprocess.run([git, "-C", str(root), "add", *tracks], check=True,
+                                       capture_output=True)
+                code, out = _main_check_output(root)
+                if code != 1 or says not in out or "Refusing to report a pass" not in out:
+                    fail(f"visible tree: {name}", f"main_check exited {code}, and did not "
+                                                  f"refuse saying {says!r}",
+                         out.strip().splitlines()[-3:])
+                else:
+                    print(f"ok [visible tree: {name}]")
+        finally:
+            if saved is None:
+                os.environ.pop("GIT_CEILING_DIRECTORIES", None)
+            else:
+                os.environ["GIT_CEILING_DIRECTORIES"] = saved
+
+        # The self-test's own refusals.
+        try:
+            planted_case = _named("role-to-assume from a variable")
+            quoting_case = _named("an early step named with an account id reads the secret")
+        except LookupError as e:
+            print(f"FAIL [refuses]: {e}", file=sys.stderr)
+            return 1
+        metas = meta_cases(planted_case)
+        for name, case, says in metas:
+            ran += 1
+            why, _ = run_case(base, case)
+            if why is None or says not in why:
+                fail(f"refuses: {name}", f"run_case reported {why!r}, not {says!r}")
+            else:
+                print(f"ok [refuses: {name}]")
+        # A finding that quotes an account id: redaction switched off for one case
+        # whose finding quotes the id it plants, which run_case must report.
+        ran += 1
+        redacting = globals()["redact"]
+        globals()["redact"] = lambda text: text
+        try:
+            why, _ = run_case(base, quoting_case)
+        finally:
+            globals()["redact"] = redacting
+        if why is None or "quote an account id" not in why:
+            fail("refuses: a finding that quotes an account id", f"run_case reported {why!r}")
+        else:
+            print("ok [refuses: a finding that quotes an account id]")
+        ran += 1
+        planted = _tree(Path(tmp) / "planted")
+        wf = planted / WORKFLOWS_REL / planted_case[1]
+        wf.write_text(wf.read_text().replace(planted_case[2], planted_case[3]))
+        problem = unmutated_problem(planted)
+        if problem is None or "rejects the workflows as they are" not in problem:
+            fail("refuses: a baseline the gate already rejects",
+                 f"unmutated_problem returned {problem!r}")
+        else:
+            print("ok [refuses: a baseline the gate already rejects]")
+
+    expected = (len(cases) + len(ACCEPTED) + len(shortfalls) + 1 + len(VISIBILITY_CASES)
+                + len(metas) + 2)
     if failures:
         print(f"check-workflow-id-masking self-test FAILED: {failures} of {ran} case(s)",
               file=sys.stderr)
         return 1
-    if ran < len(MUTATIONS) + len(DRIFT_MUTATIONS) + len(ACCEPTED):
-        print("self-test ran fewer mutations than it lists; refusing to report a pass",
+    if ran < expected:
+        print(f"self-test ran {ran} of the {expected} cases it lists; refusing to report a pass",
               file=sys.stderr)
         return 1
-    print(f"check-workflow-id-masking self-test passed ({ran - len(ACCEPTED)} mutations "
-          "rejected at the mutated line with no account id in any finding, "
-          f"{len(ACCEPTED)} permitted edits and the unmutated workflows accepted).")
+    print(f"check-workflow-id-masking self-test passed ({len(cases)} mutations rejected at the "
+          "mutated line by the rule each names, with no account id in any finding; "
+          f"{len(ACCEPTED)} permitted edits and the unmutated workflows accepted; "
+          f"{len(shortfalls) + 1} floor shortfalls and {len(VISIBILITY_CASES)} untracked trees "
+          f"refused; {len(metas) + 2} vacuous self-test outcomes reported).")
     return 0
 
 
