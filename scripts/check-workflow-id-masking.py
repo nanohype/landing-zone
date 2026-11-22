@@ -204,6 +204,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import repo_is_visible
@@ -1580,7 +1581,7 @@ def floor_shortfalls(met: Result) -> list[tuple[str, Result, str]]:
         for key, value in over.items():
             setattr(r, key, value)
         return r
-    gone = sorted(KNOWN_ID_READS)[0]
+    gone = min(KNOWN_ID_READS)
     return [
         ("one workflow fewer than the floor", short(workflows=MIN_WORKFLOWS - 1),
          f"read {MIN_WORKFLOWS - 1} workflow(s)"),
@@ -1633,158 +1634,160 @@ def _main_check_output(root: Path) -> tuple[int, str]:
     return code, out.getvalue()
 
 
+# One self-test case's result: (its name, why it failed or None, lines to show).
+Outcome = tuple[str, str | None, list[str]]
+
+
+def mutation_outcomes(base: Path) -> list[Outcome]:
+    """Every mutation, each to be rejected at its line by the rule it names."""
+    out: list[Outcome] = []
+    for case in MUTATIONS + DRIFT_MUTATIONS:
+        why, shown = run_case(base, case)
+        out.append((case[0], why, shown))
+    return out
+
+
+def accepted_outcomes(base: Path) -> list[Outcome]:
+    """Every edit the rules permit, each to be accepted."""
+    out: list[Outcome] = []
+    for name, fname, old, new in ACCEPTED:
+        label = f"accepted: {name}"
+        target = base / WORKFLOWS_REL / fname
+        text = target.read_text()
+        if text.count(old) != 1:
+            out.append((label, f"anchor {old[:50]!r} found {text.count(old)} time(s) in {fname}",
+                        []))
+            continue
+        target.write_text(text.replace(old, new))
+        try:
+            res = check(base)
+        finally:
+            target.write_text(text)
+        out.append((label, "rejected:" if res.findings else None,
+                    [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings]))
+    return out
+
+
+def floor_outcomes(base: Path, scratch: Path) -> list[Outcome]:
+    """Each shortfall below the floor on its own, then a scan that read no workflow."""
+    out: list[Outcome] = []
+    for name, res, says in floor_shortfalls(check(base)):
+        problem = floor_problem(res)
+        ok = problem is not None and says in problem
+        out.append((f"floor: {name}", None if ok else
+                    f"floor_problem returned {problem!r}, not a refusal saying {says!r}", []))
+    bare = scratch / "bare"
+    (bare / WORKFLOWS_REL).mkdir(parents=True)
+    problem = floor_problem(check(bare))
+    ok = problem is not None and "read 0 workflow(s)" in problem
+    out.append(("floor: no workflows", None if ok else
+                f"floor_problem returned {problem!r} for a scan of none", []))
+    return out
+
+
+def visibility_outcomes(scratch: Path) -> list[Outcome]:
+    """main_check refuses each tree git does not track as this repository, before scanning it.
+
+    GIT_CEILING_DIRECTORIES keeps git from reading a repository that contains the
+    scratch directory as the one under test."""
+    git = shutil.which("git")
+    out: list[Outcome] = []
+    with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(scratch)}):
+        for n, (name, tracks, says) in enumerate(VISIBILITY_CASES):
+            label = f"visible tree: {name}"
+            if git is None:
+                out.append((label, "git is not installed, so the case cannot be built", []))
+                continue
+            root = _tree(scratch / f"visible-{n}")
+            if tracks is not None:
+                subprocess.run([git, "-C", str(root), "init", "-q"], check=True,
+                               capture_output=True, timeout=60)
+                if tracks:
+                    subprocess.run([git, "-C", str(root), "add", *tracks], check=True,
+                                   capture_output=True, timeout=60)
+            code, printed = _main_check_output(root)
+            ok = code == 1 and says in printed and "Refusing to report a pass" in printed
+            out.append((label, None if ok else
+                        f"main_check exited {code}, and did not refuse saying {says!r}",
+                        [] if ok else printed.strip().splitlines()[-3:]))
+    return out
+
+
+def self_refusal_outcomes(base: Path, scratch: Path) -> list[Outcome]:
+    """The self-test's own refusals: each case is vacuous in one way and must be reported."""
+    try:
+        planted = _named("role-to-assume from a variable")
+        quoting = _named("an early step named with an account id reads the secret")
+    except LookupError as e:
+        return [("refuses", str(e), [])]
+    out: list[Outcome] = []
+    for name, case, says in meta_cases(planted):
+        why, _ = run_case(base, case)
+        ok = why is not None and says in why
+        out.append((f"refuses: {name}", None if ok else
+                    f"run_case reported {why!r}, not {says!r}", []))
+    # A finding that quotes an account id: redaction switched off for one case
+    # whose finding quotes the id it plants, which run_case must report.
+    with mock.patch.object(sys.modules[__name__], "redact", lambda text: text):
+        why, _ = run_case(base, quoting)
+    ok = why is not None and "quote an account id" in why
+    out.append(("refuses: a finding that quotes an account id", None if ok else
+                f"run_case reported {why!r}", []))
+    tree = _tree(scratch / "planted")
+    workflow = tree / WORKFLOWS_REL / planted[1]
+    workflow.write_text(workflow.read_text().replace(planted[2], planted[3]))
+    problem = unmutated_problem(tree)
+    ok = problem is not None and "rejects the workflows as they are" in problem
+    out.append(("refuses: a baseline the gate already rejects", None if ok else
+                f"unmutated_problem returned {problem!r}", []))
+    return out
+
+
 def self_test() -> int:
-    failures = 0
-    ran = 0
-
-    def fail(name: str, why: str, shown=()) -> None:
-        nonlocal failures
-        failures += 1
-        print(f"FAIL [{name}]: {why}", file=sys.stderr)
-        for line in shown:
-            print(f"    {line}", file=sys.stderr)
-
     with tempfile.TemporaryDirectory(prefix="id-masking-") as tmp:
-        base = _tree(Path(tmp) / "base")
+        scratch = Path(tmp)
+        base = _tree(scratch / "base")
         problem = unmutated_problem(base)
         if problem:
             print(f"FAIL [unmutated]: {problem}", file=sys.stderr)
             return 1
+        stages = {
+            "mutations": mutation_outcomes(base),
+            "accepted": accepted_outcomes(base),
+            "floor": floor_outcomes(base, scratch),
+            "visible": visibility_outcomes(scratch),
+            "refusals": self_refusal_outcomes(base, scratch),
+        }
 
-        cases = MUTATIONS + DRIFT_MUTATIONS
-        for case in cases:
-            ran += 1
-            why, shown = run_case(base, case)
-            if why:
-                fail(case[0], why, shown)
-            else:
-                print(f"ok [{case[0]}]: {shown[0]}")
-
-        for name, fname, old, new in ACCEPTED:
-            ran += 1
-            target = base / WORKFLOWS_REL / fname
-            text = target.read_text()
-            if text.count(old) != 1:
-                fail(f"accepted: {name}", f"anchor {old[:50]!r} found {text.count(old)} "
-                                          f"time(s) in {fname}")
-                continue
-            target.write_text(text.replace(old, new))
-            try:
-                res = check(base)
-            finally:
-                target.write_text(text)
-            if res.findings:
-                fail(f"accepted: {name}", "rejected:",
-                     [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings])
-            else:
-                print(f"ok [accepted: {name}]")
-
-        # The floor: each shortfall alone, then a scan that read no workflow at all.
-        shortfalls = floor_shortfalls(check(base))
-        for name, res, says in shortfalls:
-            ran += 1
-            problem = floor_problem(res)
-            if problem is None or says not in problem:
-                fail(f"floor: {name}", f"floor_problem returned {problem!r}, not a refusal "
-                                       f"saying {says!r}")
-            else:
-                print(f"ok [floor: {name}]")
-        ran += 1
-        bare = Path(tmp) / "bare"
-        (bare / WORKFLOWS_REL).mkdir(parents=True)
-        problem = floor_problem(check(bare))
-        if problem is None or "read 0 workflow(s)" not in problem:
-            fail("floor: no workflows", f"floor_problem returned {problem!r} for a scan of none")
-        else:
-            print("ok [floor: no workflows]")
-
-        # The visible tree: main_check refuses a tree git does not track, before
-        # scanning it. GIT_CEILING_DIRECTORIES keeps git from reading a repository
-        # that contains the temporary directory as the one under test.
-        git = shutil.which("git")
-        saved = os.environ.get("GIT_CEILING_DIRECTORIES")
-        os.environ["GIT_CEILING_DIRECTORIES"] = tmp
-        try:
-            for n, (name, tracks, says) in enumerate(VISIBILITY_CASES):
-                ran += 1
-                if git is None:
-                    fail(f"visible tree: {name}", "git is not installed, so the case cannot "
-                                                  "be built")
-                    continue
-                root = _tree(Path(tmp) / f"visible-{n}")
-                if tracks is not None:
-                    subprocess.run([git, "-C", str(root), "init", "-q"], check=True,
-                                   capture_output=True)
-                    if tracks:
-                        subprocess.run([git, "-C", str(root), "add", *tracks], check=True,
-                                       capture_output=True)
-                code, out = _main_check_output(root)
-                if code != 1 or says not in out or "Refusing to report a pass" not in out:
-                    fail(f"visible tree: {name}", f"main_check exited {code}, and did not "
-                                                  f"refuse saying {says!r}",
-                         out.strip().splitlines()[-3:])
-                else:
-                    print(f"ok [visible tree: {name}]")
-        finally:
-            if saved is None:
-                os.environ.pop("GIT_CEILING_DIRECTORIES", None)
-            else:
-                os.environ["GIT_CEILING_DIRECTORIES"] = saved
-
-        # The self-test's own refusals.
-        try:
-            planted_case = _named("role-to-assume from a variable")
-            quoting_case = _named("an early step named with an account id reads the secret")
-        except LookupError as e:
-            print(f"FAIL [refuses]: {e}", file=sys.stderr)
-            return 1
-        metas = meta_cases(planted_case)
-        for name, case, says in metas:
-            ran += 1
-            why, _ = run_case(base, case)
-            if why is None or says not in why:
-                fail(f"refuses: {name}", f"run_case reported {why!r}, not {says!r}")
-            else:
-                print(f"ok [refuses: {name}]")
-        # A finding that quotes an account id: redaction switched off for one case
-        # whose finding quotes the id it plants, which run_case must report.
-        ran += 1
-        redacting = globals()["redact"]
-        globals()["redact"] = lambda text: text
-        try:
-            why, _ = run_case(base, quoting_case)
-        finally:
-            globals()["redact"] = redacting
-        if why is None or "quote an account id" not in why:
-            fail("refuses: a finding that quotes an account id", f"run_case reported {why!r}")
-        else:
-            print("ok [refuses: a finding that quotes an account id]")
-        ran += 1
-        planted = _tree(Path(tmp) / "planted")
-        wf = planted / WORKFLOWS_REL / planted_case[1]
-        wf.write_text(wf.read_text().replace(planted_case[2], planted_case[3]))
-        problem = unmutated_problem(planted)
-        if problem is None or "rejects the workflows as they are" not in problem:
-            fail("refuses: a baseline the gate already rejects",
-                 f"unmutated_problem returned {problem!r}")
-        else:
-            print("ok [refuses: a baseline the gate already rejects]")
-
-    expected = (len(cases) + len(ACCEPTED) + len(shortfalls) + 1 + len(VISIBILITY_CASES)
-                + len(metas) + 2)
+    outcomes = [o for stage in stages.values() for o in stage]
+    failures = 0
+    for name, why, shown in outcomes:
+        if why is None:
+            print(f"ok [{name}]" + (f": {shown[0]}" if shown else ""))
+            continue
+        failures += 1
+        print(f"FAIL [{name}]: {why}", file=sys.stderr)
+        for line in shown:
+            print(f"    {line}", file=sys.stderr)
     if failures:
-        print(f"check-workflow-id-masking self-test FAILED: {failures} of {ran} case(s)",
-              file=sys.stderr)
+        print(f"check-workflow-id-masking self-test FAILED: {failures} of {len(outcomes)} "
+              "case(s)", file=sys.stderr)
         return 1
-    if ran < expected:
-        print(f"self-test ran {ran} of the {expected} cases it lists; refusing to report a pass",
-              file=sys.stderr)
+    # Each stage reports one outcome per case its table lists, so a stage that
+    # stopped early is a shortfall here rather than a pass.
+    expected = (len(MUTATIONS) + len(DRIFT_MUTATIONS) + len(ACCEPTED)
+                + len(floor_shortfalls(Result())) + 1 + len(VISIBILITY_CASES)
+                + len(meta_cases(MUTATIONS[0])) + 2)
+    if len(outcomes) < expected:
+        print(f"self-test ran {len(outcomes)} of the {expected} cases it lists; refusing to "
+              "report a pass", file=sys.stderr)
         return 1
-    print(f"check-workflow-id-masking self-test passed ({len(cases)} mutations rejected at the "
-          "mutated line by the rule each names, with no account id in any finding; "
-          f"{len(ACCEPTED)} permitted edits and the unmutated workflows accepted; "
-          f"{len(shortfalls) + 1} floor shortfalls and {len(VISIBILITY_CASES)} untracked trees "
-          f"refused; {len(metas) + 2} vacuous self-test outcomes reported).")
+    print(f"check-workflow-id-masking self-test passed ({len(stages['mutations'])} mutations "
+          "rejected at the mutated line by the rule each names, with no account id in any "
+          f"finding; {len(stages['accepted'])} permitted edits and the unmutated workflows "
+          f"accepted; {len(stages['floor'])} floor shortfalls and {len(stages['visible'])} "
+          f"untracked trees refused; {len(stages['refusals'])} vacuous self-test outcomes "
+          "reported).")
     return 0
 
 
