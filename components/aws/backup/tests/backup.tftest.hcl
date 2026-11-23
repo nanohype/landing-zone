@@ -25,13 +25,8 @@ mock_provider "aws" {
       reverse_dns_prefix = "com.amazonaws"
     }
   }
-  # The mock's random default isn't a parseable ARN; pin the keys + topic so the
-  # backup vault (vault CMK ARN) and vault notifications (topic ARN) plan cleanly.
-  mock_resource "aws_kms_key" {
-    defaults = {
-      arn = "arn:aws:kms:us-east-1:123456789012:key/mock"
-    }
-  }
+  # The mock's random default isn't a parseable ARN; pin the topic so the vault
+  # notifications (topic ARN) plan cleanly. The two keys get distinct ARNs below.
   mock_resource "aws_sns_topic" {
     defaults = {
       arn = "arn:aws:sns:us-east-1:123456789012:mock"
@@ -52,6 +47,26 @@ mock_provider "aws" {
   }
 }
 
+# The vault key and the notifications key each get their own ARN. A shared mock
+# default gave both the same one, so "the topic uses the notifications key"
+# could not tell that key from the vault's and passed with the vault key wired
+# in. Distinct ARNs make each key-wiring assertion name exactly one key.
+override_resource {
+  target = aws_kms_key.backup
+  values = {
+    arn    = "arn:aws:kms:us-east-1:123456789012:key/vault"
+    key_id = "vault"
+  }
+}
+
+override_resource {
+  target = aws_kms_key.notifications
+  values = {
+    arn    = "arn:aws:kms:us-east-1:123456789012:key/notifications"
+    key_id = "notifications"
+  }
+}
+
 variables {
   environment = "development"
   region      = "us-east-1"
@@ -64,8 +79,15 @@ run "backup_notifications_topic_is_sse_kms_with_dedicated_cmk" {
   command = plan
 
   assert {
-    condition     = aws_sns_topic.backup_notifications.kms_master_key_id == aws_kms_key.notifications.arn
+    condition     = aws_sns_topic.backup_notifications.kms_master_key_id == "arn:aws:kms:us-east-1:123456789012:key/notifications"
     error_message = "backup-notifications topic must be SSE-KMS referencing its dedicated notifications CMK ARN (never unencrypted, alias/aws/sns, or the vault key)"
+  }
+
+  # The other half of "kept separate": the vault encrypts recovery points with
+  # the vault key, not the notifications key.
+  assert {
+    condition     = aws_backup_vault.this.kms_key_arn == "arn:aws:kms:us-east-1:123456789012:key/vault"
+    error_message = "the backup vault must encrypt recovery points with its own vault CMK, not the notifications key"
   }
 }
 
