@@ -237,6 +237,8 @@ In `development`, a `component=all` destroy is expected to **fail at the `github
 
 **Trigger:** Cron schedule, 6 AM UTC Monday-Friday. Also supports manual dispatch.
 
+**Off until the first plan role is recorded.** Until `DRIFT_PLAN_ROLE_ARNS` holds an account's plan role, every run fails at `select-accounts`, so drift.yml stays turned off in the repository's Actions settings, where neither the schedule nor a dispatch starts it. Step 5 of [arming](#arming-drift-detection-one-plan-role-per-account) turns it on. Whether it is on is a repository setting, not code, and no check reads it: `gh api repos/nanohype/landing-zone/actions/workflows/drift.yml --jq .state` prints `disabled_manually` while it is off and `active` once it is on.
+
 **Scope:** every `production` and `staging` live leaf whose account has a plan role, matrix auto-discovered from the tree with `git ls-files` (mirroring `ci.yml`) -- a new production/staging component starts being watched with no workflow edit once its account directory is in the `DRIFT_PLAN_ROLE_ARNS` secret. Development is ephemeral and the `org`/`hub` control planes are covered by their own bring-up, so both are excluded.
 
 **Behavior:** Runs `terragrunt run --non-interactive -- plan -input=false -lock=false -detailed-exitcode` for each discovered leaf, non-interactively like `deploy.yml` and `destroy.yml`, so a leaf missing a required variable is reported as a plan error rather than holding the job at tofu's input prompt. The step also sets `TF_INPUT=false`, which tofu reads as `-input=false` on every command, so terragrunt's automatic `tofu init` fails the same way on anything it would ask for. Exit code 2 means changes detected (drift). When drift is found, creates or updates a GitHub issue labelled `drift` with the plan output. `select-accounts` and `detect-drift` run in the `drift` GitHub Environment, which admits `main` only: its OIDC subject, `repo:nanohype/landing-zone:environment:drift`, is the one a staging or production plan role trusts, and its secret holds the role map. A dispatch from any other branch stops at `select-accounts`. The environment carries no required reviewers, which would hold every scheduled run for an approval.
@@ -291,7 +293,7 @@ and the run carries one notice per skipped account ("Drift not checked for netwo
 
 #### Arming drift detection: one plan role per account
 
-Each account directory holding a `staging` or `production` leaf needs a read-only plan role of its own, because `root.hcl` assumes no role and a leaf can only be planned with a credential in its own account. Today only `workload-development` has a `github-oidc` leaf, so no account below has a plan role yet, and drift.yml fails at `select-accounts` until at least one entry exists.
+Each account directory holding a `staging` or `production` leaf needs a read-only plan role of its own, because `root.hcl` assumes no role and a leaf can only be planned with a credential in its own account. Today only `workload-development` has a `github-oidc` leaf, so no account below has a plan role yet, and drift.yml stays turned off until step 5: with no entry in `DRIFT_PLAN_ROLE_ARNS`, every run fails at `select-accounts`.
 
 **First:** complete the [required setup](#required-before-any-staging-or-production-plan-role) below. Its `drift` environment is what these plan roles trust, and its `DRIFT_PLAN_ROLE_ARNS` secret is where step 4 records them.
 
@@ -311,6 +313,7 @@ The OIDC provider and both roles are account-global, so each account gets exactl
 2. **Create or reference the OIDC provider.** AWS allows one provider per issuer per account. If the account has none for `token.actions.githubusercontent.com` (check with `aws iam list-open-id-connect-providers` under that account's credentials), leave `create_oidc_provider` at its default `true`; if it already has one, set `create_oidc_provider = false` and the component references it.
 3. **Apply it locally with that account's credentials**, the same way as the `org` components: `TERRAGRUNT_ACCOUNT_ID=<that account's id> AWS_PROFILE=<that account's profile> task apply ACCOUNT=<account> REGION=us-east-1 ENVIRONMENT=<env> COMPONENT=github-oidc`. Neither deploy.yml nor drift.yml can apply it: the role it creates is the one they would need.
 4. **Record the plan role, once the account's leaves are applied.** Read it with `terragrunt output -raw plan_role_arn` in the leaf directory, and add it to the `DRIFT_PLAN_ROLE_ARNS` secret on the `drift` environment under the account directory's name (edit the local JSON file and re-run the `gh secret set` command above; a secret cannot be read back) only after that account's `staging` and `production` leaves have been applied. An entry arms every one of the account's leaves at once: a leaf never applied plans as all creates and files a `Drift detected` issue (about twenty for a workload account), and one whose dependencies have no state yet fails and files a `drift-error` issue. The next run after the entry is added plans that account's leaves; until then they are listed as skipped.
+5. **Turn drift.yml on, after the first account's entry.** Run `gh workflow enable drift.yml --repo nanohype/landing-zone`, then check that `gh api repos/nanohype/landing-zone/actions/workflows/drift.yml --jq .state` prints `active`. The next scheduled run plans every account with an entry and lists the rest as skipped. Each later account needs only step 4.
 
 The leaf itself is a `staging` or `production` leaf, so once it exists drift.yml plans it too, with the plan role it created.
 
@@ -330,7 +333,7 @@ A plan role in an account that holds `staging` or `production` reads that accoun
 
    Check it with `gh api repos/nanohype/landing-zone/environments/drift` (expect `custom_branch_policies: true` and no `required_reviewers` rule) and `gh api repos/nanohype/landing-zone/environments/drift/deployment-branch-policies` (expect one policy, `main`). No reviewers: the scheduled run would wait for an approval every weekday.
 
-2. **The `DRIFT_PLAN_ROLE_ARNS` secret on that environment, and nowhere else.** Set it as above with `gh secret set DRIFT_PLAN_ROLE_ARNS --env drift --repo nanohype/landing-zone`, as single-line JSON, and delete any repository-level variable or secret of the same name (`refuse-inherited-config` fails every run while one exists). Until it holds an entry, drift.yml fails at `select-accounts`, which is the intended state while no account has a plan role.
+2. **The `DRIFT_PLAN_ROLE_ARNS` secret on that environment, and nowhere else.** Set it as above with `gh secret set DRIFT_PLAN_ROLE_ARNS --env drift --repo nanohype/landing-zone`, as single-line JSON, and delete any repository-level variable or secret of the same name (`refuse-inherited-config` fails every run while one exists). Until it holds an entry, every drift.yml run fails at `select-accounts`, so the workflow stays turned off until then (step 5 of [arming](#arming-drift-detection-one-plan-role-per-account)).
 
 3. **The plan role trusts exactly `environment:drift`, from landing-zone alone.** Set `plan_allowed_subject_claims = ["environment:drift"]` and `github_repos = ["landing-zone"]` in the `github-oidc` leaf of every account that holds a `staging` or `production` environment. The component enforces it, keyed on the account rather than on the leaf's directory (`account_environments`, computed from the tree by envcommon, required and validated against the `env.hcl` vocabulary, as is the leaf's `environment`):
 
@@ -428,7 +431,7 @@ The `service-quotas` component monitors service limits -- VPCs per region, EIPs,
 
 ### Drift Detection (drift.yml)
 
-Production and staging infrastructure is checked for drift every weekday morning. Drift issues appear in GitHub with the `drift` label. See the CI/CD section above for details.
+Once armed, drift.yml checks the production and staging leaves of every account with a plan role every weekday morning. It stays turned off until the first plan role is recorded ([arming](#arming-drift-detection-one-plan-role-per-account)). Drift issues appear in GitHub with the `drift` label. See the CI/CD section above for details.
 
 ## Secrets Management
 
