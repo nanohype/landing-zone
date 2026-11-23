@@ -18,11 +18,12 @@
 # github and tls are mocked even though the default tenants_repo_url = "" leaves
 # the deploy-key resources at count 0: a resource at count 0 still puts its
 # provider in the graph, so a real github provider is configured on every run.
-# Configured with an empty owner and a GITHUB_TOKEN in the environment, it looks
-# up the token's user and organisation on api.github.com, so an unmocked suite
-# makes live GitHub calls, and passes or fails on the caller's token, wherever
-# one is set. The tenants-repo runs at the end set the URL and assert what the
-# deploy key and ArgoCD's repository Secret are given.
+# Configured with an empty owner and a token (GITHUB_TOKEN, or a GitHub CLI
+# login the provider falls back to), it looks up the token's user and that
+# user's organisation on api.github.com, so an unmocked suite makes live GitHub
+# calls, and passes or fails on the caller's token, wherever one is set. The
+# tenants-repo runs at the end set the URL and assert what the deploy key and
+# ArgoCD's repository Secret are given.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
