@@ -36,14 +36,23 @@ CI rather than drifting quietly.
 
     scripts/render-tenants.py --environment development
     scripts/render-tenants.py --environment development --check
+    scripts/render-tenants.py --self-test
+
+`--self-test` renders synthetic Platform CRs in a scratch tree: every datastore
+kind and mapped field, each schema divergence and malformed selection refused,
+and `--check` on a fresh, a stale and a missing rendering.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import pathlib
 import sys
+import tempfile
+from unittest import mock
 
 try:
     import yaml
@@ -289,5 +298,163 @@ def main() -> int:
     return 0
 
 
+# --- self-test ----------------------------------------------------------------
+
+# A tenant manifest with every datastore kind and every mapped field, a second
+# document that is not the Platform, and an empty one.
+FULL_CR = """\
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: alpha
+---
+---
+apiVersion: platform.nanohype.dev/v1alpha1
+kind: Platform
+metadata:
+  name: alpha
+spec:
+  datastores:
+    - name: db
+      kind: relational
+      deletionPolicy: Retain
+      relational: {engineVersion: "16.4", minACU: 0.5, maxACU: 4, backupRetentionDays: 7, deletionProtection: true}
+    - name: table
+      kind: keyValue
+      keyValue:
+        partitionKey: {name: pk, type: S}
+        sortKey: {name: sk, type: N}
+        billingMode: PAY_PER_REQUEST
+        ttlAttribute: expires
+        pointInTimeRecovery: true
+        globalSecondaryIndexes:
+          - {name: by-sk, partitionKey: {name: sk, type: N}, sortKey: {name: pk, type: S}, projection: ALL}
+    - name: bucket
+      kind: objectStore
+      objectStore: {versioning: true, lifecycleExpireDays: 30}
+    - name: jobs
+      kind: queue
+      queue: {fifo: true, visibilityTimeoutSeconds: 60, messageRetentionSeconds: 86400, maxReceiveCount: 5}
+    - name: hot
+      kind: cache
+      cache: {engine: valkey, nodeType: cache.t4g.micro, replicas: 1}
+    - name: events
+      kind: stream
+    - name: plain
+      kind: objectStore
+    - name: empty
+      kind: queue
+      queue: {}
+"""
+FULL_RENDERED = {"alpha": {"datastores": [
+    {"name": "db", "kind": "relational", "deletion_policy": "Retain",
+     "relational": {"engine_version": "16.4", "min_acu": 0.5, "max_acu": 4,
+                    "backup_retention_days": 7, "deletion_protection": True}},
+    {"name": "table", "kind": "keyValue",
+     "key_value": {"partition_key": {"name": "pk", "type": "S"},
+                   "sort_key": {"name": "sk", "type": "N"}, "billing_mode": "PAY_PER_REQUEST",
+                   "ttl_attribute": "expires", "point_in_time_recovery": True,
+                   "global_secondary_indexes": [
+                       {"name": "by-sk", "partition_key": {"name": "sk", "type": "N"},
+                        "sort_key": {"name": "pk", "type": "S"}, "projection": "ALL"}]}},
+    {"name": "bucket", "kind": "objectStore",
+     "object_store": {"versioning": True, "lifecycle_expire_days": 30}},
+    {"name": "jobs", "kind": "queue",
+     "queue": {"fifo": True, "visibility_timeout_seconds": 60,
+               "message_retention_seconds": 86400, "max_receive_count": 5}},
+    {"name": "hot", "kind": "cache",
+     "cache": {"engine": "valkey", "node_type": "cache.t4g.micro", "replicas": 1}},
+    {"name": "events", "kind": "stream"},
+    {"name": "plain", "kind": "objectStore"},
+    {"name": "empty", "kind": "queue"},
+]}}
+LEAF = "live/aws/workload-selftest/us-east-1/selftest/tenant-substrate"
+SELECTION = f"{LEAF}/tenants.selection.yaml"
+GENERATED = f"{LEAF}/tenants.generated.json"
+ONE_STORE = "kind: Platform\nmetadata: {name: alpha}\nspec:\n  datastores:\n    - "
+
+# (name, files in the scratch tree, arguments, exit status, words the output must
+# carry). A status of None is a refusal raised as SystemExit, whose message the
+# words are from.
+CASES = [
+    ("every kind and field rendered", {SELECTION: "tenants: [alpha]\n", "crs/alpha/platform.yaml":
+                                       FULL_CR}, [], 0, "wrote "),
+    ("a rendering that matches", {}, ["--check"], 0, "matches the Platform CRs"),
+    ("a rendering gone stale", {"crs/alpha/platform.yaml": FULL_CR.replace("replicas: 1",
+                                                                           "replicas: 2")},
+     ["--check"], 1, "is stale"),
+    ("a rendering that is not there", {GENERATED: None}, ["--check"], 1, "does not exist — run:"),
+    ("a field with no counterpart", {"crs/alpha/platform.yaml": ONE_STORE +
+                                     "{name: d, kind: relational, relational: {iops: 3}}\n"},
+     [], 1, "has no counterpart in var.tenants"),
+    ("a stream with a config block", {"crs/alpha/platform.yaml": ONE_STORE +
+                                      "{name: s, kind: stream, stream: {shards: 1}}\n"},
+     [], 1, "has no config block in var.tenants"),
+    ("an index field with no counterpart", {"crs/alpha/platform.yaml": ONE_STORE +
+                                            "{name: t, kind: keyValue, keyValue: "
+                                            "{globalSecondaryIndexes: [{name: g, limit: 1}]}}\n"},
+     [], 1, "globalSecondaryIndexes carries unmapped field"),
+    ("two Platform documents", {"crs/alpha/platform.yaml": "kind: Platform\n---\nkind: Platform\n"},
+     [], 1, "expected exactly one Platform document"),
+    ("a Platform named for another tenant", {"crs/alpha/platform.yaml":
+                                             "kind: Platform\nmetadata: {name: beta}\n"},
+     [], None, "Platform is named 'beta'"),
+    ("a selected tenant with no manifest", {"crs/alpha/platform.yaml": None}, [], None,
+     "by convention"),
+    ("tenants that are not a list", {SELECTION: "tenants: alpha\n"}, [], None, "must be a list"),
+    ("no selection", {SELECTION: None}, [], None, "does not exist — an environment"),
+    ("no leaf for the environment", {}, ["--environment", "nowhere"], None,
+     "expected exactly one tenant-substrate leaf"),
+]
+
+
+def self_test() -> int:
+    """Run main() over each case in one scratch tree, each case changing it in turn."""
+    failures = []
+    with tempfile.TemporaryDirectory(prefix="render-tenants-") as tmp:
+        root = pathlib.Path(tmp)
+        here = sys.modules[__name__]
+        with mock.patch.object(here, "ROOT", root), mock.patch.object(here, "LIVE",
+                                                                      root / "live" / "aws"):
+            for name, files, args, status, says in CASES:
+                for rel, text in files.items():
+                    path = root / rel
+                    if text is None:
+                        path.unlink()
+                    else:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(text, encoding="utf-8")
+                argv = ["render-tenants.py", "--environment", "selftest",
+                        "--source-root", str(root / "crs"), *args]
+                out = io.StringIO()
+                with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
+                    try:
+                        code: int | None = main()
+                    except SystemExit as e:
+                        code, message = None, str(e)
+                    else:
+                        message = out.getvalue()
+                if code != status or says not in message:
+                    failures.append(f"[{name}] exited {code}, not {status} saying {says!r}: "
+                                    f"{message.strip()[:160]}")
+                if name == "every kind and field rendered" and json.loads(
+                        (root / GENERATED).read_text(encoding="utf-8")) != FULL_RENDERED:
+                    failures.append(f"[{name}] rendered something other than the expected "
+                                    "var.tenants")
+    for failure in failures:
+        print(f"FAIL {failure}", file=sys.stderr)
+    if failures:
+        print(f"render-tenants self-test FAILED: {len(failures)} of {len(CASES)} case(s)",
+              file=sys.stderr)
+        return 1
+    print(f"render-tenants self-test passed ({len(CASES)} cases: every kind and mapped field "
+          "rendered, each divergence and malformed selection refused, and --check on a fresh, "
+          "a stale and a missing rendering).")
+    return 0
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--self-test"]:
+        sys.exit(self_test())
     sys.exit(main())
