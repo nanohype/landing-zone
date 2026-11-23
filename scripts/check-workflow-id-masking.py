@@ -223,6 +223,11 @@ USAGE
                                             to be accepted; require the floor
                                             to refuse each shortfall alone and a
                                             scan of no workflows; require each
+                                            built-in workflow shape held to the
+                                            rules, in a workflow of its own (the
+                                            branches a repository's own
+                                            workflows may never take); require
+                                            each
                                             exception the policy can grant to be
                                             permitted where it applies and
                                             refused where it does not; require
@@ -242,7 +247,11 @@ USAGE
                                             another rule, a finding quoting an
                                             id, a baseline the gate rejects, a
                                             vendored record never examined, an
-                                            exception whose read was never seen)
+                                            exception whose read was never seen);
+                                            and require each stage made to fail,
+                                            and the self-test over a failing
+                                            stage, policy, baseline or count, to
+                                            report it
 
 Exit 0 = clean. Exit 1 = a violation. Exit 2 = the gate could not reach a
 verdict: PyYAML or tomllib is missing, the policy cannot be used, the tree is
@@ -1758,24 +1767,24 @@ POLICY_CASES = [
      'vendored = []\n\n[repository_level_ids]\nX_ROLE_ARN = ""\n',
      "[repository_level_ids].X_ROLE_ARN is not a non-empty string"),
     ("a case named twice", 'must_say = "c"\n',
-     'must_say = "c"\n\n[[mutation]]\nname = "a case"\nfile = "deploy.yml"\nold = "a"\n'
-     'new = "b"\nmust_say = "c"\n', "more than once"),
+     ('must_say = "c"\n\n[[mutation]]\nname = "a case"\nfile = "deploy.yml"\nold = "a"\n'
+      'new = "b"\nmust_say = "c"\n'), "more than once"),
     ("a floor that is not a table",
      '[floor]\nmin_workflows = 1\nmin_mask_steps = 1\nknown_id_reads = ["DEPLOY_ROLE_ARN"]\n',
      "floor = 1\n", "[floor] is not a table"),
     ("an exception table that is not a table", "vendored = []", "vendored = []\nvars_allowed = 1",
      "[vars_allowed] is not a table"),
     ("cases that are not an array of tables",
-     ("vendored = []", '[[mutation]]\nname = "a case"\nfile = "deploy.yml"\nold = "a"\n'
-                       'new = "b"\nmust_say = "c"\n'),
+     ("vendored = []", ('[[mutation]]\nname = "a case"\nfile = "deploy.yml"\nold = "a"\n'
+                        'new = "b"\nmust_say = "c"\n')),
      ("vendored = []\nmutation = 1", ""), "mutation is not an array of tables"),
     ("vendored paths that are not an array", "vendored = []", 'vendored = "scripts/x.sh"',
      "vendored is not an array of paths"),
     ("an accepted edit of arrays", 'must_say = "c"\n',
-     'must_say = "c"\n\n[[accepted]]\nname = "x"\nfile = "deploy.yml"\nold = ["a"]\n'
-     'new = ["b"]\n', "one old string and one new string"),
-    ("no mutation case", ("vendored = []", '[[mutation]]\nname = "a case"\nfile = "deploy.yml"\n'
-                          'old = "a"\nnew = "b"\nmust_say = "c"\n'),
+     ('must_say = "c"\n\n[[accepted]]\nname = "x"\nfile = "deploy.yml"\nold = ["a"]\n'
+      'new = ["b"]\n'), "one old string and one new string"),
+    ("no mutation case", ("vendored = []", ('[[mutation]]\nname = "a case"\nfile = "deploy.yml"\n'
+                                           'old = "a"\nnew = "b"\nmust_say = "c"\n')),
      ("vendored = []\nmutation = []", ""), "has no [[mutation]] case"),
 ]
 
@@ -1855,6 +1864,72 @@ EXCEPTION_CASES = [
 ]
 
 
+SHORTFALL = "a shortfall planted beside the violation: this gate did not see what it checks"
+
+# Shapes a repository's own workflows may never take, each added to the tree as a
+# workflow of its own: (name, the workflow, the line a finding must cite, what it must
+# say, an id the workflow reads). A must_say of None is a shape the rules permit, which
+# must be accepted with the workflow read and, where one is named, the id read seen.
+SHAPES_FILE = "zz-id-masking-shapes.yml"
+CONFIGURE = f"      - uses: {CONFIGURE_AWS}@{'f' * 40}\n"
+ONE_JOB = "on: push\njobs:\n  only:\n    runs-on: ubuntu-latest\n    steps:\n"
+SHAPES = [
+    ("YAML the rules pass over",
+     ("on: push\n"
+     "env:\n"
+     "  RATIO: 1.5\n"
+     "  VARIABLE_SET: ${{ vars.SELF_TEST_X != '' }}\n"
+     "  REVERSED_SET: ${{ '' != vars.SELF_TEST_Z }}\n"
+     "  SECRET_SET: ${{ secrets.SELF_TEST_Y != '' }}\n"
+     '  UNREADABLE: "${{ github.sha @ x }}"\n'
+     "  LITERALS: ${{ true && !false && github.event.1 == null }}\n"
+     "jobs:\n"
+     "  not-a-mapping: 1\n"
+     "  steps-not-mappings:\n"
+     "    runs-on: ubuntu-latest\n"
+     "    steps:\n"
+     "      - just text\n"
+     "      - run: echo ok\n"), None, None, None),
+    ("a workflow that is not a mapping", "- not\n- a mapping\n", None, None, None),
+    ("an environment written as a mapping",
+     ("on: push\n"
+     "permissions: {}\n"
+     "jobs:\n"
+     "  refuse:\n"
+     "    runs-on: ubuntu-latest\n"
+     "    steps:\n"
+     "      - env:\n"
+     "          SET: ${{ secrets.SELF_TEST_DEPLOY_ROLE_ARN != '' }}\n"
+     '        run: test "$SET" = false\n'
+     "  deploy:\n"
+     "    needs: refuse\n"
+     "    runs-on: ubuntu-latest\n"
+     "    environment:\n"
+     "      name: dev\n"
+     "    permissions:\n"
+     "      id-token: write\n"
+     "    steps:\n"
+     "      - name: Mask the deploy role\n"
+     "        env:\n"
+     "          SELF_TEST_DEPLOY_ROLE_ARN: ${{ secrets.SELF_TEST_DEPLOY_ROLE_ARN }}\n"
+     "          ROLE_ARN_VARIABLE: ${{ vars.SELF_TEST_DEPLOY_ROLE_ARN != '' }}\n"
+     '        run: bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" SELF_TEST_DEPLOY_ROLE_ARN\n'),
+     None, None, "SELF_TEST_DEPLOY_ROLE_ARN"),
+    ("an account id in an unquoted float", "on: push\nenv:\n  OWNER: 222233334444.5\n",
+     r"^  OWNER:", "as a literal", None),
+    ("credentials configured with no inputs", ONE_JOB + CONFIGURE, r"^      - uses:",
+     "mask-aws-account-id: true", None),
+    ("role-to-assume given a number",
+     ONE_JOB + CONFIGURE + ("        with:\n          role-to-assume: 5\n"
+                            "          mask-aws-account-id: true\n"),
+     r"^          role-to-assume: 5", "role-to-assume is '5'", None),
+    ("a mask step naming a key its env does not carry",
+     ONE_JOB + ("      - name: Mask\n"
+                '        run: bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" MISSING\n'),
+     r"^        run: bash", "names MISSING, which this step's env does not carry", None),
+]
+
+
 def meta_cases(planted: Mutation) -> list[tuple[str, Mutation, str]]:
     """The self-test's own refusals, each a case vacuous in one way, which run_case must
     report rather than pass: (name, case, what the report says). planted is a mutation
@@ -1908,8 +1983,8 @@ def accepted_outcomes(base: Path, policy: Policy) -> list[Outcome]:
         target = base / WORKFLOWS_REL / case.file
         text = target.read_text() if target.is_file() else ""
         if text.count(case.old) != 1:
-            out.append((label, f"anchor {case.old[:50]!r} found {text.count(case.old)} time(s) "
-                               f"in {case.file}", []))
+            out.append((label, (f"anchor {case.old[:50]!r} found {text.count(case.old)} "
+                                f"time(s) in {case.file}"), []))
             continue
         target.write_text(text.replace(case.old, case.new))
         try:
@@ -1970,7 +2045,11 @@ def vendored_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome
         res = check(tree, dataclasses.replace(policy, vendored=listed))
         shown = [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings]
         if says is None:
-            out.append((label, holds_problem(res), shown))
+            # The self-test's trees carry each file a record names.
+            carried = _tree(scratch / f"carried-{n}", source=tree)
+            out.append((label, holds_problem(res) or (
+                None if (carried / VENDORED_COPY).is_file() else
+                f"_tree did not carry {VENDORED_COPY}, which the record names"), shown))
             continue
         hit = [f for f in res.findings if f[0] == rel and says in f[2]]
         out.append((label, None if hit else f"no finding at {rel} says {says!r}",
@@ -2049,22 +2128,19 @@ def status_outcomes(scratch: Path, policy: Policy) -> list[Outcome]:
                 out.append((label, f"{missing} in {planted.file}", []))
                 continue
             target.write_text(mutated)
-        if change == "plant below the floor":
-            # A floor no scan of these workflows meets, so the violation and the shortfall
-            # are both there: the violation is the verdict.
-            policy_file = root / POLICY_REL
-            raised, n = re.subn(r"(?m)^min_workflows\s*=\s*\d+", "min_workflows = 1000000",
-                                policy_file.read_text())
-            if n != 1:
-                out.append((label, f"{POLICY_REL} sets min_workflows {n} time(s), not once", []))
-                continue
-            policy_file.write_text(raised)
-        elif change == "no workflows":
+        if change == "no workflows":
             for p in (root / WORKFLOWS_REL).glob("*.y*ml"):
                 p.unlink()
         elif change == "no policy":
             (root / POLICY_REL).unlink()
-        code, printed = _main_check_output(root)
+        # A violation and a shortfall both there, the shortfall planted beside it: no edit
+        # of a repository's own policy text says which floor its scan falls short of. The
+        # violation is the verdict.
+        shortfall = (mock.patch.object(sys.modules[__name__], "floor_problem",
+                                       lambda res, policy: SHORTFALL)
+                     if change == "plant below the floor" else contextlib.nullcontext())
+        with shortfall:
+            code, printed = _main_check_output(root)
         ok = code == status and says in printed
         out.append((label, None if ok else f"main_check exited {code}, not {status} saying "
                                            f"{says!r}", [] if ok else printed.strip().splitlines()[-3:]))
@@ -2137,7 +2213,178 @@ def self_refusal_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Out
     return out
 
 
-def self_test() -> int:
+def shape_problem(res: Result, baseline: int, reads: str | None) -> str | None:
+    """Why a scan of a workflow the rules permit, added to a tree of baseline workflows,
+    did not accept it having read it (and the id it reads, where one is named), or None."""
+    if res.findings or res.workflows != baseline + 1 or (reads is not None
+                                                          and reads not in res.id_names):
+        return "rejected, or the workflow or its read was not seen"
+    return None
+
+
+def reported(outcomes: list[Outcome], says: str) -> bool:
+    """Whether every one of outcomes, and at least one, failed saying says."""
+    return bool(outcomes) and all(why is not None and says in why for _, why, _ in outcomes)
+
+
+def failing(outcomes: list[Outcome]) -> list[Outcome]:
+    """The outcomes that failed."""
+    return [o for o in outcomes if o[1] is not None]
+
+
+def shape_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
+    """Each shape in SHAPES, in a workflow added to the tree; a mask step whose script is
+    gone from the tree; and the reader of a parse error."""
+    out: list[Outcome] = []
+    baseline = check(base, policy).workflows
+    target = base / WORKFLOWS_REL / SHAPES_FILE
+    for name, text, line, says, reads in SHAPES:
+        label = f"shape: {name}"
+        if says is not None:
+            why, shown = run_case(base, Mutation(name, SHAPES_FILE, "", text, line, says), policy)
+            out.append((label, why, shown))
+            continue
+        target.write_text(text)
+        try:
+            res = check(base, policy)
+        finally:
+            target.unlink()
+        out.append((label, shape_problem(res, baseline, reads),
+                    [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings]))
+    tree = scratch / "no-mask-script"
+    shutil.copytree(base, tree)
+    (tree / MASK_SCRIPT).unlink()
+    says = f"runs {MASK_SCRIPT}, which is not in the tree"
+    hits = [f for f in check(tree, policy).findings
+            if f[0].startswith(WORKFLOWS_REL) and says in f[2]]
+    out.append(("shape: a mask step whose script is not in the tree",
+                None if hits else f"no finding in a workflow says {says!r}", []))
+    noted = parse_error(yaml.MarkedYAMLError(problem="a problem", note="a note"))
+    other = parse_error(ValueError("not a YAML error"))
+    out.append(("shape: a parse error's note, and an error YAML did not raise",
+                None if "a problem; a note" in noted and other.endswith("not a YAML error")
+                else f"parse_error read them as {noted!r} and {other!r}", []))
+    return out
+
+
+GONE = "text in no workflow of this tree"
+
+
+def meta_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
+    """Each stage of this self-test, made to fail one way, must report it, and the self-test
+    over each must fail: a tree git cannot build, an anchor that is gone, a policy case the
+    gate accepts, a smallest policy it refuses, and a policy, baseline, case or count that
+    fails."""
+    here = sys.modules[__name__]
+
+    def fresh(name: str) -> Path:
+        (scratch / "meta" / name).mkdir(parents=True)
+        return scratch / "meta" / name
+
+    gone = Mutation("an anchor that is gone", policy.mutations[0].file, GONE, "", None, "-")
+    gone_policy = dataclasses.replace(policy, mutations=(gone,))
+    checks: list[tuple[str, list[Outcome], str]] = []
+    with mock.patch.object(shutil, "which", lambda _name: None):
+        checks.append(("untracked trees git cannot build",
+                       visibility_outcomes(fresh("no-git-visible"))[1:], "could not be built"))
+        checks.append(("tracked trees git cannot build",
+                       status_outcomes(fresh("no-git-status"), policy), "could not be built"))
+    checks.append(("a permitted edit whose anchor is gone", accepted_outcomes(
+        base, dataclasses.replace(policy, accepted=(Accepted("gone", gone.file, GONE, "x"),))),
+        "found 0 time(s)"))
+    with mock.patch.object(here, "MIN_POLICY", "["):
+        checks.append(("a smallest policy the gate refuses",
+                       policy_outcomes(fresh("refused-smallest"))[:1], "refused"))
+    with mock.patch.object(here, "POLICY_CASES", [("gone", GONE, "", "x")]):
+        checks.append(("a policy case whose anchor is gone",
+                       policy_outcomes(fresh("gone-policy"))[1:], "found 0 time(s)"))
+    with mock.patch.object(here, "POLICY_CASES",
+                           [("kept", 'docs = "README.md"', 'docs = "README.md"', "x")]):
+        checks.append(("a policy case the gate accepts",
+                       policy_outcomes(fresh("kept-policy"))[1:], "accepted, not refused"))
+    checks.append(("exit statuses whose violation's anchor is gone",
+                   [o for o in status_outcomes(fresh("gone-status"), gone_policy)
+                    if "violation" in o[0]], "found 0 time(s)"))
+    checks.append(("a refused baseline whose anchor is gone",
+                   self_refusal_outcomes(base, fresh("gone-refusals"), gone_policy)[-1:],
+                   "found 0 time(s)"))
+    out: list[Outcome] = []
+    for name, outcomes, says in checks:
+        out.append((f"meta: {name}", None if reported(outcomes, says) else
+                    f"reported {[why for _, why, _ in outcomes]}, not {says!r} for each", []))
+    # The predicates above, and the shapes stage's, held to planted results.
+    read = Result()
+    read.workflows = 1
+    seen = Result()
+    seen.workflows, seen.id_names = 1, {"X_ROLE_ARN"}
+    found = Result()
+    found.workflows, found.findings = 1, [("x", 1, "planted")]
+    planted = [
+        reported([], "x"), reported([("n", None, [])], "x"), not reported([("n", "a x", [])], "x"),
+        shape_problem(found, 0, None) is None, shape_problem(Result(), 0, None) is None,
+        shape_problem(read, 0, "X_ROLE_ARN") is None, shape_problem(seen, 0, "X_ROLE_ARN") is not None,
+    ]
+    out.append(("meta: the self-test's own predicates", None if not any(planted) else
+                f"wrong on planted results {[i for i, bad in enumerate(planted) if bad]}", []))
+
+    # The self-test itself, with one thing broken at a time: (name, what is patched, its
+    # exit status, words it must print).
+    def stub(*outcomes: Outcome):
+        return lambda *args, **kwargs: list(outcomes)
+
+    stages = ("mutation_outcomes", "accepted_outcomes", "floor_outcomes", "shape_outcomes",
+              "exception_outcomes", "vendored_outcomes", "policy_outcomes",
+              "visibility_outcomes", "status_outcomes", "self_refusal_outcomes")
+    passing = {name: stub(("stub", None, [])) for name in stages}
+
+    def refused(root):
+        raise PolicyError("planted")
+
+    for name, patches, status, says in (
+            ("a policy the self-test cannot use", {"load_policy": refused}, CANNOT_RUN,
+             "Cannot run: planted"),
+            ("a baseline the gate already rejects",
+             {"unmutated_problem": lambda base, policy: "planted"}, 1, "FAIL [unmutated]: planted"),
+            ("a stage with a failing case",
+             {**passing, "mutation_outcomes": stub(("stub", "planted", ["shown"]))}, 1,
+             "self-test FAILED"),
+            ("stages that stopped early", passing, 1, "refusing to report a pass")):
+        printed = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            for attr, value in patches.items():
+                stack.enter_context(mock.patch.object(here, attr, value))
+            stack.enter_context(contextlib.redirect_stdout(printed))
+            stack.enter_context(contextlib.redirect_stderr(printed))
+            code = self_test(meta=False)
+        ok = code == status and says in printed.getvalue()
+        out.append((f"meta: a self-test over {name} fails", None if ok else
+                    f"self_test exited {code}, not {status} saying {says!r}", []))
+    proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--no-such-flag"],
+                          capture_output=True, text=True, timeout=60, check=False)
+    ok = proc.returncode == CANNOT_RUN and "usage:" in proc.stderr
+    out.append(("meta: an argument the gate does not take", None if ok else
+                f"exited {proc.returncode} saying {proc.stderr.strip()[:80]!r}", []))
+    for module, says in (("tomllib", "tomllib is not available"),
+                         ("yaml", "PyYAML is not installed")):
+        # The gate loaded in a process where the module cannot be imported.
+        proc = subprocess.run(
+            [sys.executable, "-c", (f"import runpy, sys; sys.modules[{module!r}] = None; "
+                                    f"runpy.run_path({str(Path(__file__).resolve())!r}, "
+                                    f"run_name='without_{module}')")],
+            capture_output=True, text=True, timeout=60, check=False)
+        ok = proc.returncode == CANNOT_RUN and says in proc.stderr
+        out.append((f"meta: no {module}", None if ok else
+                    f"the gate exited {proc.returncode} without {module}, not {CANNOT_RUN} "
+                    f"saying {says!r}", []))
+    return out
+
+
+# What meta_outcomes reports: its eight stage checks, the predicates, four broken
+# self-tests, the bad argument and the two missing modules.
+META_OUTCOMES = 16
+
+
+def self_test(meta: bool = True) -> int:
     try:
         policy = load_policy(ROOT)
     except PolicyError as e:
@@ -2157,35 +2404,39 @@ def self_test() -> int:
                 "mutations": mutation_outcomes(base, policy),
                 "accepted": accepted_outcomes(base, policy),
                 "floor": floor_outcomes(base, scratch, policy),
+                "shapes": shape_outcomes(base, scratch, policy),
                 "exceptions": exception_outcomes(base, policy),
                 "vendored": vendored_outcomes(base, scratch, policy),
                 "policy": policy_outcomes(scratch),
                 "visible": visibility_outcomes(scratch),
                 "status": status_outcomes(scratch, policy),
                 "refusals": self_refusal_outcomes(base, scratch, policy),
+                "meta": meta_outcomes(base, scratch, policy) if meta else [],
             }
 
     outcomes = [o for stage in stages.values() for o in stage]
-    failures = 0
     for name, why, shown in outcomes:
         if why is None:
             print(f"ok [{name}]" + (f": {shown[0]}" if shown else ""))
-            continue
-        failures += 1
+    # The verdict, checked without itself: a planted failed outcome must be failing.
+    failed = failing(outcomes) + [("self-test", "failing() passes a failed outcome", [])] * (
+        not failing([("planted", "planted", [])]))
+    for name, why, shown in failed:
         print(f"FAIL [{name}]: {why}", file=sys.stderr)
         for line in shown:
             print(f"    {line}", file=sys.stderr)
-    if failures:
-        print(f"check-workflow-id-masking self-test FAILED: {failures} of {len(outcomes)} "
+    if failed:
+        print(f"check-workflow-id-masking self-test FAILED: {len(failed)} of {len(outcomes)} "
               "case(s)", file=sys.stderr)
         return 1
     # Each stage reports one outcome per case its table lists, so a stage that
     # stopped early is a shortfall here rather than a pass.
     expected = (len(policy.mutations) + 1 + len(policy.accepted)
-                + len(floor_shortfalls(Result(), policy)) + 1 + len(EXCEPTION_CASES)
+                + len(floor_shortfalls(Result(), policy)) + 1 + len(SHAPES) + 2
+                + len(EXCEPTION_CASES)
                 + len(VENDORED_CASES)
                 + 1 + len(POLICY_CASES) + len(VISIBILITY_CASES) + len(STATUS_CASES)
-                + len(meta_cases(policy.mutations[0])) + 4)
+                + len(meta_cases(policy.mutations[0])) + 4 + (META_OUTCOMES if meta else 0))
     if len(outcomes) < expected:
         print(f"self-test ran {len(outcomes)} of the {expected} cases it lists; refusing to "
               "report a pass", file=sys.stderr)
@@ -2194,11 +2445,13 @@ def self_test() -> int:
           "rejected at the mutated line by the rule each names, with no account id in any "
           f"finding; {len(stages['accepted'])} permitted edits and the unmutated workflows "
           f"accepted; {len(stages['floor'])} floor shortfalls refused; "
+          f"{len(stages['shapes'])} workflow shapes held to the rules; "
           f"{len(stages['exceptions'])} policy exceptions held to where they apply; "
           f"{len(stages['vendored'])} vendored records checked; {len(stages['policy'])} "
           f"policies checked; {len(stages['visible'])} untracked trees refused; "
           f"{len(stages['status'])} exit statuses; {len(stages['refusals'])} vacuous "
-          "self-test outcomes reported).")
+          f"self-test outcomes reported; {len(stages['meta'])} ways of breaking the self-test "
+          "itself reported).")
     return 0
 
 
