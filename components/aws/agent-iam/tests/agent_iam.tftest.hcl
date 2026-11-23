@@ -26,19 +26,22 @@ mock_provider "aws" {
       reverse_dns_prefix = "com.amazonaws"
     }
   }
+  # The stub described below. It sits on the mock provider rather than in a
+  # file-level override_data: OpenTofu 1.13 carries a file-level override_data
+  # into the test files that run after this one, where it replaced the real
+  # trust agent_iam_trust.tftest.hcl asserts.
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
 }
 
 # The operator trust is rendered by aws_iam_policy_document, which the mock turns
-# into a non-JSON placeholder and the aws_iam_role policy validator then rejects.
-# We don't assert on the operator's OIDC trust here (its shape isn't the escalation
-# surface these tests guard — the boundary gate is), so feed a valid JSON stub so
-# the role plans and the boundary/write-gate assertions can run.
-override_data {
-  target = data.aws_iam_policy_document.operator_trust
-  values = {
-    json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
-  }
-}
+# into a non-JSON placeholder and the aws_iam_role policy validator then rejects,
+# so this file feeds a valid JSON stub and the role plans. The stub means nothing
+# here asserts who may assume the operator: agent_iam_trust.tftest.hcl renders
+# the real trust with a credential-less provider and asserts it exactly.
 
 variables {
   environment       = "development"
@@ -74,6 +77,40 @@ run "operator_tenant_write_is_boundary_gated" {
       if try(s.Sid, "") == "TenantRoleWriteWithBoundary"
     ])
     error_message = "tenant-role write must be scoped to the /eks-agent-platform/tenants/ path ARN, not a wildcard"
+  }
+}
+
+# Every statement that can create a role or change a role's policies carries
+# the boundary condition, not just the two named above: the scheduler-invoke
+# role write is a third, and a fourth added later is held to the same rule.
+# Matching on the actions rather than the Sid means a renamed or new statement
+# cannot slip past.
+run "every_role_write_is_boundary_gated" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
+      try(s.Condition.StringEquals["iam:PermissionsBoundary"], "") == aws_iam_policy.tenant_boundary.arn
+      if length(setintersection(toset(flatten([s.Action])), toset([
+        "iam:CreateRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
+        "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:PutRolePermissionsBoundary",
+        "iam:DeleteRolePermissionsBoundary",
+      ]))) > 0
+    ])
+    error_message = "every operator statement that creates a role or writes its policies must be gated by iam:PermissionsBoundary == the tenant boundary"
+  }
+
+  # The rule above passes vacuously if no statement matches, so pin the three
+  # that exist: tenant, session and scheduler-invoke role writes.
+  assert {
+    condition = toset([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement : s.Sid
+      if contains(flatten([s.Action]), "iam:CreateRole")
+      ]) == toset([
+      "TenantRoleWriteWithBoundary", "PlatformSessionRoleWriteWithBoundary", "SchedulerInvokeRoleWriteWithBoundary",
+    ])
+    error_message = "the operator's iam:CreateRole statements must be exactly the tenant, session and scheduler-invoke role writes"
   }
 }
 
@@ -121,8 +158,10 @@ run "boundary_denies_escalation" {
       && contains(s.Action, "organizations:*")
       && contains(s.Action, "account:*")
       && contains(s.Action, "sts:AssumeRole")
+      && flatten([s.Resource]) == ["*"]
+      && try(s.Condition, null) == null
     ]) == 1
-    error_message = "tenant boundary must Deny organizations:*, account:*, and sts:AssumeRole (the escalation verbs)"
+    error_message = "tenant boundary must Deny organizations:*, account:*, and sts:AssumeRole (the escalation verbs) on Resource \"*\" with no condition: a narrower Resource denies nothing"
   }
 
   # IAM is denied wholesale except on scheduler-invoke roles (NotResource), so a
@@ -160,13 +199,31 @@ run "operator_role_shape" {
     error_message = "operator role must live under /eks-agent-platform/"
   }
 
+  # TenantRoleRead carries writes that no boundary condition can gate
+  # (iam:UpdateAssumeRolePolicy, iam:DeleteRole, tagging), so its Resource is
+  # the only thing scoping them: exactly the two tenant role patterns.
+  # flatten([...]) reads Resource the same whether it is written as a string or a
+  # list, and the length check fails if the statement is gone.
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement : s
+      if try(s.Sid, "") == "TenantRoleRead" && toset(flatten([s.Resource])) == toset([
+        "arn:aws:iam::123456789012:role/eks-agent-platform/tenants/*",
+        "arn:aws:iam::123456789012:role/development-platform-*-tenant",
+      ])
+    ]) == 1
+    error_message = "operator tenant-role read must be scoped to exactly the tenant role ARNs, never Resource=\"*\""
+  }
+
+  # No statement that carries an IAM action may name Resource "*", whatever its
+  # Sid: every role the operator touches is scoped by path or name pattern.
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
-      !contains(try(tolist(s.Resource), []), "*")
-      if try(s.Sid, "") == "TenantRoleRead"
+      !contains(flatten([s.Resource]), "*")
+      if anytrue([for a in flatten([s.Action]) : startswith(a, "iam:")])
     ])
-    error_message = "operator tenant-role read must be scoped to tenant ARNs, never Resource=\"*\""
+    error_message = "no operator statement carrying an iam: action may have Resource \"*\""
   }
 
   # The SLO reconciler queries Amazon Managed Prometheus to evaluate burn rates.
