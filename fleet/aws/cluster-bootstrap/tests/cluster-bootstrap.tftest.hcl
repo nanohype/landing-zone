@@ -28,9 +28,20 @@
 # that is actually configured inside a legacy child module makes tofu test resolve
 # the child's provider config against the mock's empty schema, so every real
 # argument (host, token, …) reports as unexpected. Leaving them un-mocked lets the
-# real plugins load their schemas and plan offline — cluster_certificate_authority_data
-# is a real (throwaway, self-signed, key-less) CA the providers parse without
-# network or credentials, so helm_release/k8s resources plan as creates.
+# real plugins load their schemas — cluster_certificate_authority_data is a real
+# (throwaway, self-signed, key-less) CA the providers parse without network or
+# credentials, so the k8s resources plan as creates.
+#
+# Two things the real plugins would otherwise fetch:
+#   - Planning a helm_release makes the real helm provider read its chart
+#     repository's index (helm.cilium.io, argoproj.github.io), so the suite
+#     needed the network. override_resource on the two releases below plans them
+#     from the given values instead; no assertion reads a chart.
+#   - The real github provider is configured inside the module too, and with a
+#     token in the environment (GITHUB_TOKEN, or a GitHub CLI login) configuring
+#     it looks the token's user up on api.github.com (see the component's
+#     main.tf). It cannot be mocked from here, so the suite is network-free only
+#     where no token is set, as in CI's test step.
 
 mock_provider "aws" {
   mock_data "aws_iam_policy_document" {
@@ -47,6 +58,16 @@ mock_provider "aws" {
   }
 }
 mock_provider "tls" {}
+
+# The chart reads above: both releases plan from their configuration, with no
+# call to the helm provider.
+override_resource {
+  target = module.cluster_bootstrap.helm_release.cilium
+}
+
+override_resource {
+  target = module.cluster_bootstrap.helm_release.argocd
+}
 
 variables {
   region                             = "us-east-1"
