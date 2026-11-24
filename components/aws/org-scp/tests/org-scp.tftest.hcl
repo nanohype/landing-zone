@@ -16,6 +16,14 @@
 # `content` and `type` are configured arguments (known at plan), so the mock does
 # NOT synthesize them — jsondecode(aws_organizations_policy.this[...].content) sees
 # the real value the component threaded through, which is exactly what we assert.
+#
+# The component also ships nine guardrail SCPs of its own (guardrails.tf). The runs
+# at the end hold each one to its exact Deny statements, so a guardrail that is
+# gutted, narrowed, widened or turned into an Allow fails here rather than shipping;
+# a deliberate change to a guardrail changes its assertion in the same pull request.
+# They also bind each guardrail only where guardrail_targets says, and refuse a
+# target for a guardrail that does not exist or an operator policy that would
+# replace one.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
@@ -34,9 +42,10 @@ mock_provider "aws" {
 }
 
 variables {
-  environment = "development"
-  region      = "us-east-1"
-  team        = "platform"
+  environment     = "development"
+  region          = "us-east-1"
+  team            = "platform"
+  allowed_regions = ["us-east-1"]
 
   # A realistic org guardrail ceiling. Built with jsonencode() so the JSON is real
   # and known at plan time. target_ids has TWO entries so the attachment fan-out
@@ -183,4 +192,303 @@ run "policy_attached_to_every_target" {
     ])
     error_message = "each SCP attachment must target one of the supplied target_ids, not a wrong/hardcoded target"
   }
+}
+
+# ── the shipped guardrails ────────────────────────────────────────────────────
+
+# With no operator policies, the component creates exactly the nine guardrails and
+# attaches none of them.
+run "ships_the_nine_guardrails_attached_to_nothing" {
+  command = plan
+
+  variables {
+    policies = {}
+  }
+
+  assert {
+    condition     = toset(keys(aws_organizations_policy.this)) == toset(["DenyLeavingOrg", "DenyDisablingSecurity", "DenyRootUserActions", "RegionRestriction", "NetworkGuardrails", "DataProtection", "DenyBedrockEgressOutsideRegion", "EnforceMandatoryTags", "DenyDirectUseOfPlatformKeys"])
+    error_message = "with no operator policies the component must create exactly its nine guardrails"
+  }
+
+  assert {
+    condition     = length(aws_organizations_policy_attachment.this) == 0
+    error_message = "a guardrail with no guardrail_targets entry must be attached nowhere"
+  }
+
+  assert {
+    condition     = alltrue([for p in aws_organizations_policy.this : p.type == "SERVICE_CONTROL_POLICY"])
+    error_message = "every guardrail must be a SERVICE_CONTROL_POLICY"
+  }
+}
+
+# Each shipped guardrail, statement by statement.
+run "each_shipped_guardrail_holds_exactly_its_deny_statements" {
+  command = plan
+
+  variables {
+    policies = {}
+  }
+
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["DenyLeavingOrg"].content).Statement == [
+      {
+        Action   = "organizations:LeaveOrganization"
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyLeaveOrganization"
+      },
+    ]
+    error_message = "the shipped DenyLeavingOrg guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["DenyDisablingSecurity"].content).Statement == [
+      {
+        Action   = ["cloudtrail:DeleteTrail", "cloudtrail:StopLogging", "cloudtrail:UpdateTrail", "guardduty:DeleteDetector", "guardduty:DisassociateFromMasterAccount", "guardduty:UpdateDetector", "config:DeleteConfigurationRecorder", "config:DeleteDeliveryChannel", "config:StopConfigurationRecorder", "securityhub:DisableSecurityHub", "securityhub:DeleteMembers", "securityhub:DisassociateFromMasterAccount", "access-analyzer:DeleteAnalyzer"]
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyDisablingSecurityServices"
+      },
+    ]
+    error_message = "the shipped DenyDisablingSecurity guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["DenyRootUserActions"].content).Statement == [
+      {
+        Action = "*"
+        Condition = {
+          StringLike = {
+            "aws:PrincipalArn" = "arn:aws:iam::*:root"
+          }
+        }
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyRootUserActions"
+      },
+    ]
+    error_message = "the shipped DenyRootUserActions guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["RegionRestriction"].content).Statement == [
+      {
+        Condition = {
+          StringNotEquals = {
+            "aws:RequestedRegion" = ["us-east-1"]
+          }
+        }
+        Effect    = "Deny"
+        NotAction = ["a4b:*", "budgets:*", "ce:*", "chime:*", "cloudfront:*", "cur:*", "globalaccelerator:*", "health:*", "iam:*", "importexport:*", "organizations:*", "route53:*", "route53domains:*", "shield:*", "sts:*", "support:*", "trustedadvisor:*", "waf:*"]
+        Resource  = "*"
+        Sid       = "DenyOutsideAllowedRegions"
+      },
+    ]
+    error_message = "the shipped RegionRestriction guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["NetworkGuardrails"].content).Statement == [
+      {
+        Action   = "ec2:CreateDefaultVpc"
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyDefaultVPC"
+      },
+      {
+        Action   = "ec2:DeleteFlowLogs"
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyDeleteFlowLogs"
+      },
+      {
+        Action   = "ec2:DisableEbsEncryptionByDefault"
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyDisableEBSEncryption"
+      },
+    ]
+    error_message = "the shipped NetworkGuardrails guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["DataProtection"].content).Statement == [
+      {
+        Action   = "s3:PutBucketPublicAccessBlock"
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyRemovingS3PublicAccessBlock"
+      },
+      {
+        Action = "s3:PutObject"
+        Condition = {
+          Null = {
+            "s3:x-amz-server-side-encryption" = "false"
+          }
+          StringNotEquals = {
+            "s3:x-amz-server-side-encryption" = ["AES256", "aws:kms"]
+          }
+        }
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyUnencryptedS3Puts"
+      },
+      {
+        Action = ["rds:CreateDBInstance", "rds:CreateDBCluster"]
+        Condition = {
+          Bool = {
+            "rds:StorageEncrypted" = "false"
+          }
+        }
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyUnencryptedResources"
+      },
+      {
+        Action = "ec2:CreateVolume"
+        Condition = {
+          Bool = {
+            "ec2:Encrypted" = "false"
+          }
+        }
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyUnencryptedEBSVolumes"
+      },
+    ]
+    error_message = "the shipped DataProtection guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["DenyBedrockEgressOutsideRegion"].content).Statement == [
+      {
+        Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream", "bedrock:Converse", "bedrock:ConverseStream"]
+        Condition = {
+          StringNotEquals = {
+            "aws:RequestedRegion" = ["us-east-1"]
+          }
+        }
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyBedrockInvokeOutsideSanctionedRegions"
+      },
+    ]
+    error_message = "the shipped DenyBedrockEgressOutsideRegion guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["EnforceMandatoryTags"].content).Statement == [
+      {
+        Action = ["ec2:RunInstances", "ec2:CreateVolume", "lambda:CreateFunction", "s3:CreateBucket", "dynamodb:CreateTable", "rds:CreateDBInstance", "rds:CreateDBCluster", "sqs:CreateQueue", "sns:CreateTopic"]
+        Condition = {
+          Null = {
+            "aws:RequestTag/PlatformId" = "true"
+          }
+        }
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyCreateWithoutPlatformId"
+      },
+      {
+        Action = ["ec2:RunInstances", "ec2:CreateVolume", "lambda:CreateFunction", "s3:CreateBucket", "dynamodb:CreateTable", "rds:CreateDBInstance", "rds:CreateDBCluster", "sqs:CreateQueue", "sns:CreateTopic"]
+        Condition = {
+          Null = {
+            "aws:RequestTag/DataClassification" = "true"
+          }
+        }
+        Effect   = "Deny"
+        Resource = "*"
+        Sid      = "DenyCreateWithoutDataClassification"
+      },
+    ]
+    error_message = "the shipped EnforceMandatoryTags guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+  assert {
+    condition = jsondecode(aws_organizations_policy.this["DenyDirectUseOfPlatformKeys"].content).Statement == [
+      {
+        Action = ["kms:Decrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"]
+        Condition = {
+          "ForAnyValue:StringLike" = {
+            "kms:ResourceAliases" = ["alias/*-platform-secrets", "alias/*-platform-logs"]
+          }
+          Null = {
+            "kms:ViaService" = "true"
+          }
+        }
+        Effect   = "Deny"
+        Resource = "arn:aws:kms:*:*:key/*"
+        Sid      = "DenyDirectUseOfPlatformKeys"
+      },
+    ]
+    error_message = "the shipped DenyDirectUseOfPlatformKeys guardrail must hold exactly its Deny statements; a change to it is a change to this assertion too"
+  }
+}
+
+# The region guardrails deny outside allowed_regions, whatever it holds.
+# region-ok: us-west-2 is the second allowed region in this run; a list that only
+# held the deploy region could not tell the input apart from a hard-coded value.
+run "region_guardrails_follow_allowed_regions" {
+  command = plan
+
+  variables {
+    policies        = {}
+    allowed_regions = ["us-east-1", "us-west-2"]
+  }
+
+  assert {
+    condition = alltrue([
+      for name in ["RegionRestriction", "DenyBedrockEgressOutsideRegion"] :
+      jsondecode(aws_organizations_policy.this[name].content).Statement[0].Condition.StringNotEquals["aws:RequestedRegion"] == ["us-east-1", "us-west-2"]
+    ])
+    error_message = "RegionRestriction and DenyBedrockEgressOutsideRegion must deny outside exactly allowed_regions"
+  }
+}
+
+# A guardrail binds where guardrail_targets names, and nowhere else.
+run "a_guardrail_binds_only_where_targeted" {
+  command = plan
+
+  variables {
+    policies          = {}
+    guardrail_targets = { DenyLeavingOrg = ["ou-a1b2-c3d4e5f6"] }
+  }
+
+  assert {
+    condition     = keys(aws_organizations_policy_attachment.this) == ["DenyLeavingOrg-ou-a1b2-c3d4e5f6"]
+    error_message = "guardrail_targets must attach DenyLeavingOrg to its one target and attach nothing else"
+  }
+
+  assert {
+    condition     = aws_organizations_policy_attachment.this["DenyLeavingOrg-ou-a1b2-c3d4e5f6"].target_id == "ou-a1b2-c3d4e5f6"
+    error_message = "the attachment must land on the named target"
+  }
+}
+
+run "a_target_for_an_unknown_guardrail_is_refused" {
+  command = plan
+
+  variables {
+    guardrail_targets = { DenyEverything = ["ou-a1b2-c3d4e5f6"] }
+  }
+
+  expect_failures = [var.guardrail_targets]
+}
+
+run "an_operator_policy_may_not_replace_a_guardrail" {
+  command = plan
+
+  variables {
+    policies = {
+      DenyLeavingOrg = {
+        description = "an empty policy under a guardrail's name"
+        policy      = jsonencode({ Version = "2012-10-17", Statement = [] })
+        target_ids  = []
+      }
+    }
+  }
+
+  expect_failures = [var.policies]
+}
+
+run "allowed_regions_must_name_a_region" {
+  command = plan
+
+  variables {
+    allowed_regions = []
+  }
+
+  expect_failures = [var.allowed_regions]
 }
