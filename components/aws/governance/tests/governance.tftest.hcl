@@ -111,7 +111,7 @@ run "rejects_tenant_key_that_overflows_bucket_budget" {
 # Get* verb, or any other addition, fails it. The set holds
 # dynamodb:BatchWriteItem, which carries DeleteRequest as well as PutRequest, so
 # the IAM layer alone does not make the tables append-only. This run pins the
-# grant as it is; narrowing it belongs to the tenant-isolation work (lzg-2).
+# grant as it is; narrowing it belongs to the tenant-isolation work.
 run "audit_ledger_is_written_by_a_narrow_role_and_protected_outside_development" {
   command = plan
 
