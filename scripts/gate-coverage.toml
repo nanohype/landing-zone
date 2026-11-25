@@ -1,0 +1,11 @@
+# The coverage every Python script under scripts/ meets under the runs CI makes
+# of it, in percent: scripts/gate-coverage.py runs every gate and every
+# self-test under coverage.py and holds each script to these.
+
+[floor]
+line = 75
+branch = 60
+
+# A script held above the floor: "scripts/x.py" = { line = 100, branch = 100,
+# why = "..." }, with the reason it is held higher.
+[override]
