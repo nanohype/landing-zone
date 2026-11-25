@@ -237,8 +237,9 @@ USAGE
                                             that holds to be accepted; require
                                             each policy refusal; require main to
                                             refuse each tree git does not track
-                                            as a repository and to exit 0, 1 and
-                                            2 where each applies; and require
+                                            as a repository or cannot list, and
+                                            to exit 0, 1 and 2 where each
+                                            applies, printing no id; and require
                                             the self-test's own checks to report
                                             a case that would pass vacuously (an
                                             anchor that no longer occurs, a
@@ -255,8 +256,8 @@ USAGE
 
 Exit 0 = clean. Exit 1 = a violation. Exit 2 = the gate could not reach a
 verdict: PyYAML or tomllib is missing, the policy cannot be used, the tree is
-not a checkout git tracks, or the scan fell below the floor without finding a
-violation.
+not a checkout git tracks, git cannot list it (not installed, or not done within
+a minute), or the scan fell below the floor without finding a violation.
 """
 
 import contextlib
@@ -516,8 +517,13 @@ def repo_is_visible(root: Path) -> tuple[bool, str]:
     A gate that reports on a tree it cannot see reports a pass, and a count of
     matched files says the pattern matched, not that the repository is there.
     """
-    proc = subprocess.run(["git", "-C", str(root), "ls-files"],
-                          capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(["git", "-C", str(root), "ls-files"],
+                              capture_output=True, text=True, check=False, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, (f"`git ls-files` could not run ({type(e).__name__}), so the tracked set "
+                       "could not be read. This gate reads the repository through git; "
+                       "without it there is nothing to check rather than nothing to report.")
     if proc.returncode != 0:
         return False, ("`git ls-files` failed, so the tracked set could not be read. This "
                        "gate reads the repository through git; without it there is nothing "
@@ -686,6 +692,16 @@ def redact(text: str) -> str:
     return ID_RUN.sub(
         lambda m: m.group(0) if len(m.group(0)) == 12 and placeholder(m.group(0))
         else "<account id>", text)
+
+
+def emit(text: str, err: bool = False) -> None:
+    """Print one message, redacted, to stdout (or stderr with err).
+
+    Every line this gate prints goes through here. A message is assembled from
+    policy values, paths, parser errors and workflow text, and redacting where
+    each is built leaves any one built without it to print an id; the print is
+    the one place they all pass."""
+    print(redact(text), file=sys.stderr if err else sys.stdout)
 
 
 def quote(text, limit: int) -> str:
@@ -993,9 +1009,9 @@ def vendored_findings(root: Path, policy: Policy) -> tuple[list[Finding], int]:
     record_path = root / VENDORED_REL
     if not record_path.is_file():
         if policy.vendored:
-            return [(VENDORED_REL, 1, f"is not in the tree, though {POLICY_REL} lists "
-                                      f"{', '.join(policy.vendored)} as vendored: nothing "
-                                      "records which bytes they must be.")], 0
+            return [(VENDORED_REL, 1, redact(f"is not in the tree, though {POLICY_REL} lists "
+                                             f"{', '.join(policy.vendored)} as vendored: "
+                                             "nothing records which bytes they must be."))], 0
         return [], 0
     try:
         record = json.loads(record_path.read_text())
@@ -1009,8 +1025,9 @@ def vendored_findings(root: Path, policy: Policy) -> tuple[list[Finding], int]:
     out: list[Finding] = []
     for rel in policy.vendored:
         if rel not in record:
-            out.append((VENDORED_REL, 1, f"has no record for {rel}, which {POLICY_REL} lists "
-                                         "as vendored, so nothing says which bytes it must be."))
+            out.append((VENDORED_REL, 1, redact(f"has no record for {rel}, which {POLICY_REL} "
+                                                "lists as vendored, so nothing says which "
+                                                "bytes it must be.")))
     held = 0
     for rel, entry in sorted(record.items()):
         if not (isinstance(entry, dict) and all(isinstance(entry.get(k), str) and entry[k]
@@ -1487,11 +1504,11 @@ def check_workflow(root, rel, doc, ident, out, res, policy: Policy) -> None:
 def report(res: Result, policy: Policy) -> int:
     if res.findings:
         for rel, line, msg in res.findings:
-            print(f"::error file={rel},line={line}::{rel}:{line}: {msg}")
-        print(f"\n{len(res.findings)} finding(s). See the docstring of "
+            emit(f"::error file={rel},line={line}::{rel}:{line}: {msg}")
+        emit(f"\n{len(res.findings)} finding(s). See the docstring of "
               f"scripts/check-workflow-id-masking.py and {policy.docs}.")
         return 1
-    print(f"OK: {res.workflows} workflow(s) read; {res.id_reads} id secret read(s) of "
+    emit(f"OK: {res.workflows} workflow(s) read; {res.id_reads} id secret read(s) of "
           f"{len(res.id_names)} name(s), each masked first by one of {res.mask_steps} mask "
           "step(s), none from vars"
           + (f"; {res.vendored} vendored file(s), each the bytes {VENDORED_REL} records"
@@ -1516,12 +1533,12 @@ def floor_problem(res: Result, policy: Policy) -> str | None:
 def main_check(root: Path = ROOT) -> int:
     ok, why = repo_is_visible(root)
     if not ok:
-        print(f"::error::Cannot run: {why} Refusing to report a pass.")
+        emit(f"::error::Cannot run: {why} Refusing to report a pass.")
         return CANNOT_RUN
     try:
         policy = load_policy(root)
     except PolicyError as e:
-        print(f"::error::Cannot run: {e}. Refusing to report a pass.")
+        emit(f"::error::Cannot run: {e}. Refusing to report a pass.")
         return CANNOT_RUN
     res = check(root, policy)
     problem = floor_problem(res, policy)
@@ -1531,10 +1548,10 @@ def main_check(root: Path = ROOT) -> int:
         # needs.
         code = report(res, policy)
         if problem:
-            print(f"::error::{problem}")
+            emit(f"::error::{problem}")
         return code
     if problem:
-        print(f"::error::Cannot run: {problem}")
+        emit(f"::error::Cannot run: {problem}")
         return CANNOT_RUN
     return report(res, policy)
 
@@ -1700,6 +1717,10 @@ def _record(**over) -> str:
     return json.dumps({VENDORED_COPY: {k: v for k, v in entry.items() if v is not None}})
 
 
+# A vendored path carrying an account id: the two findings that quote the policy's
+# vendored paths must print it as <account id>.
+VENDORED_ID_PATH = "scripts/zz-vendored-222233334444.sh"
+
 VENDORED_CASES = [
     ("a record that holds", _record(), VENDORED_BYTES, (VENDORED_COPY,), None, None),
     ("a vendored copy edited in place", _record(), VENDORED_BYTES + "echo edited\n", (),
@@ -1708,6 +1729,10 @@ VENDORED_CASES = [
      VENDORED_REL, "has no record for"),
     ("no record file, with a path listed as vendored", None, VENDORED_BYTES, (VENDORED_COPY,),
      VENDORED_REL, "nothing records which bytes"),
+    ("a path listed as vendored with no record, carrying an account id", "{}", VENDORED_BYTES,
+     (VENDORED_ID_PATH,), VENDORED_REL, "has no record for scripts/zz-vendored-<account id>"),
+    ("no record file, with a listed path carrying an account id", None, VENDORED_BYTES,
+     (VENDORED_ID_PATH,), VENDORED_REL, "lists scripts/zz-vendored-<account id>"),
     ("a record file that is not JSON", "{not json", VENDORED_BYTES, (), VENDORED_REL,
      "could not be read as JSON"),
     ("a record file that is not an object", "[]", VENDORED_BYTES, (), VENDORED_REL,
@@ -1797,6 +1822,14 @@ VISIBILITY_CASES = [
     ("a checkout that tracks nothing", (), "the tracked set is empty"),
     ("a checkout that tracks only the gate scripts", ("scripts",), "is under scripts/"),
 ]
+# A checkout git tracks, with git failing to list it, refused the same way: (name, what
+# running git raises, or None for a git that outlasts the timeout the call sets, what
+# the refusal says).
+GIT_FAILURES = [
+    ("git is not installed", FileNotFoundError(2, "No such file or directory", "git"),
+     "could not run (FileNotFoundError)"),
+    ("git ls-files does not finish within its timeout", None, "could not run (TimeoutExpired)"),
+]
 
 # Trees git tracks, each with the status main_check must exit with and words it must
 # print: (name, what is done to the tree after it is tracked, status, words).
@@ -1809,7 +1842,11 @@ STATUS_CASES = [
      "did not see what it checks"),
     ("a tracked tree with no policy on disk", "no policy", CANNOT_RUN,
      f"{POLICY_REL} could not be read"),
+    ("a tracked tree whose policy refusal quotes an account id", "policy quoting an id",
+     CANNOT_RUN, "unknown key(s) x<account id>"),
 ]
+# The id that case plants, as a key the policy does not read.
+STATUS_ID = "222233334444"
 
 
 # The policy's two exception tables, planted in a workflow the self-test adds, with the
@@ -2044,6 +2081,12 @@ def vendored_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome
             (tree / VENDORED_COPY).write_text(copy)
         res = check(tree, dataclasses.replace(policy, vendored=listed))
         shown = [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings]
+        planted = {i for i in ID_LITERAL.findall(" ".join(listed) + (record or ""))
+                   if not placeholder(i)}
+        leaked = leaked_ids(res.findings, planted)
+        if leaked:
+            out.append((label, f"{len(leaked)} finding(s) quote an account id, at {leaked}", []))
+            continue
         if says is None:
             # The self-test's trees carry each file a record names.
             carried = _tree(scratch / f"carried-{n}", source=tree)
@@ -2105,6 +2148,31 @@ def visibility_outcomes(scratch: Path) -> list[Outcome]:
         out.append((label, None if ok else
                     f"main_check exited {code}, and did not refuse saying {says!r}",
                     [] if ok else printed.strip().splitlines()[-3:]))
+    for n, (name, raised, says) in enumerate(GIT_FAILURES):
+        label = f"visible tree: {name}"
+        root = _tree(scratch / f"git-fails-{n}")
+        try:
+            _git(root, "init", "-q")
+            _git(root, "add", ".")
+        except (OSError, subprocess.SubprocessError) as e:
+            out.append((label, f"the tree could not be built: {e}", []))
+            continue
+        timeouts: list = []
+
+        def outlasts(args, **kwargs):
+            # A git that never finishes: subprocess.run raises once the call's own
+            # timeout passes, and with none set it would wait for ever.
+            timeouts.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(args, kwargs.get("timeout") or 0)
+
+        with mock.patch.object(subprocess, "run", side_effect=raised or outlasts):
+            code, printed = _main_check_output(root)
+        bounded = raised is not None or (bool(timeouts) and None not in timeouts)
+        ok = bounded and code == CANNOT_RUN and says in printed \
+            and "Refusing to report a pass" in printed
+        out.append((label, None if ok else "git ls-files ran with no timeout" if not bounded
+                    else f"main_check exited {code}, and did not refuse saying {says!r}",
+                    [] if ok else printed.strip().splitlines()[-3:]))
     return out
 
 
@@ -2133,6 +2201,9 @@ def status_outcomes(scratch: Path, policy: Policy) -> list[Outcome]:
                 p.unlink()
         elif change == "no policy":
             (root / POLICY_REL).unlink()
+        elif change == "policy quoting an id":
+            policy_file = root / POLICY_REL
+            policy_file.write_text(f"x{STATUS_ID} = 1\n" + policy_file.read_text())
         # A violation and a shortfall both there, the shortfall planted beside it: no edit
         # of a repository's own policy text says which floor its scan falls short of. The
         # violation is the verdict.
@@ -2141,9 +2212,12 @@ def status_outcomes(scratch: Path, policy: Policy) -> list[Outcome]:
                      if change == "plant below the floor" else contextlib.nullcontext())
         with shortfall:
             code, printed = _main_check_output(root)
-        ok = code == status and says in printed
-        out.append((label, None if ok else f"main_check exited {code}, not {status} saying "
-                                           f"{says!r}", [] if ok else printed.strip().splitlines()[-3:]))
+        leaked = leaked_ids([("printed", 0, printed)], {STATUS_ID})
+        ok = code == status and says in printed and not leaked
+        out.append((label, None if ok else
+                    "main_check printed an account id" if leaked else
+                    f"main_check exited {code}, not {status} saying {says!r}",
+                    [] if ok or leaked else printed.strip().splitlines()[-3:]))
     return out
 
 
@@ -2338,11 +2412,11 @@ def meta_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
     passing = {name: stub(("stub", None, [])) for name in stages}
 
     def refused(root):
-        raise PolicyError("planted")
+        raise PolicyError(f"planted {STATUS_ID}")
 
     for name, patches, status, says in (
-            ("a policy the self-test cannot use", {"load_policy": refused}, CANNOT_RUN,
-             "Cannot run: planted"),
+            ("a policy the self-test cannot use, refused quoting an account id",
+             {"load_policy": refused}, CANNOT_RUN, "Cannot run: planted <account id>"),
             ("a baseline the gate already rejects",
              {"unmutated_problem": lambda base, policy: "planted"}, 1, "FAIL [unmutated]: planted"),
             ("a stage with a failing case",
@@ -2356,8 +2430,10 @@ def meta_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
             stack.enter_context(contextlib.redirect_stdout(printed))
             stack.enter_context(contextlib.redirect_stderr(printed))
             code = self_test(meta=False)
-        ok = code == status and says in printed.getvalue()
+        leaked = leaked_ids([("printed", 0, printed.getvalue())], {STATUS_ID})
+        ok = code == status and says in printed.getvalue() and not leaked
         out.append((f"meta: a self-test over {name} fails", None if ok else
+                    "self_test printed an account id" if leaked else
                     f"self_test exited {code}, not {status} saying {says!r}", []))
     proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--no-such-flag"],
                           capture_output=True, text=True, timeout=60, check=False)
@@ -2388,14 +2464,14 @@ def self_test(meta: bool = True) -> int:
     try:
         policy = load_policy(ROOT)
     except PolicyError as e:
-        print(f"Cannot run: {e}. The self-test runs the cases the policy holds.", file=sys.stderr)
+        emit(f"Cannot run: {e}. The self-test runs the cases the policy holds.", err=True)
         return CANNOT_RUN
     with tempfile.TemporaryDirectory(prefix="id-masking-") as tmp:
         scratch = Path(tmp)
         base = _tree(scratch / "base")
         problem = unmutated_problem(base, policy)
         if problem:
-            print(f"FAIL [unmutated]: {problem}", file=sys.stderr)
+            emit(f"FAIL [unmutated]: {problem}", err=True)
             return 1
         # GIT_CEILING_DIRECTORIES keeps git from reading a repository that contains the
         # scratch directory as the one a case's tree is in.
@@ -2417,17 +2493,17 @@ def self_test(meta: bool = True) -> int:
     outcomes = [o for stage in stages.values() for o in stage]
     for name, why, shown in outcomes:
         if why is None:
-            print(f"ok [{name}]" + (f": {shown[0]}" if shown else ""))
+            emit(f"ok [{name}]" + (f": {shown[0]}" if shown else ""))
     # The verdict, checked without itself: a planted failed outcome must be failing.
     failed = failing(outcomes) + [("self-test", "failing() passes a failed outcome", [])] * (
         not failing([("planted", "planted", [])]))
     for name, why, shown in failed:
-        print(f"FAIL [{name}]: {why}", file=sys.stderr)
+        emit(f"FAIL [{name}]: {why}", err=True)
         for line in shown:
-            print(f"    {line}", file=sys.stderr)
+            emit(f"    {line}", err=True)
     if failed:
-        print(f"check-workflow-id-masking self-test FAILED: {len(failed)} of {len(outcomes)} "
-              "case(s)", file=sys.stderr)
+        emit(f"check-workflow-id-masking self-test FAILED: {len(failed)} of {len(outcomes)} "
+             "case(s)", err=True)
         return 1
     # Each stage reports one outcome per case its table lists, so a stage that
     # stopped early is a shortfall here rather than a pass.
@@ -2435,23 +2511,25 @@ def self_test(meta: bool = True) -> int:
                 + len(floor_shortfalls(Result(), policy)) + 1 + len(SHAPES) + 2
                 + len(EXCEPTION_CASES)
                 + len(VENDORED_CASES)
-                + 1 + len(POLICY_CASES) + len(VISIBILITY_CASES) + len(STATUS_CASES)
+                + 1 + len(POLICY_CASES) + len(VISIBILITY_CASES) + len(GIT_FAILURES)
+                + len(STATUS_CASES)
                 + len(meta_cases(policy.mutations[0])) + 4 + (META_OUTCOMES if meta else 0))
     if len(outcomes) < expected:
-        print(f"self-test ran {len(outcomes)} of the {expected} cases it lists; refusing to "
-              "report a pass", file=sys.stderr)
+        emit(f"self-test ran {len(outcomes)} of the {expected} cases it lists; refusing to "
+             "report a pass", err=True)
         return 1
-    print(f"check-workflow-id-masking self-test passed ({len(stages['mutations'])} mutations "
-          "rejected at the mutated line by the rule each names, with no account id in any "
-          f"finding; {len(stages['accepted'])} permitted edits and the unmutated workflows "
-          f"accepted; {len(stages['floor'])} floor shortfalls refused; "
-          f"{len(stages['shapes'])} workflow shapes held to the rules; "
-          f"{len(stages['exceptions'])} policy exceptions held to where they apply; "
-          f"{len(stages['vendored'])} vendored records checked; {len(stages['policy'])} "
-          f"policies checked; {len(stages['visible'])} untracked trees refused; "
-          f"{len(stages['status'])} exit statuses; {len(stages['refusals'])} vacuous "
-          f"self-test outcomes reported; {len(stages['meta'])} ways of breaking the self-test "
-          "itself reported).")
+    emit(f"check-workflow-id-masking self-test passed ({len(stages['mutations'])} mutations "
+         "rejected at the mutated line by the rule each names, with no account id in any "
+         f"finding; {len(stages['accepted'])} permitted edits and the unmutated workflows "
+         f"accepted; {len(stages['floor'])} floor shortfalls refused; "
+         f"{len(stages['shapes'])} workflow shapes held to the rules; "
+         f"{len(stages['exceptions'])} policy exceptions held to where they apply; "
+         f"{len(stages['vendored'])} vendored records checked; {len(stages['policy'])} "
+         f"policies checked; {len(stages['visible'])} trees git does not track or cannot "
+         "list refused; "
+         f"{len(stages['status'])} exit statuses; {len(stages['refusals'])} vacuous "
+         f"self-test outcomes reported; {len(stages['meta'])} ways of breaking the self-test "
+         "itself reported).")
     return 0
 
 
@@ -2459,6 +2537,6 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         sys.exit(self_test())
     if sys.argv[1:]:
-        print("usage: check-workflow-id-masking.py [--self-test]", file=sys.stderr)
+        emit("usage: check-workflow-id-masking.py [--self-test]", err=True)
         sys.exit(CANNOT_RUN)
     sys.exit(main_check())
