@@ -22,7 +22,7 @@ resources, not a grandchild's attributes, so asserting the value means re-statin
 expression in an output and comparing it to itself: a valid artifact that asserts
 nothing. Reading the resource bodies is the only assertion that binds.
 
-Four rules:
+Five rules:
 
   1. POLARITY. Every teardown-gate attribute must resolve permissively when the lever is
      set. Read as polarity, not presence — `deletion_protection = local.allow_teardown`
@@ -35,15 +35,42 @@ Four rules:
      gate attribute outside the lever idiom, must be named in EXEMPT with a reason. Then
      teardown posture is a decision on the record rather than an omission.
   4. NO BLIND PASS. The check fails if it discovers no files, if a variable block never
-     closes, or if an EXEMPT entry no longer describes anything. A gate whose healthy
-     output is indistinguishable from its blind output is the failure it exists to catch.
+     closes, if an EXEMPT module no longer holds a protectable resource, or if
+     GATELESS_HELD names a module EXEMPT does not. A gate whose healthy output is
+     indistinguishable from its blind output is the failure it exists to catch.
+  5. CLASSIFICATION. A gate attribute may only sit on a kind PROTECTABLE lists. A
+     resource or module call that carries `force_destroy` or `deletion_protection_enabled`
+     is one a destroy can be refused by, and rule 2 can only require its gate if the check
+     knows the kind. This anchors the gated kinds to the tree: drop one from PROTECTABLE
+     and every resource of that kind that carries a gate is reported here, and an
+     exemption left holding nothing protectable is reported by rule 4 (the route53 zones
+     carry no gate, so dropping aws_route53_zone reports dns, private-dns and shared-dns
+     that way). A kind with no gate
+     carries no attribute to classify, so GATELESS_HELD anchors those instead: each
+     exempt module declares the gateless kinds it holds, and a declared kind PROTECTABLE
+     does not list as gateless, a declared kind the module does not hold, and a gateless
+     kind an exempt module holds without declaring it are each reported. Drop
+     aws_backup_vault from PROTECTABLE and backup and shared-backup are reported.
+
+`--self-test` proves the rules per kind. For every protectable kind it builds a module
+with the lever and that kind, and requires the check to accept it with every gate open
+on the lever, and to reject it with each gate pinned closed and with each gate left
+off. A kind with no gate must be rejected unless EXEMPT names it. The kinds and gates
+it expects are written out in EXPECTED, not read from PROTECTABLE: a self-test that
+took its cases from the table it checks would drop a kind's cases in the same edit that
+dropped the kind, and pass. check-gates-detect.py's positive control plants one
+violation; this is what notices a kind the matcher has stopped seeing.
 """
 
+import contextlib
+import io
 import re
 import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
+from unittest import mock
 
 # Attribute -> the value it must take when a teardown is permitted.
 GATES = {
@@ -90,11 +117,6 @@ PROTECTABLE = {
 # table answers "can this component be torn down?", and a vague entry is how a wedge gets
 # re-derived by the next reader.
 EXEMPT = {
-    "components/aws/cost": (
-        "The CUR bucket gates force_destroy on the environment inline. Account-level "
-        "billing data has no per-cluster lifecycle, so there is no substrate for a "
-        "force_destroy_buckets lever to be about."
-    ),
     "components/aws/backup": (
         "Recovery points are the thing that must outlive the substrate they protect, so "
         "the vault is deliberately un-forceable. A teardown that means it deletes the "
@@ -146,6 +168,15 @@ EXEMPT = {
         "The shared zone lives in the network-owner account and is consumed by every "
         "spoke that associates with it."
     ),
+}
+
+
+# The gateless kinds each exempt module holds (see rule 5). Every key must be an EXEMPT
+# module, every kind must be one PROTECTABLE lists with no gate and the module holds,
+# and every gateless kind an exempt module holds must be listed here.
+GATELESS_HELD = {
+    "components/aws/backup": ("aws_backup_vault", "aws_backup_vault_lock_configuration"),
+    "components/aws/shared-backup": ("aws_backup_vault", "aws_backup_vault_lock_configuration"),
 }
 
 
@@ -307,10 +338,10 @@ def declared_kinds(files):
     return found
 
 
-def main():
-    repo = Path(__file__).resolve().parent.parent
+def main(repo=None, min_files=50):
+    repo = repo or Path(__file__).resolve().parent.parent
     files = tracked_tf_files(repo)
-    if len(files) < 50:
+    if len(files) < min_files:
         print(f"::error::discovered only {len(files)} tracked .tf files — the check cannot "
               f"run from here and must not report success. Expected the landing-zone tree.")
         return 1
@@ -371,6 +402,32 @@ def main():
                         f"    Spell the permissive branch out so the polarity is readable:\n"
                         f"      {attr} = <lever> ? {GATES[attr]} : <the leaf's own pin>")
 
+        # ── rule 5: classification — a gate sits only on a kind the check knows ───────
+        for f in sorted(mod_files):
+            rel = f.relative_to(repo)
+            lines, _ = code_lines(rel, f.read_text())
+            kind = None
+            for lineno, line in lines:
+                header = re.match(r'^(resource|data)\s+"([^"]+)"|^(module)\s+"', line)
+                if header:
+                    kind = header.group(2) if header.group(1) == "resource" else (
+                        "module:?" if header.group(3) else None)
+                    continue
+                source = re.match(r'^\s+source\s*=\s*"([^"]*)"', line)
+                if source and kind == "module:?":
+                    kind = next((k for k in PROTECTABLE if k.startswith("module:")
+                                 and k.split(":", 1)[1] in source.group(1)),
+                                "module:" + source.group(1))
+                    continue
+                gate = re.match(r"^\s*(" + "|".join(GATES) + r")\s*=", line)
+                if gate and kind and kind not in PROTECTABLE:
+                    failures.append(
+                        f"::error file={rel},line={lineno}::{gate.group(1)} is set on {kind}, "
+                        f"which PROTECTABLE does not list\n"
+                        f"    The check holds a kind to its gates only if it knows the kind. "
+                        f"Add {kind} to PROTECTABLE with the gates a destroy needs, or drop "
+                        f"the attribute.")
+
         # ── rule 2: coverage — every protectable resource carries its gate ────────────
         ungated = {}
         for kind in sorted(kinds):
@@ -381,9 +438,28 @@ def main():
         n_gates = sum(len(v) for v in gates_present.values())
 
         if key in EXEMPT:
-            exempt_seen.add(key)
+            # Rule 4: an exemption excuses a protectable resource; with none, it is stale.
             if kinds:
+                exempt_seen.add(key)
                 inventory.append(f"  {key}: EXEMPT ({', '.join(sorted(kinds))})")
+            # Rule 5, gateless kinds: declared where they are held.
+            declared = GATELESS_HELD.get(key, ())
+            for kind in declared:
+                if kind not in PROTECTABLE or PROTECTABLE[kind]:
+                    failures.append(
+                        f"::error file={key}::GATELESS_HELD declares {kind}, which PROTECTABLE "
+                        f"does not list as a kind with no gate\n"
+                        f"    A gateless kind the check stops knowing is a vault nobody sees. "
+                        f"Restore it to PROTECTABLE with no gates, or drop the declaration.")
+                elif kind not in kinds:
+                    failures.append(
+                        f"::error file={key}::GATELESS_HELD declares {kind}, which this module "
+                        f"does not hold")
+            for kind in sorted(kinds):
+                if not PROTECTABLE[kind] and kind not in declared:
+                    failures.append(
+                        f"::error file={key}::holds {kind}, which has no teardown gate, without "
+                        f"declaring it in GATELESS_HELD")
             continue
 
         if not kinds:
@@ -414,6 +490,10 @@ def main():
             inventory.append(f"  {key}: lever, {n_gates} gate(s), {', '.join(sorted(kinds))}")
 
     # ── rule 4: no blind pass ─────────────────────────────────────────────────────────
+    for key in sorted(set(GATELESS_HELD) - set(EXEMPT)):
+        failures.append(
+            f"::error file={key}::GATELESS_HELD names a module EXEMPT does not: a gateless "
+            f"kind outside an exemption is reported by rule 2, so the declaration excuses nothing")
     for key in sorted(set(EXEMPT) - exempt_seen):
         failures.append(
             f"::error file={key}::EXEMPT entry describes nothing — the directory is gone, or no "
@@ -442,5 +522,157 @@ def main():
     return 0
 
 
+# ── self-test ─────────────────────────────────────────────────────────────────────────
+
+# What each kind must be held to, stated here rather than read from PROTECTABLE (see the
+# module docstring).
+EXPECTED = {
+    "aws_s3_bucket": ("force_destroy",),
+    "aws_rds_cluster": ("deletion_protection", "skip_final_snapshot"),
+    "aws_db_instance": ("deletion_protection", "skip_final_snapshot"),
+    "aws_dynamodb_table": ("deletion_protection_enabled",),
+    "aws_secretsmanager_secret": ("recovery_window_in_days",),
+    "aws_ecr_repository": ("force_delete",),
+    "aws_route53_zone": ("force_destroy",),
+    "aws_backup_vault": (),
+    "aws_backup_vault_lock_configuration": (),
+    "module:s3-bucket": ("force_destroy",),
+    "module:rds-aurora": ("deletion_protection", "skip_final_snapshot"),
+}
+
+# The protective value of each gate: what a resource held against a teardown carries.
+CLOSED = {
+    "force_destroy": "false",
+    "skip_final_snapshot": "false",
+    "deletion_protection": "true",
+    "deletion_protection_enabled": "true",
+    "recovery_window_in_days": "30",
+    "force_delete": "false",
+}
+
+FIXTURE_DIR = "components/aws/fixture"
+
+
+def fixture_module(kind, gates):
+    """A module with the lever and one `kind`, carrying exactly `gates` (attr -> expr)."""
+    if kind.startswith("module:"):
+        opener = 'module "this" {\n  source = "terraform-aws-modules/%s/aws"\n' % kind.split(":", 1)[1]
+    else:
+        opener = 'resource "%s" "this" {\n' % kind
+    body = "".join(f"  {attr} = {expr}\n" for attr, expr in gates.items())
+    return (
+        'variable "force_destroy_buckets" {\n  type    = bool\n  default = false\n}\n\n'
+        "locals {\n  allow_teardown = var.force_destroy_buckets\n}\n\n"
+        + opener + body + "}\n"
+    )
+
+
+def run_on(module_text, patches=None):
+    """(exit status, output) of main() over a one-module repository.
+
+    patches maps EXEMPT, GATELESS_HELD or PROTECTABLE to the table main() sees; each
+    table not named is empty for EXEMPT and GATELESS_HELD, and as shipped for
+    PROTECTABLE.
+    """
+    patches = patches or {}
+    with tempfile.TemporaryDirectory(prefix="teardown-self-test-") as tmp:
+        repo = Path(tmp)
+        (repo / FIXTURE_DIR).mkdir(parents=True)
+        (repo / FIXTURE_DIR / "main.tf").write_text(module_text)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=60)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, timeout=60)
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(EXEMPT, patches.get("EXEMPT", {}), clear=True))
+            stack.enter_context(mock.patch.dict(GATELESS_HELD, patches.get("GATELESS_HELD", {}),
+                                                clear=True))
+            if "PROTECTABLE" in patches:
+                stack.enter_context(mock.patch.dict(PROTECTABLE, patches["PROTECTABLE"], clear=True))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            status = main(repo=repo, min_files=1)
+        return status, out.getvalue()
+
+
+def open_expr(attr):
+    return f"local.allow_teardown ? {GATES[attr]} : {CLOSED[attr]}"
+
+
+def cases():
+    """(name, module text, table patches, expected status, text the output must hold)."""
+    out = []
+    for kind, attrs in EXPECTED.items():
+        wired = {a: open_expr(a) for a in attrs}
+        if not attrs:
+            out.append((f"{kind}: no gate exists, not exempt", fixture_module(kind, {}), None, 1,
+                        f"{kind} has no teardown gate the provider exposes"))
+            out.append((f"{kind}: no gate exists, exempt and declared", fixture_module(kind, {}),
+                        {"EXEMPT": {FIXTURE_DIR: "the self-test's declared posture"},
+                         "GATELESS_HELD": {FIXTURE_DIR: (kind,)}}, 0, "EXEMPT"))
+            out.append((f"{kind}: no gate exists, exempt but undeclared", fixture_module(kind, {}),
+                        {"EXEMPT": {FIXTURE_DIR: "the self-test's declared posture"}}, 1,
+                        f"holds {kind}, which has no teardown gate, without declaring it"))
+            continue
+        out.append((f"{kind}: every gate opens on the lever", fixture_module(kind, wired), None, 0,
+                    "Every teardown gate opens on the lever"))
+        for attr in attrs:
+            pinned = dict(wired, **{attr: CLOSED[attr]})
+            out.append((f"{kind}: {attr} pinned closed", fixture_module(kind, pinned), None, 1,
+                        f"{attr} does not open when the teardown lever is set"))
+            missing = {a: e for a, e in wired.items() if a != attr}
+            out.append((f"{kind}: {attr} left off", fixture_module(kind, missing), None, 1,
+                        f"{kind} carries no {attr}"))
+    exempt = {FIXTURE_DIR: "the self-test's declared posture"}
+    vault = fixture_module("aws_backup_vault", {})
+    out.append(("aws_backup_vault dropped from PROTECTABLE, still declared where held", vault,
+                {"EXEMPT": exempt, "GATELESS_HELD": {FIXTURE_DIR: ("aws_backup_vault",)},
+                 "PROTECTABLE": {k: v for k, v in PROTECTABLE.items() if k != "aws_backup_vault"}},
+                1, "GATELESS_HELD declares aws_backup_vault, which PROTECTABLE does not list"))
+    out.append(("a declared gateless kind the module does not hold",
+                fixture_module("aws_s3_bucket", {"force_destroy": open_expr("force_destroy")}),
+                {"EXEMPT": exempt, "GATELESS_HELD": {FIXTURE_DIR: ("aws_backup_vault",)}},
+                1, "GATELESS_HELD declares aws_backup_vault, which this module does not hold"))
+    out.append(("an exemption for a module holding nothing protectable",
+                'resource "aws_sns_topic" "this" {\n  name = "x"\n}\n',
+                {"EXEMPT": exempt}, 1, "EXEMPT entry describes nothing"))
+    out.append(("a gateless declaration outside any exemption", vault,
+                {"GATELESS_HELD": {FIXTURE_DIR: ("aws_backup_vault",)}},
+                1, "GATELESS_HELD names a module EXEMPT does not"))
+    out.append(("a gate on a kind the check does not list",
+                fixture_module("aws_iam_user", {"force_destroy": "local.allow_teardown"}),
+                None, 1, "is set on aws_iam_user, which PROTECTABLE does not list"))
+    return out
+
+
+def self_test():
+    failures = []
+    unexpected = set(PROTECTABLE) ^ set(EXPECTED)
+    if unexpected:
+        failures.append(
+            "PROTECTABLE and EXPECTED disagree on " + ", ".join(sorted(unexpected))
+            + ": a kind added to the check needs its cases here, and a kind dropped from it "
+            "is a kind the check stopped seeing")
+    planted = cases()
+    for name, text, patches, want, says in planted:
+        status, output = run_on(text, patches)
+        if status != want or says not in output:
+            failures.append(f"{name}: exit {status}, wanted {want} with \"{says}\"\n"
+                            + "".join(f"      {line}\n" for line in output.splitlines()[-6:]))
+    if len(planted) < 2 * len(EXPECTED):
+        failures.append(f"only {len(planted)} case(s) planted for {len(EXPECTED)} kind(s)")
+    if failures:
+        print("check-teardown-gates.py --self-test FAILED:")
+        for f in failures:
+            print("  - " + f)
+        return 1
+    print(f"check-teardown-gates.py --self-test: {len(planted)} case(s) across "
+          f"{len(EXPECTED)} protectable kind(s) behave as the rules say.")
+    return 0
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--self-test"]:
+        sys.exit(self_test())
+    if sys.argv[1:]:
+        print("usage: check-teardown-gates.py [--self-test]", file=sys.stderr)
+        sys.exit(2)
     sys.exit(main())

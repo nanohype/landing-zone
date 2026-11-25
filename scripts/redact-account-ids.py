@@ -60,7 +60,9 @@ import contextlib
 import io
 import os
 import re
+import subprocess
 import sys
+from unittest import mock
 
 PLACEHOLDER = "<account-id>"
 ACCOUNT_ID = re.compile(r"[0-9]{12}", re.ASCII)
@@ -83,13 +85,8 @@ def redact(text: str, ids: list[str]) -> str:
     return STANDALONE_ACCOUNT_ID.sub(PLACEHOLDER, text)
 
 
-def self_test() -> int:
-    """The behaviour drift.yml relies on, against synthetic ids only.
-
-    Run in CI (the `workflows` job) so a later edit to this file that weakens a
-    pass fails a pull request, and by drift.yml before it redacts, so a broken
-    redactor fails the job before anything is filed.
-    """
+def checks() -> list[str]:
+    """The behaviour drift.yml relies on, against synthetic ids only: each failed case."""
     a, b = "111122223333", "444455556666"
     failures: list[str] = []
 
@@ -125,20 +122,79 @@ def self_test() -> int:
     expect("empty secret", known_ids(""), [])
 
     # Fail closed: with --require-ids, a secret that is unset, empty or holds no
-    # id refuses (exit 2) before reading stdin, so nothing is written.
-    saved = os.environ.pop("DRIFT_PLAN_ROLE_ARNS", None)
-    try:
+    # id refuses (exit 2) before reading stdin, so nothing is written. stdin is an
+    # empty stream here: a refusal that stopped refusing would otherwise read the
+    # caller's stdin and wait on it, and a self-test that hangs reports nothing.
+    # patch.dict hands back the caller's environment, secret included, afterwards.
+    with mock.patch.dict(os.environ):
         for label, raw in (("unset", None), ("empty", ""), ("no id", '{"workload-staging":"not-an-arn"}')):
+            os.environ.pop("DRIFT_PLAN_ROLE_ARNS", None)
             if raw is not None:
                 os.environ["DRIFT_PLAN_ROLE_ARNS"] = raw
-            with contextlib.redirect_stderr(io.StringIO()):
+            written = io.StringIO()
+            empty = io.TextIOWrapper(io.BytesIO(b""))
+            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(written), \
+                    mock.patch.object(sys, "stdin", empty):
                 code = main(["--require-ids"])
-            expect(f"--require-ids refuses a secret that is {label}", code, 2)
-    finally:
-        os.environ.pop("DRIFT_PLAN_ROLE_ARNS", None)
-        if saved is not None:
-            os.environ["DRIFT_PLAN_ROLE_ARNS"] = saved
+            expect(f"--require-ids refuses a secret that is {label}, writing nothing",
+                   (code, written.getvalue()), (2, ""))
 
+    # The path drift.yml publishes from: this script run as a process, the plan on
+    # stdin, the issue text on stdout. The cases above call redact() directly, so
+    # they would all still pass with this path writing its input back untouched;
+    # these run it the way drift.yml does and read what it writes.
+    def run(args: list[str], stdin: bytes, role_map: str | None) -> subprocess.CompletedProcess[bytes]:
+        env = {k: v for k, v in os.environ.items() if k != "DRIFT_PLAN_ROLE_ARNS"}
+        if role_map is not None:
+            env["DRIFT_PLAN_ROLE_ARNS"] = role_map
+        return subprocess.run([sys.executable, os.path.abspath(__file__), *args],
+                              input=stdin, env=env, capture_output=True, check=False)
+
+    plan = f"bucket {a}-us-east-1-tfstate\nrole arn:aws:iam::{b}:role/x\nrun 9{a}9 and 999988887777\n"
+    done = run(["--require-ids"], plan.encode(), role_map)
+    expect("--require-ids writes the redacted plan and exits 0", (done.returncode, done.stdout.decode()), (0, (
+        f"bucket {PLACEHOLDER}-us-east-1-tfstate\nrole arn:aws:iam::{PLACEHOLDER}:role/x\n"
+        f"run 9{PLACEHOLDER}9 and {PLACEHOLDER}\n")))
+    done = run([], plan.encode(), None)
+    expect("with no secret, the pattern pass still runs on stdin", (done.returncode, done.stdout.decode()), (0, (
+        f"bucket {PLACEHOLDER}-us-east-1-tfstate\nrole arn:aws:iam::{PLACEHOLDER}:role/x\n"
+        f"run 9{a}9 and {PLACEHOLDER}\n")))
+    # Plan output is not guaranteed UTF-8; a byte that is not must not stop the
+    # ids beside it being replaced.
+    done = run(["--require-ids"], b"\xff " + a.encode() + b"\n", role_map)
+    expect("bytes that are not UTF-8 are replaced and the id still redacted",
+           (done.returncode, done.stdout.decode()), (0, f"\ufffd {PLACEHOLDER}\n"))
+    done = run(["--require-ids"], plan.encode(), "")
+    expect("--require-ids with an empty secret writes nothing", (done.returncode, done.stdout), (2, b""))
+    done = run(["--no-such-flag"], plan.encode(), role_map)
+    expect("an unknown argument writes nothing and exits 2", (done.returncode, done.stdout), (2, b""))
+
+    return failures
+
+
+def meta_checks() -> list[str]:
+    """The self-test's own failure path, made to happen once.
+
+    A redactor that hands its input back must be reported by the cases, and the
+    self-test must then exit 1 and say so. The verdict is one expression rather
+    than an if, so the line that reports it runs whichever way it goes.
+    """
+    err = io.StringIO()
+    with mock.patch.object(sys.modules[__name__], "redact", lambda text, ids: text), \
+            contextlib.redirect_stderr(err):
+        status = self_test(meta=False)
+    return ["a redactor that returns its input unchanged is not reported as a failure"] * (
+        status != 1 or "self-test FAILED" not in err.getvalue())
+
+
+def self_test(meta: bool = True) -> int:
+    """Run the cases, and with meta, the self-test's own failure paths.
+
+    Run in CI (the `workflows` job) so a later edit to this file that weakens a
+    pass fails a pull request, and by drift.yml before it redacts, so a broken
+    redactor fails the job before anything is filed.
+    """
+    failures = checks() + (meta_checks() if meta else [])
     for line in failures:
         print(f"redact-account-ids self-test FAILED: {line}", file=sys.stderr)
     if failures:

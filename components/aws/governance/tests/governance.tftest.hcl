@@ -25,6 +25,20 @@ mock_provider "aws" {
       arn = "arn:aws:iam::123456789012:role/mock-role"
     }
   }
+  # The tenant-module run below plans the whole ledger. The mock's random default
+  # is not an ARN, and the event archive validates its source's ARN at plan.
+  mock_resource "aws_cloudwatch_event_bus" {
+    defaults = {
+      arn = "arn:aws:events:us-east-1:123456789012:event-bus/mock"
+    }
+  }
+  # The s3-bucket module validates the JSON of the policy documents it merges;
+  # the mock's placeholder is not JSON. No assertion here reads a bucket policy.
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
 }
 
 variables {
@@ -84,4 +98,76 @@ run "rejects_tenant_key_that_overflows_bucket_budget" {
   }
 
   expect_failures = [var.tenants]
+}
+
+# ── the per-tenant audit ledger ──────────────────────────────────────────────
+#
+# The audit bucket, the audit and cost tables and the audit-writer role are the
+# record a tenant's model use is reconstructed from, so what may write to them,
+# and what protects them, is the contract. These runs test the tenant module
+# directly, which is where those resources live.
+#
+# The writer's grant is compared as a whole action set: a Delete*, Update* or
+# Get* verb, or any other addition, fails it. The set holds
+# dynamodb:BatchWriteItem, which carries DeleteRequest as well as PutRequest, so
+# the IAM layer alone does not make the tables append-only. This run pins the
+# grant as it is; narrowing it belongs to the tenant-isolation work (lzg-2).
+run "audit_ledger_is_written_by_a_narrow_role_and_protected_outside_development" {
+  command = plan
+
+  module {
+    source = "./modules/tenant"
+  }
+
+  variables {
+    environment           = "staging"
+    region                = "us-east-1"
+    account_id            = "123456789012"
+    tenant_id             = "acme"
+    cluster_name          = "staging-platform"
+    force_destroy_buckets = false
+    tenant_config         = {}
+    tags                  = {}
+  }
+
+  assert {
+    condition = toset(flatten([
+      for s in jsondecode(module.audit_writer_irsa.role_policy_json).Statement : s.Action
+      ])) == toset([
+      "s3:PutObject",
+      "kms:GenerateDataKey", "kms:Encrypt",
+      "dynamodb:PutItem", "dynamodb:BatchWriteItem",
+      "cloudwatch:PutMetricData", "logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents",
+      "events:PutEvents",
+    ])
+    error_message = "the audit writer's grant must be exactly the write verbs it needs: no delete, update or read on the ledger"
+  }
+
+  # Each ledger grant names only its own ledger resource.
+  assert {
+    condition = alltrue([
+      for s in jsondecode(module.audit_writer_irsa.role_policy_json).Statement : (
+        contains(s.Action, "s3:PutObject") ? s.Resource == ["${module.audit_bucket.s3_bucket_arn}/*"] :
+        contains(s.Action, "kms:Encrypt") ? s.Resource == [aws_kms_key.audit.arn] :
+        contains(s.Action, "dynamodb:PutItem") ? s.Resource == [aws_dynamodb_table.audit.arn, aws_dynamodb_table.cost.arn] :
+        true
+      )
+    ])
+    error_message = "the audit writer may put objects only in the audit bucket, encrypt only with the audit key, and write only the audit and cost tables"
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.audit.deletion_protection_enabled == true && aws_dynamodb_table.cost.deletion_protection_enabled == true
+    error_message = "outside development, with no teardown lever, the audit and cost tables must refuse deletion"
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.audit.point_in_time_recovery[0].enabled == true && aws_dynamodb_table.cost.point_in_time_recovery[0].enabled == true
+    error_message = "the audit and cost tables must keep point-in-time recovery by default"
+  }
+
+  assert {
+    condition     = aws_kms_key.audit.enable_key_rotation == true && aws_kms_key.audit.deletion_window_in_days == 30
+    error_message = "the audit key must rotate and keep the 30-day deletion window"
+  }
 }

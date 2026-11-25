@@ -67,5 +67,8 @@ granted on the `cluster-stack` side.
 ## Tenants repo
 
 Setting `tenants_repo_url` requires `GITHUB_TOKEN` in the provider pod's environment
-(the component registers a deploy key on that repo). Left empty (the default), the
-github provider is declared but never called, so no token is needed.
+(the component registers a deploy key on that repo). Left empty (the default), no
+github resources are created and no token is needed. The github provider is still
+configured on every run, so if the provider pod does hold a token (`GITHUB_TOKEN`, or
+a GitHub CLI login), configuring it looks up that token's user and organisation on
+api.github.com, and a failed lookup fails the run.
