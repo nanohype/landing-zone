@@ -22,11 +22,12 @@ tasks:
       - tofu fmt -recursive fleet/
 
   fmt:check:
-    desc: Check formatting without modifying files
+    desc: Check formatting without modifying files (tofu fmt and terragrunt hcl format, as CI does)
     cmds:
       - tofu fmt -check -recursive components/
       - tofu fmt -check -recursive modules/
       - tofu fmt -check -recursive fleet/
+      - terragrunt hcl format --check --diff
 
   validate:
     desc: Validate every component, fleet vend root, and shared module
@@ -111,13 +112,14 @@ tasks:
         echo "All $found gate(s) and $tests self-test(s) passed."
 
   check:
-    desc: The full pre-push sequence — formatting, validation, lint, unit tests, and every gate
+    desc: The full pre-push sequence — formatting, validation, lint, unit tests, every gate, and the credential-less render of every leaf
     cmds:
       - task: fmt:check
       - task: validate
       - task: lint
       - task: test
       - task: gates
+      - task: evaluate
 
   test:
     desc: Run the tofu test unit suites (security-contract tests) across modules, components, and fleet vend roots
