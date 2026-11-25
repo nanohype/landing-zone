@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""No shell script or workflow step makes a network call that can hang forever.
+"""No shell script, workflow step or task makes a network call that can hang forever.
 
 WHY THIS EXISTS
 
@@ -13,7 +13,7 @@ habit:
 
   kubectl        unbounded by default. This is the one that bites.
   curl           unbounded by default without --max-time.
-  git            unbounded; no deadline flag, so it needs an external `timeout`.
+  git            unbounded; no deadline flag, so it needs an external deadline.
   go build       unbounded on a module fetch; same.
   tofu init      downloads providers and modules, with no deadline flag; same.
   tflint --init  downloads the ruleset through an HTTP client with no timeout,
@@ -26,21 +26,31 @@ reads as a job timeout rather than as the call that stopped.
 
 WHAT IT CHECKS
 
-Every invocation of an unbounded-by-default tool, in a tracked shell script or in
-the `run:` of a workflow step, is bounded by one of four mechanisms: an explicit
-deadline flag on the call, an external `timeout` prefix, a shell function of the
-same name that injects one (the wrapper pattern — which is preferred, because it
-makes a call that forgets impossible rather than merely detectable), or, in a
+Every invocation of an unbounded-by-default tool, in a tracked shell script, in
+the `run:` of a workflow step or in a Taskfile task, is bounded by one of these:
+an explicit deadline flag on the call; an external deadline in front of it, either
+scripts/deadline.py or, in a workflow, GNU `timeout`; a shell function of the
+same name that injects a flag (the wrapper pattern, which is preferred because it
+makes a call that forgets impossible rather than merely detectable); or, in a
 workflow, a `timeout-minutes` on the step that makes the call.
+
+The shell scripts and the Taskfile run on contributors' Macs as well as on Linux,
+and macOS ships no `timeout`. There a call behind GNU `timeout` fails before it
+starts, and behind `|| true` it fails silently. So in those files, a `timeout` in
+front of a network call is reported, and scripts/deadline.py, which takes the
+same arguments, is the deadline. Workflows run on Linux runners, where `timeout`
+is part of the system.
 
 The wrapper is what a per-call check cannot see on its own, so it is looked for
 first: a script defining `kubectl() { ... --request-timeout ... }` has bounded
 every kubectl call in it, including the ones written after the wrapper.
 
-A call is found where a command starts: at the start of a line or after `|`,
-`;`, `&`, `(`, a backtick or `$(`, past any variable assignments and any `env`,
-`command`, `exec` or `timeout` in front of the tool. A tool run through another
-program (`xargs`, `sudo`, `nice`) is not found. A line ending in a backslash
+A call is found where a command starts: at the start of a line, after `|`, `;`,
+`&`, `(`, a backtick or `$(`, and after the shell words `if`, `then`, `else`,
+`elif`, `do`, `while`, `until`, `time`, `!` and `{`. It is found past any
+variable assignments and any `env`, `command`, `exec`, `timeout` or deadline.py
+in front of the tool. A tool run through another program (`xargs`, `sudo`,
+`nice`) is not found. A line ending in a backslash
 continues onto the next, so a deadline flag on a continuation line counts. The
 call runs to the end of its command (the first `|`, `;`, `&`, `)` or backtick
 outside quotes), so a deadline flag on another command does not bound it. Only
@@ -48,9 +58,10 @@ the calls that reach the network are held to a deadline: git and helm calls
 other than the local subcommands named in LOCAL, and go, tofu and tflint calls
 on the subcommands named in NETWORK.
 
-Workflows are read with a YAML parser, because a step's `run:` and its
-`timeout-minutes` are related only through the structure. A workflow the parser
-cannot read fails the check rather than passing unread.
+Workflows and the Taskfile are read with a YAML parser, because a step's `run:`
+and its `timeout-minutes` are related only through the structure, and a task's
+commands are strings inside it. A file the parser cannot read fails the check
+rather than passing unread.
 
 VIEW
 
@@ -59,11 +70,12 @@ about deadlines must not satisfy a check about deadlines — which is the exact
 shape this gate is here to prevent, since the comment claiming every call was
 bounded is what made the gap invisible.
 
-`--self-test` runs the rules over planted scripts, workflows and repositories,
-each with the exit status and the message it must produce.
+`--self-test` runs the rules over planted scripts, workflows, Taskfiles and
+repositories, each with the exit status and the message it must produce.
 
-Exit 0 = every call is bounded. Exit 1 = an unbounded call, an unreadable
-workflow, or nothing read. Exit 2 = usage.
+Exit 0 = every call is bounded. Exit 1 = an unbounded call, GNU `timeout` in a
+file that runs on macOS, an unreadable workflow or Taskfile, or nothing read.
+Exit 2 = usage.
 """
 
 from __future__ import annotations
@@ -136,17 +148,29 @@ NETWORK = {
     "tofu": {("init",)},
 }
 
-# Variable assignments and the prefixes that run the next word as the command.
-# `timeout` is among them so that a bounded call is still FOUND, then counted as
-# bounded, rather than passed over as if it were not a call.
+# The two external deadlines, with their options and DURATION: GNU `timeout`, and
+# scripts/deadline.py, which takes the same arguments and runs where Python does.
+OPTIONS = r"(?:\s+-{1,2}[A-Za-z-]+(?:[= ]\S+)?)*\s+[0-9.]+[smhd]?"
+TIMEOUT = r"timeout" + OPTIONS
+DEADLINE = r"(?:python3?\s+)?\S*deadline\.py[\"']?" + OPTIONS
+
+# Variable assignments and the words that run the next word as the command. The
+# deadlines are among them so that a bounded call is still FOUND, then counted
+# as bounded, rather than passed over as if it were not a call.
 PREFIX = (
     r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|env|command|exec"
-    r"|timeout(?:\s+-{1,2}[A-Za-z-]+(?:[= ]\S+)?)*\s+[0-9.]+[smhd]?)\s+)*"
+    r"|(?P<timeout>" + TIMEOUT + r")|(?P<deadline>" + DEADLINE + r"))\s+)*"
 )
+# The shell words after which a command starts: `if kubectl ...`, `then git push`,
+# `while curl ...; do`, `! git fetch`, `{ curl ...; }`.
+RESERVED = r"(?:(?:if|then|else|elif|do|while|until|time|!|\{)\s+)*"
 CALL = re.compile(
-    r"(?:^|[|;&(`]|\$\()\s*(?P<prefix>" + PREFIX + r")"
+    r"(?:^|[|;&(`]|\$\()\s*" + RESERVED + r"(?P<prefix>" + PREFIX + r")"
     r"(?P<tool>" + "|".join(UNBOUNDED) + r")(?=\s|$)"
 )
+
+NO_DEADLINE = "no deadline"
+MACOS = "GNU timeout, which macOS does not ship"
 
 
 def blank_comment_bodies(text: str) -> str:
@@ -253,12 +277,15 @@ def reaches_network(tool: str, words: list[str]) -> bool:
     return True
 
 
-def unbounded_calls(code: str, step_bounded: bool = False) -> tuple[int, list[tuple[int, str]]]:
-    """(network calls checked, [(line, text)] of the unbounded ones) in one script.
+def unbounded_calls(code: str, step_bounded: bool = False,
+                    portable: bool = True) -> tuple[int, list[tuple[int, str, str]]]:
+    """(network calls checked, [(line, text, why)] of the ones to report) in a script.
 
     `code` has its comment bodies blanked. `step_bounded` is True for a workflow
-    step whose `timeout-minutes` bounds every call it makes. A tool behind a
-    wrapper function is bounded by construction and not counted.
+    step whose `timeout-minutes` bounds every call it makes. `portable` is True for
+    a file that runs on macOS as well as Linux, where a GNU `timeout` in front of
+    a call is reported whatever else bounds it. A tool behind a wrapper function
+    is bounded by construction and not counted.
     """
     wrapped = {
         tool
@@ -266,18 +293,24 @@ def unbounded_calls(code: str, step_bounded: bool = False) -> tuple[int, list[tu
         if flag and re.search(rf"^{tool}\(\)\s*\{{[^}}]*{re.escape(flag)}", code, re.M)
     }
     checked = 0
-    found: list[tuple[int, str]] = []
+    found: list[tuple[int, str, str]] = []
     for n, line in logical_lines(code):
         for m in CALL.finditer(line):
             tool = m.group("tool")
             call = call_text(line, m.start("tool"))
-            if tool in wrapped or not reaches_network(tool, call.split()):
+            if not reaches_network(tool, call.split()):
+                continue
+            if portable and m.group("timeout"):
+                found.append((n, line.strip(), MACOS))
+                continue
+            if tool in wrapped:
                 continue
             checked += 1
             flag = UNBOUNDED[tool]
-            if step_bounded or "timeout" in m.group("prefix").split() or (flag and flag in call):
+            if (step_bounded or m.group("timeout") or m.group("deadline")
+                    or (flag and flag in call)):
                 continue
-            found.append((n, line.strip()))
+            found.append((n, line.strip(), NO_DEADLINE))
     return checked, found
 
 
@@ -306,6 +339,36 @@ def workflow_steps(text: str) -> list[tuple[int, str, bool, bool]]:
             if isinstance(run, yaml.ScalarNode):
                 out.append((run.start_mark.line + 1, run.value, run.style == "|",
                             _get(step, "timeout-minutes") is not None))
+    return out
+
+
+def taskfile_commands(text: str) -> list[tuple[int, str, bool]]:
+    """(line the command starts on, command, literal block) per command a task runs.
+
+    Raises yaml.YAMLError for a file the parser cannot read. A task's commands are
+    the task itself when it is a string or a list of strings, or else its `cmd`
+    and its `cmds`, where an entry is a string or a mapping whose `cmd` or
+    `defer` is one. An entry that names another task (`task:`) runs no command of
+    its own: that task's commands are read where it is defined.
+    """
+    out: list[tuple[int, str, bool]] = []
+
+    def add(node: yaml.Node | None) -> None:
+        if isinstance(node, yaml.ScalarNode):
+            out.append((node.start_mark.line + 1, node.value, node.style == "|"))
+
+    tasks = _get(yaml.compose(text), "tasks")
+    for _, task in tasks.value if isinstance(tasks, yaml.MappingNode) else []:
+        entries = task.value if isinstance(task, yaml.SequenceNode) else []
+        if isinstance(task, yaml.MappingNode):
+            add(_get(task, "cmd"))
+            cmds = _get(task, "cmds")
+            entries = cmds.value if isinstance(cmds, yaml.SequenceNode) else []
+        add(task)
+        for entry in entries:
+            add(entry)
+            add(_get(entry, "cmd"))
+            add(_get(entry, "defer"))
     return out
 
 
@@ -352,14 +415,30 @@ def main(root: Path = ROOT, min_scripts: int = MIN_SCRIPTS) -> int:
         )
         return 1
 
-    unbounded: list[str] = []
+    taskfiles = tracked(root, "Taskfile.yaml", "Taskfile.yml")
+    if not taskfiles:
+        print(
+            "FAIL: no Taskfile.yaml found. The scan could not see the tasks contributors "
+            "run; refusing to report a pass.",
+            file=sys.stderr,
+        )
+        return 1
+
+    reported: dict[str, list[str]] = {NO_DEADLINE: [], MACOS: []}
     unreadable: list[str] = []
     checked = 0
+
+    def report(rel: str, first: int, literal: bool,
+               found: list[tuple[int, str, str]]) -> None:
+        # A literal block's first line follows the line its key is on; any other
+        # scalar is reported at the line it starts on.
+        for n, text, why in found:
+            reported[why].append(f"  {rel}:{first + n if literal else first}: {text[:100]}")
 
     for rel in scripts:
         n_checked, found = unbounded_calls(blank_comment_bodies((root / rel).read_text()))
         checked += n_checked
-        unbounded += [f"  {rel}:{n}: {text[:100]}" for n, text in found]
+        report(rel, 0, True, found)
 
     steps = 0
     for rel in workflows:
@@ -370,16 +449,29 @@ def main(root: Path = ROOT, min_scripts: int = MIN_SCRIPTS) -> int:
             continue
         for line, script, literal, step_bounded in parsed:
             steps += 1
-            n_checked, found = unbounded_calls(blank_comment_bodies(script), step_bounded)
+            # Workflows run on Linux runners, where GNU timeout is a deadline.
+            n_checked, found = unbounded_calls(blank_comment_bodies(script), step_bounded,
+                                               portable=False)
             checked += n_checked
-            # A literal block's first line follows the line its `run:` is on.
-            unbounded += [f"  {rel}:{line + n if literal else line}: {text[:100]}"
-                          for n, text in found]
+            report(rel, line, literal, found)
+
+    commands = 0
+    for rel in taskfiles:
+        try:
+            parsed_tasks = taskfile_commands((root / rel).read_text())
+        except yaml.YAMLError as e:
+            unreadable.append(f"  {rel}: {str(e).splitlines()[0]}")
+            continue
+        for line, command, literal in parsed_tasks:
+            commands += 1
+            n_checked, found = unbounded_calls(blank_comment_bodies(command))
+            checked += n_checked
+            report(rel, line, literal, found)
 
     if unreadable:
-        print("Workflow(s) the YAML parser could not read:\n", file=sys.stderr)
+        print("File(s) the YAML parser could not read:\n", file=sys.stderr)
         print("\n".join(unreadable), file=sys.stderr)
-        print("\nAn unread workflow is unchecked, so this refuses to report a pass.",
+        print("\nAn unread file is unchecked, so this refuses to report a pass.",
               file=sys.stderr)
         return 1
     if not steps:
@@ -389,23 +481,43 @@ def main(root: Path = ROOT, min_scripts: int = MIN_SCRIPTS) -> int:
             file=sys.stderr,
         )
         return 1
-    if unbounded:
-        print("Network call(s) with no deadline:\n", file=sys.stderr)
-        print("\n".join(unbounded), file=sys.stderr)
+    if not commands:
         print(
-            "\n`|| true` handles a failure and does nothing about a hang. Bound the "
-            "call with its own deadline flag, prefix it with `timeout`, define a "
-            "wrapper function for the tool, or, in a workflow, give the step a "
-            "`timeout-minutes`. The wrapper is best, because it makes a call that "
-            "forgets impossible rather than merely detectable.",
+            f"FAIL: read {', '.join(taskfiles)} and found no task that runs a command. "
+            f"The scan saw nothing to check there; refusing to report a pass.",
             file=sys.stderr,
         )
         return 1
+    if reported[NO_DEADLINE]:
+        print("Network call(s) with no deadline:\n", file=sys.stderr)
+        print("\n".join(reported[NO_DEADLINE]) + "\n", file=sys.stderr)
+        print(
+            "`|| true` handles a failure and does nothing about a hang. Bound the "
+            "call with its own deadline flag, put scripts/deadline.py in front of it "
+            "(or GNU `timeout`, in a workflow), define a wrapper function for the "
+            "tool, or, in a workflow, give the step a `timeout-minutes`. The wrapper "
+            "is best, because it makes a call that forgets impossible rather than "
+            "merely detectable.\n",
+            file=sys.stderr,
+        )
+    if reported[MACOS]:
+        print("Network call(s) behind GNU timeout, in a file that runs on macOS:\n",
+              file=sys.stderr)
+        print("\n".join(reported[MACOS]) + "\n", file=sys.stderr)
+        print(
+            "macOS ships no `timeout`, so there the call fails before it starts, and "
+            "behind `|| true` it fails silently. Use scripts/deadline.py, which takes "
+            "GNU timeout's arguments and exit statuses.",
+            file=sys.stderr,
+        )
+    if reported[NO_DEADLINE] or reported[MACOS]:
+        return 1
 
     print(
-        f"✓ every network call in a shell script or workflow step is bounded "
-        f"({checked} unwrapped call(s) checked across {len(scripts)} script(s) and "
-        f"{steps} workflow step(s); wrapped tools are bounded by construction)"
+        f"✓ every network call in a shell script, workflow step or task is bounded "
+        f"({checked} unwrapped call(s) checked across {len(scripts)} script(s), "
+        f"{steps} workflow step(s) and {commands} task command(s); wrapped tools are "
+        f"bounded by construction)"
     )
     return 0
 
@@ -414,6 +526,7 @@ def main(root: Path = ROOT, min_scripts: int = MIN_SCRIPTS) -> int:
 
 PROBE = "scripts/probe.sh"
 PROBE_WORKFLOW = ".github/workflows/probe.yml"
+PROBE_TASKFILE = "Taskfile.yaml"
 QUIET_SCRIPT = "#!/usr/bin/env bash\necho ok\n"
 
 
@@ -441,13 +554,23 @@ def steps(*lines: str) -> dict[str, str]:
     return {PROBE_WORKFLOW: workflow(*lines)}
 
 
-def run_on(files: dict[str, str], min_scripts: int = 1) -> tuple[int, str]:
+def taskfile(*entries: str) -> dict[str, str]:
+    """A Taskfile whose one task's `cmds` are `entries`, the first of them on line 5."""
+    return {PROBE_TASKFILE: 'version: "3"\ntasks:\n  probe:\n    cmds:\n' + "".join(entries)}
+
+
+QUIET_TASKFILE = taskfile("      - echo ok\n")[PROBE_TASKFILE]
+
+
+def run_on(files: dict[str, str | None], min_scripts: int = 1) -> tuple[int, str]:
     """(exit status, output) of main() over a repository holding `files`.
 
-    The repository holds a README, a quiet script and a quiet workflow unless
-    `files` replaces them; a path mapped to None is left out.
+    The repository holds a README, a quiet script, a quiet workflow and a quiet
+    Taskfile unless `files` replaces them; a path mapped to None is left out.
     """
-    tree = {"README.md": "probe\n", PROBE: QUIET_SCRIPT, PROBE_WORKFLOW: QUIET_WORKFLOW}
+    tree: dict[str, str | None] = {"README.md": "probe\n", PROBE: QUIET_SCRIPT,
+                                   PROBE_WORKFLOW: QUIET_WORKFLOW,
+                                   PROBE_TASKFILE: QUIET_TASKFILE}
     tree.update(files)
     with tempfile.TemporaryDirectory(prefix="deadlines-self-test-") as tmp:
         root = Path(tmp)
@@ -484,8 +607,19 @@ def cases() -> list[tuple[str, dict, int, str, int]]:
          ok, 1),
         ("git push with no timeout", script("git push -q origin HEAD:main"), 1,
          call + "git push", 1),
-        ("git push under timeout", script("timeout 120 git push -q origin HEAD:main"), 0,
+        ("git push under deadline.py",
+         script('python3 "$LZ_DIR/scripts/deadline.py" 120 git push -q origin HEAD:main'), 0,
          "1 unwrapped call(s)", 1),
+        ("GNU timeout in a script that runs on macOS",
+         script("timeout 120 git push -q origin HEAD:main"), 1,
+         f"macOS:\n\n  {call}timeout 120 git push", 1),
+        ("GNU timeout in front of a call its own flag bounds",
+         script("timeout 60 curl --max-time 30 https://example.invalid"), 1,
+         f"macOS:\n\n  {call}timeout 60 curl", 1),
+        ("GNU timeout in front of a wrapped tool",
+         script('kubectl() { command kubectl --request-timeout=10s "$@"; }',
+                "timeout 60 kubectl get pods"), 1,
+         f"macOS:\n\n  {PROBE}:3: timeout 60 kubectl", 1),
         ("git commit after a global flag is local",
          script('git -C "$dir" -c user.name=x commit -q -m probe'), 0, "0 unwrapped call(s)", 1),
         ("a local git call does not excuse the network call beside it",
@@ -499,15 +633,16 @@ def cases() -> list[tuple[str, dict, int, str, int]]:
          0, ok, 1),
         ("go build with no timeout", script("go build -o /tmp/probe ."), 1, call + "go build", 1),
         ("go mod download with no timeout", script("go mod download"), 1, call + "go mod", 1),
-        ("go build under timeout with options", script("timeout -k 5 300 go build ."), 0,
-         "1 unwrapped call(s)", 1),
+        ("go build under deadline.py with options",
+         script("scripts/deadline.py -k 5 -v 300 go build ."), 0, "1 unwrapped call(s)", 1),
         ("go vet reaches no network", script("go vet ./..."), 0, "0 unwrapped call(s)", 1),
         ("tofu init with no timeout", script('(cd "$dir" && tofu init -backend=false)'), 1,
          call + '(cd "$dir" && tofu init', 1),
         ("tofu -chdir init with no timeout", script("tofu -chdir=components/aws/x init"), 1,
          call + "tofu -chdir", 1),
-        ("tofu init under timeout", script("timeout 10m tofu init -backend=false"), 0,
-         "1 unwrapped call(s)", 1),
+        ("tofu init under deadline.py",
+         script('python3 "{{.ROOT_DIR}}/scripts/deadline.py" -v 10m tofu init -backend=false'),
+         0, "1 unwrapped call(s)", 1),
         ("tofu validate reaches no network", script("tofu validate"), 0, "0 unwrapped call(s)", 1),
         ("tflint --init with no timeout", script("tflint --config x.hcl --init"), 1,
          call + "tflint --config", 1),
@@ -536,6 +671,21 @@ def cases() -> list[tuple[str, dict, int, str, int]]:
         ("a $( ) inside the call does not end it",
          script("kubectl get pods -n $(cat ns) --request-timeout=5s"), 0,
          "1 unwrapped call(s)", 1),
+        # A command also starts after the shell's own words.
+        ("a call after if", script("if kubectl get ns; then :; fi"), 1, call + "if kubectl", 1),
+        ("a call after if !", script("if ! git push -q origin HEAD; then :; fi"), 1,
+         call + "if ! git push", 1),
+        ("a call after then, on a line of its own",
+         script("if true; then", "  curl -fsS https://example.invalid", "fi"), 1,
+         f"{PROBE}:3: curl -fsS", 1),
+        ("a call after while", script("while curl -fsS https://example.invalid; do :; done"), 1,
+         call + "while curl", 1),
+        ("a call after do", script("for r in a b; do git fetch -q origin; done"), 1,
+         call + "for r in a b; do git fetch", 1),
+        ("a call inside { }", script("{ curl -fsS https://example.invalid; }"), 1,
+         call + "{ curl", 1),
+        ("a shell word as an argument starts no command", script("echo do git push"), 0,
+         "0 unwrapped call(s)", 1),
         # Workflows: the step's timeout-minutes counts, the job's does not.
         ("a step with only its job's timeout-minutes",
          steps("      - run: tflint --init --config .tflint-aws.hcl\n"), 1,
@@ -554,11 +704,36 @@ def cases() -> list[tuple[str, dict, int, str, int]]:
          steps("      - run: |\n"
                '          curl() { command curl --max-time 30 "$@"; }\n'
                "          curl -fsSL https://example.invalid\n"), 0, "0 unwrapped call(s)", 1),
+        # The Taskfile: a task's commands, wherever the Taskfile puts them.
+        ("a task's tflint --init with no deadline", taskfile("      - tflint --init -c x.hcl\n"),
+         1, f"{PROBE_TASKFILE}:5: tflint --init", 1),
+        ("a task's tflint --init under deadline.py",
+         taskfile("      - python3 scripts/deadline.py -v 5m tflint --init -c x.hcl\n"), 0,
+         "1 unwrapped call(s)", 1),
+        ("GNU timeout in a task", taskfile("      - timeout 5m tflint --init -c x.hcl\n"), 1,
+         f"macOS:\n\n  {PROBE_TASKFILE}:5: timeout 5m tflint", 1),
+        ("a call in a task's literal block reported at its own line",
+         taskfile("      - |\n        set -e\n        tofu init\n"), 1,
+         f"{PROBE_TASKFILE}:7: tofu init", 1),
+        ("a cmd: entry", taskfile("      - cmd: git push -q origin HEAD\n"), 1,
+         f"{PROBE_TASKFILE}:5: git push", 1),
+        ("a defer: entry", taskfile("      - defer: git push -q origin HEAD\n"), 1,
+         f"{PROBE_TASKFILE}:5: git push", 1),
+        ("a task: entry runs no command of its own",
+         taskfile("      - echo ok\n      - task: other\n"), 0, "1 task command(s)", 1),
+        ("a task given as one string",
+         {PROBE_TASKFILE: 'version: "3"\ntasks:\n  probe: tofu init\n'}, 1,
+         f"{PROBE_TASKFILE}:3: tofu init", 1),
+        ("a task given as a list of strings",
+         {PROBE_TASKFILE: 'version: "3"\ntasks:\n  probe:\n    - echo ok\n    - tofu init\n'},
+         1, f"{PROBE_TASKFILE}:5: tofu init", 1),
+        ("a task's own cmd:", {PROBE_TASKFILE: 'version: "3"\ntasks:\n  probe:\n    cmd: tofu init\n'},
+         1, f"{PROBE_TASKFILE}:4: tofu init", 1),
         # Preconditions: each refuses to report a pass over what it could not read.
         ("no shell script tracked", {PROBE: None}, 1, "no shell scripts found", 1),
         ("only the gates are tracked",
-         {"README.md": None, PROBE_WORKFLOW: None, "scripts/README": "probe\n"}, 1,
-         "is under scripts/", 1),
+         {"README.md": None, PROBE_WORKFLOW: None, PROBE_TASKFILE: None,
+          "scripts/README": "probe\n"}, 1, "is under scripts/", 1),
         ("fewer scripts than the floor", {}, 1, "below the 2 floor", 2),
         ("no workflow tracked", {PROBE_WORKFLOW: None}, 1, "no workflow found", 1),
         ("a workflow the parser cannot read", {PROBE_WORKFLOW: "jobs: [\n"}, 1,
@@ -567,6 +742,11 @@ def cases() -> list[tuple[str, dict, int, str, int]]:
          steps("      - uses: actions/checkout@v4\n"), 1, "found no step that runs a script", 1),
         ("a workflow with no jobs", {PROBE_WORKFLOW: "name: probe\non: push\n"}, 1,
          "found no step that runs a script", 1),
+        ("no Taskfile tracked", {PROBE_TASKFILE: None}, 1, "no Taskfile.yaml found", 1),
+        ("a Taskfile the parser cannot read", {PROBE_TASKFILE: "tasks: [\n"}, 1,
+         f"{PROBE_TASKFILE}: while parsing", 1),
+        ("a Taskfile with no command", {PROBE_TASKFILE: 'version: "3"\ntasks: {}\n'}, 1,
+         "found no task that runs a command", 1),
         ("everything bounded", {}, 0, ok, 1),
     ]
 

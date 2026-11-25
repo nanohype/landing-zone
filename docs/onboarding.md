@@ -17,6 +17,7 @@ This repo provisions and manages the platform's AWS infrastructure: networking, 
 | [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) | v2 | `brew install awscli` |
 | [TFLint](https://github.com/terraform-linters/tflint) | latest | `brew install tflint` |
 | TFLint AWS plugin | 0.34.0 | `tflint --init -c .tflint-aws.hcl` |
+| [Python](https://www.python.org/downloads/) | >= 3.11 | `brew install python` |
 
 ## Cloud Access
 

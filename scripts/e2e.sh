@@ -295,7 +295,7 @@ teardown() {
       cd "$WORK/tenants" &&
         git rm -f "tenants/$CLUSTER/$TENANT.yaml" >/dev/null 2>&1 &&
         git -c user.name=e2e -c user.email=e2e@local commit -q -m "e2e: remove $TENANT" &&
-        timeout 120 git push -q origin HEAD:main
+        python3 "$LZ_DIR/scripts/deadline.py" 120 git push -q origin HEAD:main
     ) 2>/dev/null || true
   fi
   kubectl -n argocd delete application "portal-tenants-$CLUSTER" --cascade=foreground --timeout=120s 2>/dev/null || true
@@ -715,7 +715,7 @@ echo "  operator Available (GitOps-installed from the released image)"
 
 # --- 3. tenant via GitOps (commit to tenants repo -> ArgoCD applies) --------
 log "TENANT $TENANT (render charts/tenant -> push -> ArgoCD)"
-timeout 120 git clone -q "$TENANTS_REPO" "$WORK/tenants"
+python3 "$LZ_DIR/scripts/deadline.py" 120 git clone -q "$TENANTS_REPO" "$WORK/tenants"
 mkdir -p "$WORK/tenants/tenants/$CLUSTER"
 helm template "$TENANT" "$EAP_DIR/charts/tenant" \
   --set platform.name="$TENANT" --set platform.tenant="$TENANT" --set platform.persona=eng \
@@ -724,7 +724,7 @@ helm template "$TENANT" "$EAP_DIR/charts/tenant" \
   cd "$WORK/tenants" &&
     git add -A &&
     git -c user.name=e2e -c user.email=e2e@local commit -q -m "e2e: create $TENANT on $CLUSTER" &&
-    timeout 120 git push -q origin HEAD:main
+    python3 "$LZ_DIR/scripts/deadline.py" 120 git push -q origin HEAD:main
 )
 log "WAIT for the Platform CR (ArgoCD git poll + sync + operator reconcile)"
 # Nudge ArgoCD to act on the just-pushed commit now instead of on its ~3m
@@ -789,7 +789,7 @@ ACTUAL_BOUNDARY=$(aws iam get-role --role-name "$RN" --query 'Role.PermissionsBo
 echo "  tenant role $RN: bounded by $EXPECTED_BOUNDARY, model scope in force"
 
 log "VALIDATE cloudgov platform audit"
-(cd "$CLOUDGOV_DIR" && timeout 300 go build -o "$WORK/cloudgov" .)
+(cd "$CLOUDGOV_DIR" && python3 "$LZ_DIR/scripts/deadline.py" 300 go build -o "$WORK/cloudgov" .)
 "$WORK/cloudgov" platform audit --fail-on HIGH || die "cloudgov reported CRITICAL/HIGH findings"
 echo "  cloudgov: no CRITICAL/HIGH findings"
 
