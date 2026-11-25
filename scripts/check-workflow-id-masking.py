@@ -246,7 +246,8 @@ USAGE
                                             mutation the gate accepts, a
                                             rejection at another line or by
                                             another rule, a finding quoting an
-                                            id, a baseline the gate rejects, a
+                                            id in a workflow case or a vendored
+                                            one, a baseline the gate rejects, a
                                             vendored record never examined, an
                                             exception whose read was never seen);
                                             and require each stage made to fail,
@@ -2264,6 +2265,15 @@ def self_refusal_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Out
     ok = why is not None and "quote an account id" in why
     out.append(("refuses: a finding that quotes an account id", None if ok else
                 f"run_case reported {why!r}", []))
+    # The same for a vendored finding: redaction switched off for the vendored cases whose
+    # listed path carries an id, each of which vendored_outcomes must report.
+    carrying = [c for c in VENDORED_CASES if VENDORED_ID_PATH in c[3]]
+    with mock.patch.dict(globals(), {"redact": lambda text: text, "VENDORED_CASES": carrying}):
+        vend = vendored_outcomes(base, scratch / "refusals-vendored", policy)
+    ok = len(vend) == len(carrying) > 0 and all(
+        why is not None and "quote an account id" in why for _, why, _ in vend)
+    out.append(("refuses: a vendored finding that quotes an account id", None if ok else
+                f"vendored_outcomes reported {[why for _, why, _ in vend]}", []))
     # A case accepted without the scan having seen what it is about: a record never
     # examined, an exception's read never seen.
     for name, why, says in (
@@ -2513,7 +2523,7 @@ def self_test(meta: bool = True) -> int:
                 + len(VENDORED_CASES)
                 + 1 + len(POLICY_CASES) + len(VISIBILITY_CASES) + len(GIT_FAILURES)
                 + len(STATUS_CASES)
-                + len(meta_cases(policy.mutations[0])) + 4 + (META_OUTCOMES if meta else 0))
+                + len(meta_cases(policy.mutations[0])) + 5 + (META_OUTCOMES if meta else 0))
     if len(outcomes) < expected:
         emit(f"self-test ran {len(outcomes)} of the {expected} cases it lists; refusing to "
              "report a pass", err=True)
