@@ -180,7 +180,7 @@ def meta_checks() -> list[str]:
     than an if, so the line that reports it runs whichever way it goes.
     """
     err = io.StringIO()
-    with mock.patch.object(sys.modules[__name__], "redact", lambda text, ids: text), \
+    with mock.patch.dict(globals(), {"redact": lambda text, ids: text}), \
             contextlib.redirect_stderr(err):
         status = self_test(meta=False)
     return ["a redactor that returns its input unchanged is not reported as a failure"] * (
