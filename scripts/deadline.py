@@ -262,6 +262,9 @@ def run(argv: list[str]) -> int:
 
 SLEEP = "import time; time.sleep(30)"
 IGNORE_TERM = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
+EXIT_ON_TERM = ("import signal, sys, time; signal.signal(signal.SIGTERM, lambda *a: sys.exit(7)); "
+                "time.sleep(30)")
+STUCK = -1000  # the status outcome() reports for a run it had to stop
 # Starts a grandchild that sleeps, writes its pid where the case says, then sleeps.
 # The grandchild's standard streams are /dev/null: holding the case's output pipe,
 # it would keep the case waiting for end-of-file however early deadline.py exited.
@@ -287,10 +290,18 @@ def cases(tmp: str) -> list[tuple[str, list[str], int, str]]:
          ["5", *py("raise SystemExit(3)")], 3, ""),
         ("a command that succeeds in time exits 0", ["5", *py("pass")], 0, ""),
         ("the deadline fires: 124", ["0.3", *py(SLEEP)], 124, ""),
-        ("a duration takes a unit", ["0.005m", *py(SLEEP)], 124, ""),
+        ("a duration takes a unit: 0.05m lets a half-second command finish",
+         ["0.05m", *py("import time; time.sleep(0.5)")], 0, ""),
+        ("a stopped command is continued, so it still ends at the deadline",
+         ["0.5", *py("import os, signal, time; os.kill(os.getpid(), signal.SIGSTOP); "
+                     "time.sleep(30)")], 124, ""),
         ("0 sets no deadline", ["0", *py("import time; time.sleep(0.5)")], 0, ""),
         ("--preserve-status at the deadline: TERM's 143",
          ["--preserve-status", "0.3", *py(SLEEP)], 128 + signal.SIGTERM, ""),
+        ("a command that exits on TERM at the deadline: still 124",
+         ["0.3", *py(EXIT_ON_TERM)], 124, ""),
+        ("--preserve-status keeps the exit a command makes at the deadline",
+         ["--preserve-status", "0.3", *py(EXIT_ON_TERM)], 7, ""),
         ("-k sends KILL to a command that ignores TERM: 137",
          ["-k", "0.3", "0.3", *py(IGNORE_TERM)], 137, ""),
         ("--kill-after= in its long form", ["--kill-after=0.3", "0.3", *py(IGNORE_TERM)], 137,
@@ -333,10 +344,38 @@ def cases(tmp: str) -> list[tuple[str, list[str], int, str]]:
 
 
 def outcome(args: list[str]) -> tuple[int, str, float]:
+    """(status, output, seconds) of deadline.py run with args. A run that outlasts
+    a minute is stopped, and its status is STUCK."""
     start = time.monotonic()
-    proc = subprocess.run([sys.executable, os.path.abspath(__file__), *args],
-                          capture_output=True, text=True, timeout=60, check=False)
+    try:
+        proc = subprocess.run([sys.executable, os.path.abspath(__file__), *args],
+                              capture_output=True, text=True, timeout=60, check=False)
+    except subprocess.TimeoutExpired:
+        return STUCK, "deadline.py was still running after 60s", time.monotonic() - start
     return proc.returncode, proc.stdout + proc.stderr, time.monotonic() - start
+
+
+def started(pidfile: str) -> int | None:
+    """The pid a planted command wrote, or None if it never ran."""
+    try:
+        with open(pidfile) as f:
+            return int(f.read())
+    except (OSError, ValueError):
+        return None
+
+
+def outlived(pid: int | None) -> bool | None:
+    """Whether pid is still running 3s on (it is then killed), or None for no pid."""
+    if pid is None:
+        return None
+    survived = not gone_within(pid, 3)
+    if survived:
+        os.kill(pid, signal.SIGKILL)
+    return survived
+
+
+def fate(survived: bool | None) -> str:
+    return {None: "never started", True: "survived", False: "gone"}[survived]
 
 
 def alive(pid: int) -> bool:
@@ -360,26 +399,29 @@ def gone_within(pid: int, seconds: float) -> bool:
     return False
 
 
-def group_outcome(tmp: str, foreground: bool) -> tuple[int, bool]:
+def group_outcome(tmp: str, foreground: bool) -> tuple[int, bool | None]:
     """(status, whether the grandchild outlived the deadline) for a command with a child."""
     pidfile = os.path.join(tmp, f"grandchild-{foreground}")
     status, _, _ = outcome([*(["--foreground"] if foreground else []), "1",
                             *py(SPAWN, pidfile)])
-    with open(pidfile) as f:
-        pid = int(f.read())
-    survived = not gone_within(pid, 3)
-    if survived:
-        os.kill(pid, signal.SIGKILL)
-    return status, survived
+    return status, outlived(started(pidfile))
 
 
-def signalled_outcome() -> tuple[int, float]:
-    """(status, seconds) of deadline.py sent TERM while its command runs."""
+def signalled_outcome(tmp: str) -> tuple[int, float, bool | None]:
+    """(status, seconds, whether the command outlived it) of deadline.py sent TERM."""
+    pidfile = os.path.join(tmp, "signalled")
     start = time.monotonic()
-    proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "30", *py(SLEEP)])
+    proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "30",
+                             *py("import os, sys, time; open(sys.argv[1], 'w')"
+                                 ".write(str(os.getpid())); time.sleep(30)", pidfile)])
     time.sleep(1)
     proc.send_signal(signal.SIGTERM)
-    return proc.wait(timeout=30), time.monotonic() - start
+    try:
+        status = proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        status = STUCK
+    return status, time.monotonic() - start, outlived(started(pidfile))
 
 
 def self_test(planted: list[tuple[str, list[str], int, str]] | None = None,
@@ -395,17 +437,18 @@ def self_test(planted: list[tuple[str, list[str], int, str]] | None = None,
                                     f"      {line}\n" for line in output.splitlines()[-4:]))
         if meta:
             status, survived = group_outcome(tmp, foreground=False)
-            if status != EXIT_TIMEDOUT or survived:
+            if status != EXIT_TIMEDOUT or survived is not False:
                 failures.append(f"the deadline reaches the command's children: exit {status}, "
-                                f"grandchild {'survived' if survived else 'gone'}")
+                                f"grandchild {fate(survived)}")
             status, survived = group_outcome(tmp, foreground=True)
-            if status != EXIT_TIMEDOUT or not survived:
+            if status != EXIT_TIMEDOUT or survived is not True:
                 failures.append(f"--foreground signals the command alone: exit {status}, "
-                                f"grandchild {'survived' if survived else 'gone'}")
-            status, seconds = signalled_outcome()
-            if status != -signal.SIGTERM or seconds > FAST:
+                                f"grandchild {fate(survived)}")
+            status, seconds, survived = signalled_outcome(tmp)
+            if status != -signal.SIGTERM or seconds > FAST or survived is not False:
                 failures.append(f"TERM sent to deadline.py reaches its command, and ends "
-                                f"deadline.py with it: exit {status} in {seconds:.1f}s")
+                                f"deadline.py with it: exit {status} in {seconds:.1f}s, "
+                                f"command {fate(survived)}")
             status, output, _ = outcome(["5", *py("import os, signal; "
                                                  "os.kill(os.getpid(), signal.SIGTERM)")])
             if status != -signal.SIGTERM:

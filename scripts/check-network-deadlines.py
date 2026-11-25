@@ -727,8 +727,9 @@ def cases() -> list[tuple[str, dict, int, str, int]]:
         ("a task given as a list of strings",
          {PROBE_TASKFILE: 'version: "3"\ntasks:\n  probe:\n    - echo ok\n    - tofu init\n'},
          1, f"{PROBE_TASKFILE}:5: tofu init", 1),
-        ("a task's own cmd:", {PROBE_TASKFILE: 'version: "3"\ntasks:\n  probe:\n    cmd: tofu init\n'},
-         1, f"{PROBE_TASKFILE}:4: tofu init", 1),
+        ("a task's own cmd:",
+         {PROBE_TASKFILE: 'version: "3"\ntasks:\n  probe:\n    cmd: tofu init\n'}, 1,
+         f"{PROBE_TASKFILE}:4: tofu init", 1),
         # Preconditions: each refuses to report a pass over what it could not read.
         ("no shell script tracked", {PROBE: None}, 1, "no shell scripts found", 1),
         ("only the gates are tracked",
