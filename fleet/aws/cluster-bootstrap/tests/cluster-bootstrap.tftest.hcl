@@ -34,9 +34,10 @@
 #
 # Two things the real plugins would otherwise fetch:
 #   - Planning a helm_release makes the real helm provider read its chart
-#     repository's index (helm.cilium.io, argoproj.github.io), so the suite
-#     needed the network. override_resource on the two releases below plans them
-#     from the given values instead; no assertion reads a chart.
+#     repository's index (helm.cilium.io, argoproj.github.io), so without these
+#     overrides the suite would need the network. override_resource on the two
+#     releases below plans them from the given values instead; no assertion reads
+#     a chart.
 #   - The real github provider is configured inside the module too, and with a
 #     token in the environment (GITHUB_TOKEN, or a GitHub CLI login) configuring
 #     it looks the token's user up on api.github.com (see the component's
