@@ -69,19 +69,28 @@ USAGE
                                        rejected, citing the file and the
                                        mutated line, with no account id (nor
                                        the head or tail of one it planted)
-                                       in any finding
+                                       in any finding; accept each edit the
+                                       rules permit; refuse each shortfall by
+                                       the floor alone; and require each way
+                                       of breaking the self-test to fail it,
+                                       and the gate to stop without PyYAML
+                                       or the masking gate
 
 Exit 0 = clean. Exit 1 = a violation, or a scan that could not see its inputs.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 try:
     import yaml
@@ -99,17 +108,29 @@ WORKFLOWS_REL = ".github/workflows"
 NAME = "DRIFT_PLAN_ROLE_ARNS"
 ALLOWED_TRIGGERS = {"schedule", "workflow_dispatch"}
 
-# The masking gate's YAML loader and expression reader, so both gates read a
-# workflow the same way.
-_spec = importlib.util.spec_from_file_location(
-    "check_workflow_id_masking", HERE / "check-workflow-id-masking.py")
-if _spec is None or _spec.loader is None:
-    print("FAIL: scripts/check-workflow-id-masking.py could not be loaded; this gate "
-          "reads expressions with its tokeniser and refuses to report a pass without it.",
-          file=sys.stderr)
-    sys.exit(1)
-masking = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(masking)
+MASKING_GATE = HERE / "check-workflow-id-masking.py"
+
+
+def load_masking(path: Path):
+    """The masking gate's module, loaded from path; exit 1 if it cannot be.
+
+    This gate reads expressions with that gate's YAML loader and tokeniser, so both
+    gates read a workflow the same way, and it refuses to report a pass without them."""
+    spec = importlib.util.spec_from_file_location("check_workflow_id_masking", path)
+    try:
+        if spec is None or spec.loader is None:
+            raise ImportError(f"no loader reads {path.name}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except (ImportError, OSError, SyntaxError) as e:
+        print(f"FAIL: {path.name} could not be loaded ({type(e).__name__}); this gate reads "
+              "expressions with its tokeniser and refuses to report a pass without it.",
+              file=sys.stderr)
+        sys.exit(1)
+    return module
+
+
+masking = load_masking(MASKING_GATE)
 LDict = masking.LDict
 
 
@@ -415,6 +436,17 @@ MUTATIONS = [
      "on:\n  pull_request_target:\n  schedule:\n", r"^on:$"),
     ("a drift.yml job reads the map on another environment", "drift.yml", DRIFT_SELECT_ENV,
      DRIFT_SELECT_ENV.replace("    environment: drift\n", "    environment: plan\n"), None),
+    ("another workflow names the role map in an expression it cannot read", "ci.yml",
+     CI_PLAN_ENV, CI_PLAN_ENV + "    env:\n      MAP: ${{ secrets.DRIFT_PLAN_ROLE_ARNS ' }}\n",
+     None),
+    # The two below park drift.yml's own trigger block under a key no workflow reads,
+    # so the file still parses with `on:` in the form each case writes.
+    ("drift.yml's triggers written as one string", "drift.yml", DRIFT_ON,
+     "on: pull_request_target\nparked:\n  schedule:\n", r"^on: pull_request_target$"),
+    ("drift.yml's triggers written as a list", "drift.yml", DRIFT_ON,
+     "on: [schedule, pull_request_target]\nparked:\n  schedule:\n", r"^on: \["),
+    ("a dispatch choice input that lists no options", "deploy.yml", DEPLOY_ENV_CHOICE,
+     "      component:", r"^\s+environment: \$\{\{ inputs\.environment \}\}"),
     # The findings below quote workflow text carrying an account id, and must
     # print <account id> in its place (the self-test fails any that does not).
     ("a workflow that does not parse, at a line carrying an account id", "ci.yml",
@@ -435,83 +467,272 @@ MUTATIONS = [
 ]
 
 
-def self_test() -> int:
-    failures = ran = 0
+# Edits the rules permit, each to be accepted with nothing found and the floor met:
+# (name, file, old, new).
+ACCEPTED = [
+    ("a job in another workflow that is not a mapping", "ci.yml", "jobs:\n", "jobs:\n  stray: 1\n"),
+    ("a drift.yml job that is not a mapping", "drift.yml", "jobs:\n", "jobs:\n  stray: 1\n"),
+    # Unreadable, but naming no role map: the masking gate reports it, not this one.
+    ("an expression it cannot read that names no role map", "ci.yml", CI_PLAN_ENV,
+     CI_PLAN_ENV + "    env:\n      OTHER: ${{ github.ref ' }}\n"),
+]
+
+# Edits that leave the scan short of what it checks, each to be refused by the floor
+# with no finding: (name, file, old, new). new None deletes the file.
+FLOORS = [
+    ("the guard job reads the role map from vars alone", "drift.yml",
+     "INHERITED_SECRET: ${{ secrets.DRIFT_PLAN_ROLE_ARNS != '' }}",
+     "INHERITED_SECRET: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}"),
+    ("a drift-environment job reads the role map from vars alone", "drift.yml",
+     "DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}\n          ROLE_MAP_VARIABLE:",
+     "DRIFT_PLAN_ROLE_ARNS: ${{ vars.DRIFT_PLAN_ROLE_ARNS }}\n          ROLE_MAP_VARIABLE:"),
+    ("drift.yml is gone", "drift.yml", None, None),
+]
+
+# The mutations this self-test holds. A self-test over fewer cannot report a pass, so a
+# case is removed only with this number lowered beside it.
+MIN_MUTATIONS = 19
+
+# One self-test case's result: (its name, why it failed or None, lines to show).
+Outcome = tuple[str, "str | None", list]
+
+
+def checked_edit(base: Path, fname: str, old, new):
+    """check() over base with one edit to fname, undone after: (result, text before, text
+    after, None), or (None, None, None, why the edit could not be made). old None writes
+    new as the whole file; new None deletes the file."""
+    target = base / WORKFLOWS_REL / fname
+    text = target.read_text() if target.is_file() else None
+    found = 1 if old is None else (text or "").count(old)
+    if found != 1:
+        return None, None, None, f"anchor {old[:50]!r} found {found} time(s) in {fname}"
+    mutated = new if old is None or new is None else (text or "").replace(old, new)
+    if mutated is None:
+        target.unlink()
+    else:
+        target.write_text(mutated)
+    try:
+        return check(base), text, mutated, None
+    finally:
+        if text is None:
+            target.unlink()
+        else:
+            target.write_text(text)
+
+
+def mutation_outcome(base: Path, case) -> Outcome:
+    """One mutation, rejected at its line with no account id in any finding, or why not."""
+    name, fname, old, new, expect = case
+    res, text, mutated, problem = checked_edit(base, fname, old, new)
+    if problem:
+        return name, problem, []
+    planted = {m.group(1) for m in masking.ID_LITERAL.finditer(mutated)
+               if not masking.placeholder(m.group(1))} \
+        - set(masking.ID_LITERAL.findall(text or ""))
+    leaked = masking.leaked_ids(res.findings, planted)
+    if leaked:
+        # The messages are not shown: the point is that they carry an id.
+        return name, (f"{len(leaked)} finding(s) quote an account id, at {leaked}; a finding "
+                      "is published as an annotation and must say <account id> instead"), []
+    rel = f"{WORKFLOWS_REL}/{fname}"
+    if expect is None:
+        first = mutated.count("\n", 0, mutated.index(new)) + 1
+        old_lines = set((old or "").splitlines())
+        wanted = {first + i for i, ln in enumerate(new.splitlines())
+                  if ln not in old_lines} or {first}
+    else:
+        wanted = {i + 1 for i, ln in enumerate(mutated.splitlines()) if re.search(expect, ln)}
+    cited = {ln for r, ln, _ in res.findings if r == rel}
+    shown = [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings]
+    if not res.findings:
+        return name, "not rejected", []
+    if not cited & wanted:
+        return name, (f"rejected, but cited {sorted(cited) or 'no line'} in {rel}, not the "
+                      f"mutated line(s) {sorted(wanted)}"), shown
+    hit = next(f for f in res.findings if f[0] == rel and f[1] in wanted)
+    return name, None, [f"{hit[0]}:{hit[1]}: {hit[2][:90]}"]
+
+
+def accepted_outcome(base: Path, case) -> Outcome:
+    """One permitted edit, accepted with nothing found and the floor met, or why not."""
+    name, fname, old, new = case
+    res, _, _, problem = checked_edit(base, fname, old, new)
+    label = f"accepted: {name}"
+    if problem:
+        return label, problem, []
+    if res.findings:
+        return label, "rejected", [f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings]
+    return label, floor_message(res), []
+
+
+def floor_outcome(base: Path, case) -> Outcome:
+    """One shortfall, refused by the floor with no finding, or why not."""
+    name, fname, old, new = case
+    res, _, _, problem = checked_edit(base, fname, old, new)
+    label = f"floor: {name}"
+    if problem:
+        return label, problem, []
+    if res.findings:
+        return label, "rejected by a finding, not the floor", [
+            f"{r}:{ln}: {msg[:110]}" for r, ln, msg in res.findings]
+    if not floor_message(res):
+        return label, "the floor passed", []
+    return label, None, []
+
+
+def expect(ok: bool, message: str) -> list[str]:
+    """[message] when a check of the self-test's own failed, else nothing."""
+    return [] if ok else [message]
+
+
+def exit_status(call, *args) -> int | str | None:
+    """The status call(*args) exits with, or None when it returns."""
+    try:
+        call(*args)
+    except SystemExit as e:
+        return e.code
+    return None
+
+
+def rejecting_check(root: Path) -> Result:
+    """A check() that rejects every tree, for a baseline the self-test must refuse."""
+    res = Result()
+    res.findings.append((f"{WORKFLOWS_REL}/ci.yml", 1, "planted"))
+    return res
+
+
+def broken_runs() -> list:
+    """Each way of breaking this self-test, which must then fail: (name, the patch that
+    breaks it, the mutations it runs over, whether it runs the meta stage, words its
+    output must hold)."""
+    literal = MUTATIONS[0]
+    # A finding that quotes workflow text carrying an id: a parse error's would not do,
+    # since parse_error() leaves out the parser's excerpt whether redaction is on or off.
+    quoting = next(m for m in MUTATIONS
+                   if m[0] == "a dispatch choice input offers drift beside an account id")
+    one = [literal]
+    gone = "this text is in no workflow"
+    return [
+        ("a baseline the gate rejects", mock.patch.dict(globals(), {"check": rejecting_check}),
+         one, False, "FAIL [unmutated]: the gate rejects the workflows as they are"),
+        ("a mutation whose anchor is gone", contextlib.nullcontext(),
+         [("gone", "ci.yml", gone, "", None)], False, "found 0 time(s)"),
+        ("a finding that quotes an account id",
+         mock.patch.object(masking, "redact", lambda text: text), [quoting], False,
+         "quote an account id"),
+        ("a mutation the gate accepts", contextlib.nullcontext(),
+         [(literal[0], literal[1], literal[2], literal[2], None)], False, "not rejected"),
+        ("a rejection at another line", contextlib.nullcontext(),
+         [(*literal[:4], r"(?!)")], False, "not the mutated line(s)"),
+        ("a permitted edit the gate rejects",
+         mock.patch.dict(globals(), {"ACCEPTED": [("x", *literal[1:4])]}), one, False,
+         "FAIL [accepted: x]: rejected"),
+        ("a permitted edit whose anchor is gone",
+         mock.patch.dict(globals(), {"ACCEPTED": [("x", "ci.yml", gone, "")]}), one, False,
+         "FAIL [accepted: x]: anchor"),
+        ("a shortfall the floor lets pass",
+         mock.patch.dict(globals(), {"FLOORS": [("x", "ci.yml", CI_PLAN_ENV, CI_PLAN_ENV)]}),
+         one, False, "FAIL [floor: x]: the floor passed"),
+        ("a shortfall refused by a finding instead",
+         mock.patch.dict(globals(), {"FLOORS": [("x", *literal[1:4])]}), one, False,
+         "FAIL [floor: x]: rejected by a finding"),
+        ("a shortfall whose anchor is gone",
+         mock.patch.dict(globals(), {"FLOORS": [("x", "ci.yml", gone, "")]}), one, False,
+         "FAIL [floor: x]: anchor"),
+        ("fewer mutations than it holds", contextlib.nullcontext(), one, False,
+         "refusing to report a pass"),
+        ("a meta stage that reports a problem",
+         mock.patch.dict(globals(), {"meta_problems": lambda: ["planted"]}), one, True,
+         "FAIL [meta]: planted"),
+    ]
+
+
+def meta_problems() -> list[str]:
+    """Why this self-test cannot be trusted, or nothing. Each way of breaking it must fail
+    it saying so; the gate must load the masking gate beside it, and stop with exit 1
+    where it cannot load one or PyYAML; and it must refuse an argument it does not take."""
+    # The reporter itself, checked without it: a failed check must yield its message.
+    problems = ["expect() does not report a failed check"] * (expect(False, "x") != ["x"])
+    for name, patch, mutations, meta, says in broken_runs():
+        printed = io.StringIO()
+        with patch, contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+            code = self_test(mutations, meta=meta)
+        problems += expect(code == 1 and says in printed.getvalue(),
+                           f"a self-test over {name} exited {code}, not 1 saying {says!r}")
+    problems += expect(exit_status(load_masking, MASKING_GATE) is None,
+                       "the masking gate beside this file did not load")
+    with tempfile.TemporaryDirectory(prefix="drift-workflow-load-") as tmp:
+        for name, path in (("a masking gate that is not there", Path(tmp) / MASKING_GATE.name),
+                           ("a masking gate no loader reads", Path(tmp) / "masking.txt")):
+            printed = io.StringIO()
+            with contextlib.redirect_stderr(printed):
+                status = exit_status(load_masking, path)
+            problems += expect(status == 1 and "could not be loaded" in printed.getvalue(),
+                               f"{name}: the gate exited {status}, not 1 saying it could not "
+                               "be loaded")
+    this = str(Path(__file__).resolve())
+    proc = subprocess.run(
+        [sys.executable, "-c", ("import runpy, sys; sys.modules['yaml'] = None; "
+                                f"runpy.run_path({this!r}, run_name='without_yaml')")],
+        capture_output=True, text=True, timeout=60, check=False)
+    problems += expect(proc.returncode == 1 and "PyYAML is not installed" in proc.stderr,
+                       f"without PyYAML the gate exited {proc.returncode}, not 1")
+    proc = subprocess.run([sys.executable, this, "--no-such-flag"], capture_output=True,
+                          text=True, timeout=60, check=False)
+    problems += expect(proc.returncode == 2 and "usage:" in proc.stderr,
+                       f"an argument the gate does not take: exited {proc.returncode}, not 2")
+    return problems
+
+
+def self_test(mutations: list | None = None, meta: bool = True) -> int:
+    """0 when the unmutated workflows are accepted, each mutation is rejected at the line
+    it changes with no account id in any finding, each permitted edit is accepted, each
+    shortfall is refused by the floor alone, and there are at least MIN_MUTATIONS
+    mutations; 1 otherwise. With meta, meta_problems() must also find nothing."""
+    mutations = MUTATIONS if mutations is None else mutations
     with tempfile.TemporaryDirectory(prefix="drift-workflow-") as tmp:
         base = Path(tmp)
         (base / WORKFLOWS_REL).mkdir(parents=True)
         for p in (ROOT / WORKFLOWS_REL).glob("*.y*ml"):
             shutil.copy(p, base / WORKFLOWS_REL / p.name)
         clean = check(base)
-        if clean.findings or floor_message(clean):
+        refused = [f"{rel}:{ln}: {msg[:120]}" for rel, ln, msg in clean.findings] \
+            + [m for m in (floor_message(clean),) if m]
+        if refused:
             print("FAIL [unmutated]: the gate rejects the workflows as they are:",
                   file=sys.stderr)
-            for rel, ln, msg in clean.findings:
-                print(f"  {rel}:{ln}: {msg[:120]}", file=sys.stderr)
-            if floor_message(clean):
-                print(f"  {floor_message(clean)}", file=sys.stderr)
+            for line in refused:
+                print(f"  {line}", file=sys.stderr)
             return 1
-        for name, fname, old, new, expect in MUTATIONS:
-            ran += 1
-            target = base / WORKFLOWS_REL / fname
-            text = target.read_text() if old is not None else None
-            if old is not None and text.count(old) != 1:
-                print(f"FAIL [{name}]: anchor {old[:50]!r} found {text.count(old)} time(s) "
-                      f"in {fname}", file=sys.stderr)
-                failures += 1
-                continue
-            mutated = text.replace(old, new) if old is not None else new
-            target.write_text(mutated)
-            try:
-                res = check(base)
-            finally:
-                if text is None:
-                    target.unlink()
-                else:
-                    target.write_text(text)
-            planted = {m.group(1) for m in masking.ID_LITERAL.finditer(mutated)
-                       if not masking.placeholder(m.group(1))} \
-                - set(masking.ID_LITERAL.findall(text or ""))
-            leaked = masking.leaked_ids(res.findings, planted)
-            if leaked:
-                # The messages are not printed: the point is that they carry an id.
-                print(f"FAIL [{name}]: {len(leaked)} finding(s) quote an account id, at "
-                      f"{leaked}; a finding is published as an annotation and must say "
-                      "<account id> instead", file=sys.stderr)
-                failures += 1
-                continue
-            rel = f"{WORKFLOWS_REL}/{fname}"
-            lines = mutated.splitlines()
-            if expect is None:
-                first = mutated.count("\n", 0, mutated.index(new)) + 1
-                old_lines = set((old or "").splitlines())
-                wanted = {first + i for i, ln in enumerate(new.splitlines())
-                          if ln not in old_lines} or {first}
-            else:
-                wanted = {i + 1 for i, ln in enumerate(lines) if re.search(expect, ln)}
-            cited = {ln for r, ln, _ in res.findings if r == rel}
-            if not res.findings:
-                print(f"FAIL [{name}]: not rejected", file=sys.stderr)
-                failures += 1
-            elif not (cited & wanted):
-                print(f"FAIL [{name}]: rejected, but cited {sorted(cited) or 'no line'} in "
-                      f"{rel}, not the mutated line(s) {sorted(wanted)}", file=sys.stderr)
-                for r, ln, msg in res.findings:
-                    print(f"    {r}:{ln}: {msg[:110]}", file=sys.stderr)
-                failures += 1
-            else:
-                hit = next(f for f in res.findings if f[0] == rel and f[1] in wanted)
-                print(f"ok [{name}]: {hit[0]}:{hit[1]}: {hit[2][:90]}")
-    if failures:
-        print(f"check-drift-workflow self-test FAILED: {failures} of {ran} mutation(s)",
-              file=sys.stderr)
+        outcomes = [mutation_outcome(base, case) for case in mutations] \
+            + [accepted_outcome(base, case) for case in ACCEPTED] \
+            + [floor_outcome(base, case) for case in FLOORS]
+    failed = [o for o in outcomes if o[1]]
+    for name, why, shown in outcomes:
+        if why:
+            print(f"FAIL [{name}]: {why}", file=sys.stderr)
+            for line in shown:
+                print(f"    {line}", file=sys.stderr)
+        else:
+            print(f"ok [{name}]" + (f": {shown[0]}" if shown else ""))
+    problems = meta_problems() if meta else []
+    for problem in problems:
+        print(f"FAIL [meta]: {problem}", file=sys.stderr)
+    if failed or problems:
+        print(f"check-drift-workflow self-test FAILED: {len(failed)} of {len(outcomes)} "
+              f"case(s), and {len(problems)} meta problem(s)", file=sys.stderr)
         return 1
-    if ran < len(MUTATIONS):
-        print("self-test ran fewer mutations than it lists; refusing to report a pass",
-              file=sys.stderr)
+    if len(mutations) < MIN_MUTATIONS:
+        print(f"self-test ran {len(mutations)} mutation(s), fewer than the {MIN_MUTATIONS} it "
+              "holds; refusing to report a pass", file=sys.stderr)
         return 1
-    print(f"check-drift-workflow self-test passed ({ran} mutations rejected at the "
-          "mutated line with no account id in any finding, unmutated workflows accepted).")
+    print(f"check-drift-workflow self-test passed ({len(mutations)} mutations rejected at "
+          "the mutated line with no account id in any finding, "
+          f"{len(ACCEPTED)} permitted edits accepted, {len(FLOORS)} shortfalls refused by "
+          "the floor, unmutated workflows accepted"
+          + ("; the self-test's own failures reported, and the gate stops without PyYAML or "
+             "the masking gate and refuses an argument it does not take" if meta else "")
+          + ").")
     return 0
 
 
