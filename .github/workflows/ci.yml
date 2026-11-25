@@ -1072,6 +1072,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 scripts/check-teardown-gates.py
+      - run: python3 scripts/check-teardown-gates.py --self-test
 
   # A field a tenant can declare that no resource reads is a control an operator can set,
   # sees accepted, and believes is in force — `object_lock_enabled = true` on a production
