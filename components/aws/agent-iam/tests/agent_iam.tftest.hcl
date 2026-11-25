@@ -28,8 +28,8 @@ mock_provider "aws" {
   }
   # The stub described below. It sits on the mock provider rather than in a
   # file-level override_data: OpenTofu 1.13 carries a file-level override_data
-  # into the test files that run after this one, where it replaced the real
-  # trust agent_iam_trust.tftest.hcl asserts.
+  # into the test files that run after this one, where it would replace the
+  # real trust agent_iam_trust.tftest.hcl asserts.
   mock_data "aws_iam_policy_document" {
     defaults = {
       json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
@@ -83,8 +83,10 @@ run "operator_tenant_write_is_boundary_gated" {
 # Every statement that can create a role or change a role's policies carries
 # the boundary condition, not just the two named above: the scheduler-invoke
 # role write is a third, and a fourth added later is held to the same rule.
-# Matching on the actions rather than the Sid means a renamed or new statement
-# cannot slip past.
+# A statement is matched by what its actions grant, not by its Sid or by exact
+# action names: each Action is read as an IAM pattern (case-insensitive, `*` and
+# `?` wildcards), and an Allow with a NotAction grants every write it does not
+# name. So `iam:*`, `iam:Create*` and a NotAction Allow are held to the rule too.
 run "every_role_write_is_boundary_gated" {
   command = plan
 
@@ -92,25 +94,29 @@ run "every_role_write_is_boundary_gated" {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
       try(s.Condition.StringEquals["iam:PermissionsBoundary"], "") == aws_iam_policy.tenant_boundary.arn
-      if length(setintersection(toset(flatten([s.Action])), toset([
-        "iam:CreateRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
-        "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:PutRolePermissionsBoundary",
-        "iam:DeleteRolePermissionsBoundary",
-      ]))) > 0
+      if s.Effect == "Allow" && anytrue([
+        for w in ["iam:createrole", "iam:attachrolepolicy", "iam:detachrolepolicy", "iam:putrolepolicy", "iam:deleterolepolicy", "iam:putrolepermissionsboundary", "iam:deleterolepermissionsboundary"] :
+        try(s.NotAction, null) == null
+        ? anytrue([for p in flatten([s.Action]) : length(regexall("^${replace(replace(lower(p), "?", "."), "*", ".*")}$", w)) > 0])
+        : !anytrue([for p in flatten([s.NotAction]) : length(regexall("^${replace(replace(lower(p), "?", "."), "*", ".*")}$", w)) > 0])
+      ])
     ])
-    error_message = "every operator statement that creates a role or writes its policies must be gated by iam:PermissionsBoundary == the tenant boundary"
+    error_message = "every operator statement that grants a role write (by name, wildcard or NotAction) must be gated by iam:PermissionsBoundary == the tenant boundary"
   }
 
   # The rule above passes vacuously if no statement matches, so pin the three
-  # that exist: tenant, session and scheduler-invoke role writes.
+  # that exist: the statements granting iam:CreateRole, matched the same way,
+  # are exactly the tenant, session and scheduler-invoke role writes.
   assert {
     condition = toset([
-      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement : s.Sid
-      if contains(flatten([s.Action]), "iam:CreateRole")
+      for s in jsondecode(aws_iam_role_policy.operator.policy).Statement : try(s.Sid, "")
+      if s.Effect == "Allow" && (try(s.NotAction, null) == null
+        ? anytrue([for p in flatten([s.Action]) : length(regexall("^${replace(replace(lower(p), "?", "."), "*", ".*")}$", "iam:createrole")) > 0])
+      : !anytrue([for p in flatten([s.NotAction]) : length(regexall("^${replace(replace(lower(p), "?", "."), "*", ".*")}$", "iam:createrole")) > 0]))
       ]) == toset([
       "TenantRoleWriteWithBoundary", "PlatformSessionRoleWriteWithBoundary", "SchedulerInvokeRoleWriteWithBoundary",
     ])
-    error_message = "the operator's iam:CreateRole statements must be exactly the tenant, session and scheduler-invoke role writes"
+    error_message = "the operator statements granting iam:CreateRole must be exactly the tenant, session and scheduler-invoke role writes"
   }
 }
 
@@ -215,15 +221,20 @@ run "operator_role_shape" {
     error_message = "operator tenant-role read must be scoped to exactly the tenant role ARNs, never Resource=\"*\""
   }
 
-  # No statement that carries an IAM action may name Resource "*", whatever its
-  # Sid: every role the operator touches is scoped by path or name pattern.
+  # No statement that grants an IAM action may name Resource "*" or use a
+  # NotResource, whatever its Sid: every role the operator touches is scoped by
+  # path or name pattern. An action grants IAM when it starts with iam: or its
+  # pattern matches one (`*`, `i*`), and a NotAction statement is counted too.
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.operator.policy).Statement :
-      !contains(flatten([s.Resource]), "*")
-      if anytrue([for a in flatten([s.Action]) : startswith(a, "iam:")])
+      !contains(flatten([try(s.Resource, [])]), "*") && try(s.NotResource, null) == null
+      if try(s.NotAction, null) != null || anytrue([
+        for p in flatten([try(s.Action, [])]) :
+        startswith(lower(p), "iam:") || length(regexall("^${replace(replace(lower(p), "?", "."), "*", ".*")}$", "iam:x")) > 0
+      ])
     ])
-    error_message = "no operator statement carrying an iam: action may have Resource \"*\""
+    error_message = "no operator statement granting an iam: action may have Resource \"*\" or a NotResource"
   }
 
   # The SLO reconciler queries Amazon Managed Prometheus to evaluate burn rates.
