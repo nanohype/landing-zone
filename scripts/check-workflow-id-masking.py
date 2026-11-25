@@ -181,9 +181,11 @@ ONE GATE, MANY REPOSITORIES
 
 The canonical copy of this file is nanohype/landing-zone's
 scripts/check-workflow-id-masking.py, beside the mask script it holds the
-workflows to. A repository that runs the gate vendors both, byte for byte, and
-lists both as `vendored`, so each rule holds the same way everywhere and a fix
-lands once. Nothing in this file names a repository's workflows or ids.
+workflows to: scripts/mask-aws-ids.sh, the command every mask step runs, and
+scripts/mask-aws-ids.py, the core that command runs. A repository that runs the
+gate vendors all three, byte for byte, and lists each as `vendored`, so each
+rule holds the same way everywhere and a fix lands once. Nothing in this file
+names a repository's workflows or ids.
 
 A REPOSITORY'S POLICY
 
