@@ -1120,10 +1120,12 @@ jobs:
   # scripts/mask-aws-ids.sh as its first command. Nothing else notices an edit
   # that reads one from `vars.` again, receives it a step early, or prints
   # something ahead of the mask: the run stays green and an id lands in a log.
-  # The gate's self-test mutates the workflows each way it forbids and requires
-  # every mutation rejected at the mutated line; the mask script's self-test
-  # (synthetic ids only) holds what it masks and that it never echoes a value,
-  # and shellcheck reads it, since actionlint only reads inline run: blocks.
+  # The gate reads this repository's policy, scripts/workflow-id-masking.toml.
+  # Its self-test mutates the workflows in each way the policy's cases name and
+  # requires every mutation rejected at the mutated line by the rule it plants;
+  # the mask script's self-test (synthetic ids only) holds what it masks and
+  # that it never echoes a value, and shellcheck reads it, since actionlint only
+  # reads inline run: blocks.
   workflow-id-masking:
     name: Workflows Mask Account Ids
     runs-on: ubuntu-latest
