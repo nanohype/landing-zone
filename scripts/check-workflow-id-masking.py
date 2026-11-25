@@ -1022,9 +1022,9 @@ def vendored_findings(root: Path, policy: Policy) -> tuple[list[Finding], int]:
         return [(VENDORED_REL, 1, redact(f"could not be read as JSON ({e}), so no vendored "
                                          "file can be shown to be the copy it was taken as."))], 0
     if not isinstance(record, dict):
-        return [(VENDORED_REL, 1, "is not a JSON object mapping each vendored path to its "
-                                  "record, so no vendored file can be shown to be the copy it "
-                                  "was taken as.")], 0
+        return [(VENDORED_REL, 1, ("is not a JSON object mapping each vendored path to its "
+                                   "record, so no vendored file can be shown to be the copy it "
+                                   "was taken as."))], 0
     out: list[Finding] = []
     for rel in policy.vendored:
         if rel not in record:
@@ -2132,6 +2132,16 @@ def policy_outcomes(scratch: Path) -> list[Outcome]:
     return out
 
 
+def _outlasting_git(timeouts: list):
+    """subprocess.run for a git that never finishes, recording in timeouts the timeout each
+    call set: it raises as subprocess.run does once that timeout passes, where a call that
+    set none would wait for ever."""
+    def run(args, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(args, kwargs.get("timeout") or 0)
+    return run
+
+
 def visibility_outcomes(scratch: Path) -> list[Outcome]:
     """main_check refuses each tree git does not track as a repository, before scanning it."""
     out: list[Outcome] = []
@@ -2161,14 +2171,7 @@ def visibility_outcomes(scratch: Path) -> list[Outcome]:
             out.append((label, f"the tree could not be built: {e}", []))
             continue
         timeouts: list = []
-
-        def outlasts(args, **kwargs):
-            # A git that never finishes: subprocess.run raises once the call's own
-            # timeout passes, and with none set it would wait for ever.
-            timeouts.append(kwargs.get("timeout"))
-            raise subprocess.TimeoutExpired(args, kwargs.get("timeout") or 0)
-
-        with mock.patch.object(subprocess, "run", side_effect=raised or outlasts):
+        with mock.patch.object(subprocess, "run", side_effect=raised or _outlasting_git(timeouts)):
             code, printed = _main_check_output(root)
         bounded = raised is not None or (bool(timeouts) and None not in timeouts)
         ok = bounded and code == CANNOT_RUN and says in printed \
