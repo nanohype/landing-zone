@@ -1223,7 +1223,7 @@ def guard_self_test() -> int:
         refuses("a gate git does not track", "not tracked by git", run_gate, tree, "check-absent.py")
         (tree / "scripts").mkdir()
         (tree / "scripts" / "check-hangs.py").write_text("import time\ntime.sleep(60)\n")
-        with mock.patch.object(sys.modules[__name__], "GATE_TIMEOUT_SECONDS", 1):
+        with mock.patch.dict(globals(), {"GATE_TIMEOUT_SECONDS": 1}):
             code, said = run_gate(tree, "check-hangs.py")
         if code != TIMEOUT_EXIT or "timed out" not in said:
             failures.append(f"a gate that never finishes: exit {code}, not {TIMEOUT_EXIT}")
@@ -1231,7 +1231,7 @@ def guard_self_test() -> int:
             why = git_unavailable()
         if not why or "could not be executed" not in why:
             failures.append(f"no git to run: reported {why!r}")
-        with mock.patch.object(sys.modules[__name__], "ROOT", tree), \
+        with mock.patch.dict(globals(), {"ROOT": tree}), \
                 mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": tmp}):
             why = git_unavailable()
         if not why or "rev-parse` exited" not in why:

@@ -2213,8 +2213,7 @@ def status_outcomes(scratch: Path, policy: Policy) -> list[Outcome]:
         # A violation and a shortfall both there, the shortfall planted beside it: no edit
         # of a repository's own policy text says which floor its scan falls short of. The
         # violation is the verdict.
-        shortfall = (mock.patch.object(sys.modules[__name__], "floor_problem",
-                                       lambda res, policy: SHORTFALL)
+        shortfall = (mock.patch.dict(globals(), {"floor_problem": lambda res, policy: SHORTFALL})
                      if change == "plant below the floor" else contextlib.nullcontext())
         with shortfall:
             code, printed = _main_check_output(root)
@@ -2265,7 +2264,7 @@ def self_refusal_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Out
                     f"run_case reported {why!r}, not {says!r}", []))
     # A finding that quotes an account id: redaction switched off for a case whose
     # finding names a step called with the id it plants, which run_case must report.
-    with mock.patch.object(sys.modules[__name__], "redact", lambda text: text):
+    with mock.patch.dict(globals(), {"redact": lambda text: text}):
         why, _ = run_case(base, QUOTING, policy)
     ok = why is not None and "quote an account id" in why
     out.append(("refuses: a finding that quotes an account id", None if ok else
@@ -2364,8 +2363,6 @@ def meta_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
     over each must fail: a tree git cannot build, an anchor that is gone, a policy case the
     gate accepts, a smallest policy it refuses, and a policy, baseline, case or count that
     fails."""
-    here = sys.modules[__name__]
-
     def fresh(name: str) -> Path:
         (scratch / "meta" / name).mkdir(parents=True)
         return scratch / "meta" / name
@@ -2381,14 +2378,14 @@ def meta_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
     checks.append(("a permitted edit whose anchor is gone", accepted_outcomes(
         base, dataclasses.replace(policy, accepted=(Accepted("gone", gone.file, GONE, "x"),))),
         "found 0 time(s)"))
-    with mock.patch.object(here, "MIN_POLICY", "["):
+    with mock.patch.dict(globals(), {"MIN_POLICY": "["}):
         checks.append(("a smallest policy the gate refuses",
                        policy_outcomes(fresh("refused-smallest"))[:1], "refused"))
-    with mock.patch.object(here, "POLICY_CASES", [("gone", GONE, "", "x")]):
+    with mock.patch.dict(globals(), {"POLICY_CASES": [("gone", GONE, "", "x")]}):
         checks.append(("a policy case whose anchor is gone",
                        policy_outcomes(fresh("gone-policy"))[1:], "found 0 time(s)"))
-    with mock.patch.object(here, "POLICY_CASES",
-                           [("kept", 'docs = "README.md"', 'docs = "README.md"', "x")]):
+    with mock.patch.dict(globals(), {"POLICY_CASES": [
+            ("kept", 'docs = "README.md"', 'docs = "README.md"', "x")]}):
         checks.append(("a policy case the gate accepts",
                        policy_outcomes(fresh("kept-policy"))[1:], "accepted, not refused"))
     checks.append(("exit statuses whose violation's anchor is gone",
@@ -2440,8 +2437,7 @@ def meta_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
             ("stages that stopped early", passing, 1, "refusing to report a pass")):
         printed = io.StringIO()
         with contextlib.ExitStack() as stack:
-            for attr, value in patches.items():
-                stack.enter_context(mock.patch.object(here, attr, value))
+            stack.enter_context(mock.patch.dict(globals(), patches))
             stack.enter_context(contextlib.redirect_stdout(printed))
             stack.enter_context(contextlib.redirect_stderr(printed))
             code = self_test(meta=False)
