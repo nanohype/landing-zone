@@ -961,6 +961,29 @@ jobs:
       - run: pip install --quiet pyyaml==6.0.3
       - run: python3 scripts/check-gates-detect.py
 
+  # A gate's self-test plants what its checks refuse, and gate-controls proves
+  # each gate refuses one violation; neither says what no run reaches. A line no
+  # run reaches is a check that has never fired, which an edit can delete with
+  # every job green. This runs every gate and every self-test under coverage.py
+  # (gate-controls' runs included, as subprocesses) and holds each Python script
+  # under scripts/ to the line and branch floor scripts/gate-coverage.toml sets.
+  gate-coverage:
+    name: Gates Meet Their Coverage Floor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      # Every gate runs here, as in gate-controls, so this job needs what any
+      # of them needs, and coverage.py to measure them.
+      - run: pip install --quiet pyyaml==6.0.3
+      - run: pip install --quiet coverage==7.17.4
+      - run: python3 scripts/gate-coverage.py
+
   # A Deny whose Condition can never be satisfied is not a guardrail. IAM ANDs every
   # key inside one Condition block, so a Deny with several required-absent Null keys
   # fires only when ALL of them are missing — a resource carrying one and missing
@@ -1379,6 +1402,7 @@ jobs:
         drift-workflow,
         region-consistency,
         gate-controls,
+        gate-coverage,
         workflows,
         version-coverage,
         workflow-budgets,

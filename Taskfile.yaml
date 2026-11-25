@@ -112,14 +112,20 @@ tasks:
         echo "All $found gate(s) and $tests self-test(s) passed."
 
   check:
-    desc: The full pre-push sequence — formatting, validation, lint, unit tests, every gate, and the credential-less render of every leaf
+    desc: The full pre-push sequence — formatting, validation, lint, unit tests, every gate, the gates' coverage floor, and the credential-less render of every leaf
     cmds:
       - task: fmt:check
       - task: validate
       - task: lint
       - task: test
       - task: gates
+      - task: coverage
       - task: evaluate
+
+  coverage:
+    desc: Run every gate and self-test under coverage.py and hold each Python script under scripts/ to its floor (needs coverage.py)
+    cmds:
+      - python3 scripts/gate-coverage.py
 
   test:
     desc: Run the tofu test unit suites (security-contract tests) across modules, components, and fleet vend roots
