@@ -1,0 +1,941 @@
+# This repository's policy for scripts/check-workflow-id-masking.py.
+#
+# The gate is the same file in every repository that runs it (its docstring,
+# ONE GATE, MANY REPOSITORIES). What is particular to this repository is here:
+# where a finding's reader is sent, what is vendored, the floor a scan must
+# meet, where each id lives, and the self-test cases anchored in these
+# workflows.
+#
+# The workflows read these ids, each a secret on the GitHub Environment its job
+# declares:
+#
+#   deploy.yml, destroy.yml  DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID
+#   ci.yml's plan job        AWS_ROLE_ARN, TERRAGRUNT_ACCOUNT_ID
+#   e2e.yml                  E2E_AWS_ROLE_ARN
+#   drift.yml                DRIFT_PLAN_ROLE_ARNS, one plan role per account
+#                            directory, masked whole by
+#                            `mask-aws-ids.sh DRIFT_PLAN_ROLE_ARNS` in each of
+#                            the two jobs that read it
+#
+# scripts/check-drift-workflow.py owns which workflows and jobs may touch the
+# `drift` environment and its role map: only drift.yml, on `schedule` and
+# `workflow_dispatch` only, no other workflow naming the environment literally
+# or through a computed name, and no drift.yml job reading the map under
+# another environment. It reads expressions with the gate's tokeniser, imported,
+# and prints its findings through the gate's redaction. The gate owns how an id
+# is read and masked in every workflow, drift.yml included: the whole read into
+# a step's env, the mask-first rule, the guard job's presence-only form and the
+# in-environment variable guard for DRIFT_PLAN_ROLE_ARNS live there alone. No
+# workflow is exempt.
+
+docs = "docs/operations.md"
+
+# The canonical gate and mask script live in this repository, so nothing here
+# is vendored.
+vendored = []
+
+[floor]
+# What a scan must have seen to report a pass: the five workflows; the six mask
+# steps in deploy, destroy, ci's plan job, e2e, and drift's two jobs that read
+# the role map; and a read of each id above. Fewer means the scan stopped seeing
+# them, or a workflow stopped masking. Lower these only in the change that
+# removes one.
+min_workflows = 5
+min_mask_steps = 6
+known_id_reads = [
+  "AWS_ROLE_ARN",
+  "DEPLOY_ACCOUNT_ID",
+  "DEPLOY_ROLE_ARN",
+  "DRIFT_PLAN_ROLE_ARNS",
+  "E2E_AWS_ROLE_ARN",
+  "TERRAGRUNT_ACCOUNT_ID",
+]
+
+[repository_level_ids]
+# None: every id these workflows read is a secret on its job's environment.
+
+[vars_allowed]
+# None: a job that can hold AWS credentials reads no variable except in the
+# guard form.
+
+# --- self-test cases -----------------------------------------------------------
+#
+# Each [[mutation]] edits a copy of one workflow (`file`, under
+# .github/workflows) in a way the rules forbid, and the gate must reject it at
+# the mutated line by the rule it plants. `old` must occur exactly once in the
+# file and is replaced by `new`; both may be arrays of the same length, each
+# pair applied in turn. `line`, when given, is a regex naming the line of the
+# mutated file the finding must cite; otherwise it is a line `new` adds.
+# `must_say` holds words of the rule the case plants, which a finding at that
+# line must carry, so another rule firing there does not pass the case.
+
+[[mutation]]
+name = "role-to-assume from a variable"
+file = "deploy.yml"
+old = 'role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}'
+new = 'role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}'
+must_say = "It must be `${{ secrets.NAME }}`"
+
+[[mutation]]
+name = "a variable in a later step's env"
+file = "deploy.yml"
+old = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account'''
+new = '''
+          DEPLOY_ACCOUNT_ID: ${{ vars.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account'''
+must_say = "A variable is never masked"
+
+[[mutation]]
+name = "a variable read with index syntax"
+file = "deploy.yml"
+old = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account'''
+new = '''
+          DEPLOY_ACCOUNT_ID: ${{ vars['DEPLOY_ACCOUNT_ID'] }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account'''
+must_say = "A variable is never masked"
+
+[[mutation]]
+name = "a variable read through a mixed-case context name"
+file = "deploy.yml"
+old = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account'''
+new = '''
+          DEPLOY_ACCOUNT_ID: ${{ Vars.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account'''
+must_say = "A variable is never masked"
+
+[[mutation]]
+name = "a variable read through a computed index"
+file = "deploy.yml"
+old = '''
+          aws-region: ${{ inputs.region }}
+          # Already masked by the guard step'''
+new = '''
+          aws-region: ${{ inputs.region }}
+          role-session-name: ${{ vars[format('DEPLOY_{0}', 'ACCOUNT_ID')] }}
+          # Already masked by the guard step'''
+must_say = "a computed index or filter of the `vars` context"
+
+[[mutation]]
+name = "a step receives the secret before the mask step"
+file = "deploy.yml"
+old = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+new = '''
+      - name: Early
+        env:
+          EARLY: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+        run: echo early
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+must_say = "is the first to receive DEPLOY_ACCOUNT_ID"
+
+[[mutation]]
+name = "an early step reads the secret with index syntax"
+file = "deploy.yml"
+old = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+new = '''
+      - name: Early
+        env:
+          EARLY: ${{ secrets['DEPLOY_ROLE_ARN'] }}
+        run: echo "${EARLY#arn:aws:iam::}"
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+must_say = "is the first to receive DEPLOY_ROLE_ARN"
+
+[[mutation]]
+name = "an early step reads the secret through a mixed-case context name"
+file = "deploy.yml"
+old = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+new = '''
+      - name: Early
+        env:
+          EARLY: ${{ Secrets.DEPLOY_ROLE_ARN }}
+        run: echo "${EARLY#arn:aws:iam::}"
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+must_say = "is the first to receive DEPLOY_ROLE_ARN"
+
+# The finding names the step, and the step's name carries an id: every
+# message is redacted, not only the text it quotes.
+[[mutation]]
+name = "an early step named with an account id reads the secret"
+file = "deploy.yml"
+old = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+new = '''
+      - name: Early 222233334444
+        env:
+          EARLY: ${{ secrets.DEPLOY_ROLE_ARN }}
+        run: echo early
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+must_say = "step 'Early <account id>'"
+
+[[mutation]]
+name = "an early step reads every variable at once"
+file = "deploy.yml"
+old = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+new = '''
+      - name: Early
+        env:
+          ALL: ${{ toJSON(vars) }}
+        run: echo early
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+must_say = "the whole `vars` context"
+
+[[mutation]]
+name = "every secret in a job-level env"
+file = "e2e.yml"
+old = '''
+    environment: e2e
+'''
+new = '''
+    environment: e2e
+    env:
+      ALL: ${{ toJSON(secrets) }}
+'''
+must_say = "the whole `secrets` context"
+
+[[mutation]]
+name = "the mask is not the first command"
+file = "destroy.yml"
+old = '''
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID
+'''
+new = '''
+        run: |
+          echo "starting"
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID
+'''
+must_say = "and its first command is"
+
+[[mutation]]
+name = "the mask step is conditional"
+file = "deploy.yml"
+old = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+        env:
+'''
+new = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+        if: github.event_name == 'push'
+        env:
+'''
+must_say = "has an `if:`"
+
+[[mutation]]
+name = "the mask step continues on error"
+file = "deploy.yml"
+old = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+        env:
+'''
+new = '''
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+        continue-on-error: true
+        env:
+'''
+must_say = "sets `continue-on-error`"
+
+[[mutation]]
+name = "the mask step runs under pwsh"
+file = "e2e.yml"
+old = '''
+      - name: Mask and check E2E_AWS_ROLE_ARN
+        id: role
+'''
+new = '''
+      - name: Mask and check E2E_AWS_ROLE_ARN
+        id: role
+        shell: pwsh
+'''
+must_say = "runs under the step shell 'pwsh'"
+
+[[mutation]]
+name = "the job's default shell does not stop on failure"
+file = "e2e.yml"
+old = '''
+    environment: e2e
+'''
+new = '''
+    environment: e2e
+    defaults:
+      run:
+        shell: bash {0}
+'''
+must_say = "runs under the job's `defaults.run` shell"
+
+[[mutation]]
+name = "the mask command carries an argument the script refuses"
+file = "e2e.yml"
+old = '''
+bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional E2E_AWS_ROLE_ARN
+'''
+new = '''
+bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional E2E_AWS_ROLE_ARN --bogus
+'''
+must_say = "and its first command is"
+
+[[mutation]]
+name = "--optional after a name"
+file = "e2e.yml"
+old = '''
+bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional E2E_AWS_ROLE_ARN
+'''
+new = '''
+bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" E2E_AWS_ROLE_ARN --optional
+'''
+must_say = "and its first command is"
+
+[[mutation]]
+name = "a receiving step runs after a failure"
+file = "deploy.yml"
+old = '''
+      - name: Verify the credential is in DEPLOY_ACCOUNT_ID's account
+'''
+new = '''
+      - name: Verify the credential is in DEPLOY_ACCOUNT_ID's account
+        if: always()
+'''
+must_say = "runs after a failure"
+
+[[mutation]]
+name = "the guard job reads the secret's value"
+file = "destroy.yml"
+old = '''
+INHERITED_ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN != '' }}'''
+new = 'INHERITED_ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}'
+must_say = "declares no environment"
+
+[[mutation]]
+name = "the repository-level secret guard removed"
+file = "ci.yml"
+old = '''
+INHERITED_ROLE_ARN_SECRET: ${{ secrets.AWS_ROLE_ARN != '' }}'''
+new = 'INHERITED_ROLE_ARN_SECRET: "false"'
+line = '^\s+AWS_ROLE_ARN: \$\{\{ secrets\.AWS_ROLE_ARN \}\}'
+must_say = "but no job it needs, with no environment, compares"
+
+[[mutation]]
+name = "the mask command omits a secret the step receives"
+file = "ci.yml"
+old = '''
+--optional AWS_ROLE_ARN TERRAGRUNT_ACCOUNT_ID
+'''
+new = '''
+--optional AWS_ROLE_ARN
+'''
+must_say = "the mask command does not name"
+
+[[mutation]]
+name = "a piece of the secret computed in the mask step's env"
+file = "ci.yml"
+old = '''
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
+          ROLE_ARN_VARIABLE'''
+new = '''
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
+          DEV_ROLE_ARN: ${{ fromJSON(secrets.AWS_ROLE_ARN).development }}
+          ROLE_ARN_VARIABLE'''
+must_say = "computes from the id secret"
+
+[[mutation]]
+name = "the secret re-serialised in a later step's env"
+file = "ci.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
+          TF_INPUT'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ toJSON(secrets.TERRAGRUNT_ACCOUNT_ID) }}
+          TF_INPUT'''
+must_say = "computes from the id secret"
+
+[[mutation]]
+name = "the secret expanded into run text"
+file = "ci.yml"
+old = '''
+        run: terragrunt run --non-interactive -- plan -input=false -lock=false -no-color
+'''
+new = '''
+        run: terragrunt run --non-interactive -- plan -input=false -lock=false -no-color -var account=${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
+'''
+must_say = "through its step `run`"
+
+[[mutation]]
+name = "role-to-assume from the matrix"
+file = "ci.yml"
+old = 'role-to-assume: ${{ secrets.AWS_ROLE_ARN }}'
+new = 'role-to-assume: ${{ matrix.role_arn }}'
+must_say = "It must be `${{ secrets.NAME }}`"
+
+# The finding quotes the value; the self-test fails it unless it says
+# <account id> where the digits were.
+[[mutation]]
+name = "role-to-assume as a literal ARN"
+file = "destroy.yml"
+old = 'role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}'
+new = 'role-to-assume: arn:aws:iam::222233334444:role/deploy'
+must_say = "carries an ARN naming an account as a literal"
+
+# The id starts inside the 60 characters the finding quotes and ends past
+# them: cut before redacting, the quote would keep its first ten digits.
+[[mutation]]
+name = "role-to-assume as a literal whose id straddles the quoted length"
+file = "destroy.yml"
+old = 'role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}'
+new = 'role-to-assume: role-padded-so-that-the-account-id-crosses-the-cut 222233334444'
+must_say = "crosses-the-cut <account"
+
+[[mutation]]
+name = "role-to-assume spelt in mixed case, from the matrix"
+file = "ci.yml"
+old = 'role-to-assume: ${{ secrets.AWS_ROLE_ARN }}'
+new = 'Role-To-Assume: ${{ matrix.role_arn }}'
+must_say = "It must be `${{ secrets.NAME }}`"
+
+# The runner reads action inputs upper-cased, so this configures the action:
+# PULL_ROLE is an id by use, and an action is the first step to receive it.
+[[mutation]]
+name = "role-to-assume spelt in mixed case, from a secret named outside the rule"
+file = "destroy.yml"
+old = 'role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}'
+new = 'Role-To-Assume: ${{ secrets.PULL_ROLE }}'
+must_say = "is the first to receive PULL_ROLE"
+
+[[mutation]]
+name = "an id-named key fed from a variable of another name"
+file = "ci.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
+          TF_INPUT'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT }}
+          TF_INPUT'''
+must_say = "which by its name carries an account id or role ARN"
+
+[[mutation]]
+name = "the secret in a workflow-level env"
+file = "ci.yml"
+old = '''
+permissions:
+  contents: read
+
+jobs:
+'''
+new = '''
+permissions:
+  contents: read
+
+env:
+  TERRAGRUNT_ACCOUNT_ID: ${{ secrets.TERRAGRUNT_ACCOUNT_ID }}
+
+jobs:
+'''
+must_say = "through its workflow-level `env`"
+
+[[mutation]]
+name = "the secret in a job-level env"
+file = "e2e.yml"
+old = '''
+    environment: e2e
+'''
+new = '''
+    environment: e2e
+    env:
+      E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}
+'''
+must_say = "through its job-level `env`"
+
+[[mutation]]
+name = "the mask step masks a variable it hands on as an output"
+file = "e2e.yml"
+old = '''
+          E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}
+          ROLE_ARN_VARIABLE'''
+new = '''
+          E2E_AWS_ROLE_ARN: ${{ vars.E2E_ROLE }}
+          ROLE_ARN_VARIABLE'''
+must_say = "What a mask step masks"
+
+[[mutation]]
+name = "an account id as a dispatch input"
+file = "e2e.yml"
+old = '''
+      region:
+        description: "Region"
+'''
+new = '''
+      account_id:
+        description: "Target AWS account ID"
+      region:
+        description: "Region"
+'''
+must_say = "declares the workflow_dispatch input"
+
+[[mutation]]
+name = "an account as a dispatch input under another name"
+file = "e2e.yml"
+old = '''
+      region:
+        description: "Region"
+'''
+new = '''
+      aws_account:
+        description: "Target AWS account (12 digits)"
+      region:
+        description: "Region"
+'''
+must_say = "declares the workflow_dispatch input"
+
+[[mutation]]
+name = "an id input read through github.event.inputs with index syntax"
+file = "e2e.yml"
+old = '''
+          E2E_REGION: ${{ inputs.region }}
+'''
+new = '''
+          E2E_REGION: ${{ inputs.region }}
+          ACCT: ${{ github.event.inputs['account_id'] }}
+'''
+must_say = "reads the input account_id"
+
+[[mutation]]
+name = "an id input read through an upper-case context name"
+file = "e2e.yml"
+old = '''
+          E2E_REGION: ${{ inputs.region }}
+'''
+new = '''
+          E2E_REGION: ${{ inputs.region }}
+          ACCT: ${{ INPUTS.account_id }}
+'''
+must_say = "reads the input account_id"
+
+[[mutation]]
+name = "every leftover-variable guard removed"
+file = "e2e.yml"
+old = [
+  '''
+ROLE_ARN_VARIABLE: ${{ vars.E2E_AWS_ROLE_ARN != '' }}''',
+  '''
+INHERITED_VARIABLE: ${{ vars.E2E_AWS_ROLE_ARN != '' }}''',
+]
+new = [
+  'ROLE_ARN_VARIABLE: "false"',
+  'INHERITED_VARIABLE: "false"',
+]
+line = '^\s+E2E_AWS_ROLE_ARN: \$\{\{ secrets\.E2E_AWS_ROLE_ARN \}\}'
+must_say = "neither it nor a job it needs on the same environment compares"
+
+[[mutation]]
+name = "an action is the first step to receive the secret"
+file = "e2e.yml"
+old = '''
+          E2E_AWS_ROLE_ARN: ${{ secrets.E2E_AWS_ROLE_ARN }}
+          ROLE_ARN_VARIABLE'''
+new = '''
+          E2E_AWS_ROLE_ARN: ${{ steps.none.outputs.none }}
+          ROLE_ARN_VARIABLE'''
+line = '^\s+role-to-assume: \$\{\{ secrets\.E2E_AWS_ROLE_ARN \}\}'
+must_say = "and it is not a mask step"
+
+[[mutation]]
+name = "a literal account id"
+file = "deploy.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: "222233334444"
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+must_say = "carries an account id as a literal"
+
+[[mutation]]
+name = "a literal account id YAML reads as a number, as an env value"
+file = "deploy.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: 222233334444
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+must_say = "carries an account id as a literal"
+
+[[mutation]]
+name = "a literal account id YAML reads as a number, as an action input"
+file = "destroy.yml"
+old = '''
+          aws-region: ${{ inputs.region }}
+'''
+new = '''
+          aws-region: ${{ inputs.region }}
+          role-session-name: 222233334444
+'''
+must_say = "carries an account id as a literal"
+
+[[mutation]]
+name = "a literal account id YAML reads as a number, as an env key"
+file = "deploy.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          222233334444: x
+          ACTION'''
+must_say = "carries an account id as a literal"
+
+# Digits 0-7 behind a leading 0 are octal to YAML 1.1: the value is
+# 1402433619, and only the source text still reads as an account id.
+[[mutation]]
+name = "a literal account id YAML reads as octal, as an env value"
+file = "deploy.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: 012345670123
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+must_say = "carries an account id as a literal"
+
+[[mutation]]
+name = "a literal account id YAML reads as octal, as an env key"
+file = "deploy.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          012345670123: x
+          ACTION'''
+must_say = "carries an account id as a literal"
+
+# The parser's own message quotes the line it stopped at; the finding is
+# at line 1 and must say <account id>, not the digits.
+[[mutation]]
+name = "a workflow that does not parse, at a line carrying an account id"
+file = "deploy.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          OWNER: 222233334444: x
+          ACTION'''
+line = '^name: Deploy$'
+must_say = "could not be parsed"
+
+# PyYAML cuts its excerpt to about 75 characters around the column; here
+# the cut falls inside the id, leaving a tail too short to redact.
+[[mutation]]
+name = "a workflow that does not parse, with an account id at the parser's excerpt cut"
+file = "deploy.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          OWNER: x 222233334444 qqqqqqqqqqqqqqqqqqqqq: y
+          ACTION'''
+line = '^name: Deploy$'
+must_say = "could not be parsed"
+
+[[mutation]]
+name = "a variable of a name outside the rule in an AWS job"
+file = "deploy.yml"
+old = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          ACTION'''
+new = '''
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          BUCKET: ${{ vars.TF_BUCKET }}
+          ACTION'''
+must_say = "in a job that can hold AWS credentials"
+
+[[mutation]]
+name = "configure-aws-credentials without mask-aws-account-id"
+file = "deploy.yml"
+old = '''
+          mask-aws-account-id: true
+'''
+new = ''
+line = '^\s+uses: aws-actions/configure-aws-credentials@'
+must_say = "without `mask-aws-account-id: true`"
+
+[[mutation]]
+name = "configure-aws-credentials spelt in mixed case, unmasked"
+file = "destroy.yml"
+old = [
+  '        uses: aws-actions/configure-aws-credentials@',
+  '''
+          mask-aws-account-id: true
+''',
+]
+new = [
+  '        uses: Aws-Actions/Configure-AWS-Credentials@',
+  '',
+]
+line = '^\s+uses: Aws-Actions/Configure-AWS-Credentials@'
+must_say = "without `mask-aws-account-id: true`"
+
+[[mutation]]
+name = "secrets: inherit"
+file = "e2e.yml"
+old = '''
+    environment: e2e
+'''
+new = '''
+    environment: e2e
+    secrets: inherit
+'''
+must_say = "passes `secrets: inherit`"
+
+# Shapes only one rule sees: each case is rejected by that rule and by no other.
+[[mutation]]
+name = "an expression the gate cannot read names a secret"
+file = "deploy.yml"
+old = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account'''
+new = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+          FALLBACK: ${{ secrets.DEPLOY_ACCOUNT_ID || "unset" }}
+        run: |
+          if ! caller_account'''
+must_say = "that mentions the secrets, vars or inputs context"
+
+[[mutation]]
+name = "every secret read through a `*` filter"
+file = "deploy.yml"
+old = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account'''
+new = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+          EVERY: ${{ toJSON(secrets.*) }}
+        run: |
+          if ! caller_account'''
+must_say = "a computed index or filter of the `secrets` context"
+
+[[mutation]]
+name = "a job granted write-all reads a variable"
+file = "ci.yml"
+old = [
+  '''
+    name: Workflows Mask Account Ids
+    runs-on: ubuntu-latest
+''',
+  '''
+      - run: python3 scripts/check-workflow-id-masking.py
+''',
+]
+new = [
+  '''
+    name: Workflows Mask Account Ids
+    runs-on: ubuntu-latest
+    permissions: write-all
+''',
+  '''
+      - run: python3 scripts/check-workflow-id-masking.py
+        env:
+          PIP_INDEX: ${{ vars.PIP_INDEX }}
+''',
+]
+line = '^\s+PIP_INDEX: \$\{\{ vars\.PIP_INDEX \}\}'
+must_say = "in a job that can hold AWS credentials"
+
+[[mutation]]
+name = "an id-named key in the workflow-level env"
+file = "ci.yml"
+old = '''
+permissions:
+  contents: read
+
+jobs:
+'''
+new = '''
+permissions:
+  contents: read
+
+env:
+  TF_STATE_BUCKET: ${{ github.repository_owner }}-tfstate
+
+jobs:
+'''
+must_say = "in its workflow-level `env`. Such a key takes only the guard form"
+
+[[mutation]]
+name = "a job that reads an environment's secret needs no job refusing it"
+file = "deploy.yml"
+old = '''
+    needs: refuse-inherited-config
+'''
+new = ''
+line = '^\s+DEPLOY_ROLE_ARN: \$\{\{ secrets\.DEPLOY_ROLE_ARN \}\}'
+must_say = "but no job it needs, with no environment, compares"
+
+# drift.yml: the role map is a secret on the drift environment, masked by
+# `mask-aws-ids.sh DRIFT_PLAN_ROLE_ARNS` in each of the two jobs that read it.
+# drift.yml is held to every rule like the other workflows.
+
+[[mutation]]
+name = "drift: the role map masked by a script other than mask-aws-ids.sh"
+file = "drift.yml"
+old = '''
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS
+
+          # The same role-ARN shape'''
+new = '''
+          bash "$GITHUB_WORKSPACE/scripts/mask-drift-role-map.sh"
+
+          # The same role-ARN shape'''
+must_say = "and its first command is"
+
+[[mutation]]
+name = "drift: the mask step names a variable other than the role map"
+file = "drift.yml"
+old = '''
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" DRIFT_PLAN_ROLE_ARNS
+
+          # The same role-ARN shape'''
+new = '''
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" ACCOUNT_DIR
+
+          # The same role-ARN shape'''
+must_say = "the mask command does not name"
+
+[[mutation]]
+name = "drift: the role map reaches a step before the mask step"
+file = "drift.yml"
+old = '''
+          persist-credentials: false
+
+      # The first step that receives the secret.'''
+new = '''
+          persist-credentials: false
+        env:
+          DRIFT_PLAN_ROLE_ARNS: ${{ secrets.DRIFT_PLAN_ROLE_ARNS }}
+
+      # The first step that receives the secret.'''
+must_say = "is the first to receive DRIFT_PLAN_ROLE_ARNS"
+
+[[mutation]]
+name = "drift: something prints ahead of the role-map mask"
+file = "drift.yml"
+old = '''
+        run: |
+          # First: mask every id and role ARN'''
+new = '''
+        run: |
+          echo "selecting"
+          # First: mask every id and role ARN'''
+must_say = "and its first command is"
+
+[[mutation]]
+name = "drift: role-to-assume from the matrix"
+file = "drift.yml"
+old = 'role-to-assume: ${{ steps.role.outputs.role_arn }}'
+new = 'role-to-assume: ${{ matrix.role_arn }}'
+must_say = "It must be `${{ secrets.NAME }}`"
+
+[[mutation]]
+name = "drift: the in-environment variable guard removed"
+file = "drift.yml"
+old = '''
+          ROLE_MAP_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}
+'''
+new = ''
+line = '^\s+DRIFT_PLAN_ROLE_ARNS: \$\{\{ secrets\.DRIFT_PLAN_ROLE_ARNS \}\}'
+must_say = "neither it nor a job it needs on the same environment compares"
+
+[[mutation]]
+name = "the deploy job's in-environment variable guard removed"
+file = "deploy.yml"
+old = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          ROLE_ARN_VARIABLE: ${{ vars.DEPLOY_ROLE_ARN != '' }}
+'''
+new = '''
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+'''
+line = '^\s+DEPLOY_ROLE_ARN: \$\{\{ secrets\.DEPLOY_ROLE_ARN \}\}'
+must_say = "neither it nor a job it needs on the same environment compares"
+
+[[mutation]]
+name = "drift: the guard job reads the variable's value"
+file = "drift.yml"
+old = '''
+INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS != '' }}'''
+new = 'INHERITED_VARIABLE: ${{ vars.DRIFT_PLAN_ROLE_ARNS }}'
+must_say = "A variable is never masked"
+
+# Edits the rules permit, each of which must leave the workflows accepted. An
+# input name is matched as the runner reads it, upper-cased.
+
+[[accepted]]
+name = "mask-aws-account-id spelt in mixed case"
+file = "deploy.yml"
+old = '''
+          mask-aws-account-id: true
+'''
+new = '''
+          Mask-AWS-Account-Id: true
+'''
+
+[[accepted]]
+name = "role-to-assume spelt in mixed case, from the masked secret"
+file = "destroy.yml"
+old = 'role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}'
+new = 'Role-To-Assume: ${{ secrets.DEPLOY_ROLE_ARN }}'
