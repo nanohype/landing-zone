@@ -35,13 +35,17 @@ Five rules:
      gate attribute outside the lever idiom, must be named in EXEMPT with a reason. Then
      teardown posture is a decision on the record rather than an omission.
   4. NO BLIND PASS. The check fails if it discovers no files, if a variable block never
-     closes, or if an EXEMPT entry no longer describes anything. A gate whose healthy
-     output is indistinguishable from its blind output is the failure it exists to catch.
+     closes, if an EXEMPT module no longer holds a protectable resource, or if
+     GATELESS_HELD names a module EXEMPT does not. A gate whose healthy output is
+     indistinguishable from its blind output is the failure it exists to catch.
   5. CLASSIFICATION. A gate attribute may only sit on a kind PROTECTABLE lists. A
      resource or module call that carries `force_destroy` or `deletion_protection_enabled`
      is one a destroy can be refused by, and rule 2 can only require its gate if the check
      knows the kind. This anchors the gated kinds to the tree: drop one from PROTECTABLE
-     and every resource of that kind in the tree is reported here. A kind with no gate
+     and every resource of that kind that carries a gate is reported here, and an
+     exemption left holding nothing protectable is reported by rule 4 (the route53 zones
+     carry no gate, so dropping aws_route53_zone reports dns, private-dns and shared-dns
+     that way). A kind with no gate
      carries no attribute to classify, so GATELESS_HELD anchors those instead: each
      exempt module declares the gateless kinds it holds, and a declared kind PROTECTABLE
      does not list as gateless, a declared kind the module does not hold, and a gateless
