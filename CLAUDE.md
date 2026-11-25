@@ -90,10 +90,10 @@ live/
 
 ## Testing Changes
 
-1. `task check` — the whole pre-push sequence: formatting, validation, lint, the `tofu test` suites, and every gate under `scripts/`
+1. `task check` — the whole pre-push sequence, listed below with what only CI runs
 2. `task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=<name>` — dry-run against development
 
-`task check` runs CI's formatting (`tofu fmt` and `terragrunt hcl format`), validation, lint, `tofu test` suites, gates and their self-tests, and the credential-less render of every leaf. CI also runs what it does not: checkov and zizmor, the required-inputs check (`terragrunt hcl validate --inputs`), the PR plan, which needs the plan role, and the tenant re-render, which needs the Platform CRs from other repositories. The individual steps (`fmt:check`, `validate`, `lint`, `test`, `gates`, `evaluate`) stay available for a faster loop on one of them.
+`task check` runs CI's formatting (`tofu fmt` and `terragrunt hcl format`), validation, lint, `tofu test` suites, gates and their self-tests, the gates' coverage floor (it needs coverage.py), and the credential-less render of every leaf. CI also runs what it does not: checkov and zizmor, the required-inputs check (`terragrunt hcl validate --inputs`), the PR plan, which needs the plan role, and the tenant re-render, which needs the Platform CRs from other repositories. The individual steps (`fmt:check`, `validate`, `lint`, `test`, `gates`, `coverage`, `evaluate`) stay available for a faster loop on one of them.
 
 ## CI/CD
 
