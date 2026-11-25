@@ -75,6 +75,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -1190,5 +1191,66 @@ def main() -> int:
     return 0
 
 
+# --- the harness's own guards -------------------------------------------------
+
+def guard_self_test() -> int:
+    """Each guard this harness relies on refuses what it exists to refuse: a control
+    whose anchor is gone or that changes nothing, a gate git does not track, a gate that
+    never finishes, and a tree whose tracked set cannot be read."""
+    failures: list[str] = []
+
+    def refuses(name: str, says: str, guard, *args) -> None:
+        try:
+            guard(*args)
+        except AssertionError as e:
+            if says not in str(e):
+                failures.append(f"{name}: refused saying {e}, not {says!r}")
+            return
+        failures.append(f"{name}: accepted, not refused saying {says!r}")
+
+    with tempfile.TemporaryDirectory(prefix="gate-controls-guards-") as tmp:
+        tree = Path(tmp)
+        (tree / "a.txt").write_text("alpha\n")
+        refuses("an edit of a file that is not there", "anchor file missing",
+                _edit, tree, "b.txt", "x", "y")
+        refuses("an edit whose anchor is gone", "anchor not found", _edit, tree, "a.txt", "beta", "y")
+        refuses("an edit that changes nothing", "byte-identical", _edit, tree, "a.txt", "alpha",
+                "alpha")
+        refuses("an append to a file that is not there", "anchor file missing",
+                _append, tree, "b.txt", "x")
+        refuses("an append of nothing", "byte-identical", _append, tree, "a.txt", "")
+        refuses("a write of what is there", "byte-identical", _write, tree, "a.txt", "alpha\n")
+        refuses("a gate git does not track", "not tracked by git", run_gate, tree, "check-absent.py")
+        (tree / "scripts").mkdir()
+        (tree / "scripts" / "check-hangs.py").write_text("import time\ntime.sleep(60)\n")
+        with mock.patch.object(sys.modules[__name__], "GATE_TIMEOUT_SECONDS", 1):
+            code, said = run_gate(tree, "check-hangs.py")
+        if code != TIMEOUT_EXIT or "timed out" not in said:
+            failures.append(f"a gate that never finishes: exit {code}, not {TIMEOUT_EXIT}")
+        with mock.patch.dict(os.environ, {"PATH": str(tree / "no-tools")}):
+            why = git_unavailable()
+        if not why or "could not be executed" not in why:
+            failures.append(f"no git to run: reported {why!r}")
+        with mock.patch.object(sys.modules[__name__], "ROOT", tree), \
+                mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": tmp}):
+            why = git_unavailable()
+        if not why or "rev-parse` exited" not in why:
+            failures.append(f"a tree git does not track: reported {why!r}")
+    if _first_citation("no line is named here") != "<none>" or \
+            _first_citation("noise\nf.py:12: refused\n") != "f.py:12: refused":
+        failures.append("_first_citation missed a citation, or found one where there is none")
+    for failure in failures:
+        print(f"FAIL {failure}", file=sys.stderr)
+    if failures:
+        print(f"check-gates-detect self-test FAILED: {len(failures)} guard(s)", file=sys.stderr)
+        return 1
+    print("check-gates-detect self-test passed (11 guards: edits, appends and writes that would "
+          "test nothing, an untracked gate, a hanging gate, git missing or reading no repository, "
+          "and the citation reader).")
+    return 0
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--self-test"]:
+        sys.exit(guard_self_test())
     sys.exit(main())

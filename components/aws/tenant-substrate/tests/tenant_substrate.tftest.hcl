@@ -506,6 +506,47 @@ run "every_tenant_gets_its_own_key_published_for_the_operator" {
 
 }
 
+# ── an object store refuses plain HTTP for every action on the bucket and its ──
+# objects. The statement is compared whole: a Resource narrowed to the bucket
+# alone (leaving objects readable over HTTP), an Action narrowed from s3:*, a
+# Principal or a condition changed, and a second statement that allows what
+# this one denies all fail it.
+run "object_store_denies_insecure_transport_on_bucket_and_objects" {
+  command = plan
+
+  module {
+    source = "./modules/tenant"
+  }
+
+  variables {
+    environment     = "development"
+    account_id      = "123456789012"
+    tenant_id       = "t1"
+    cluster_name    = "development-platform"
+    vpc_id          = "vpc-0123456789abcdef0"
+    private_subnets = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+    cluster_sg_id   = "sg-0123456789abcdef0"
+    node_sg_id      = "sg-0fedcba9876543210"
+    backup_policy   = "daily"
+    tags            = {}
+    datastores = [
+      { name = "obj", kind = "objectStore" },
+    ]
+  }
+
+  assert {
+    condition = jsondecode(aws_s3_bucket_policy.object_store["obj"].policy).Statement == [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource  = [aws_s3_bucket.object_store["obj"].arn, "${aws_s3_bucket.object_store["obj"].arn}/*"]
+      Condition = { Bool = { "aws:SecureTransport" = "false" } }
+    }]
+    error_message = "the object store's bucket policy must be exactly one DenyInsecureTransport statement: Deny s3:* to every principal on the bucket and its objects when aws:SecureTransport is false"
+  }
+}
+
 # Distinctness is asserted on the alias rather than the ARN: a mocked provider
 # hands every aws_kms_key the same placeholder ARN, so comparing ARNs at plan
 # proves nothing. The alias is composed from <environment>-<tenant>, which is

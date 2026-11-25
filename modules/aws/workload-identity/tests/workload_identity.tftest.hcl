@@ -25,14 +25,29 @@ variables {
 run "trust_policy_is_pod_identity_only" {
   command = plan
 
+  # Every statement, not Statement[0]: a second statement letting another
+  # principal assume the role would pass a check on the first one alone.
   assert {
-    condition     = jsondecode(aws_iam_role.this.assume_role_policy).Statement[0].Principal.Service == "pods.eks.amazonaws.com"
-    error_message = "trust principal must be pods.eks.amazonaws.com (Pod Identity), not an OIDC/web-identity provider"
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role.this.assume_role_policy).Statement :
+      s.Effect == "Allow" && s.Principal == { Service = "pods.eks.amazonaws.com" }
+    ])
+    error_message = "every trust statement must Allow pods.eks.amazonaws.com (Pod Identity) alone, not an OIDC/web-identity provider or any other principal"
   }
 
   assert {
-    condition     = toset(jsondecode(aws_iam_role.this.assume_role_policy).Statement[0].Action) == toset(["sts:AssumeRole", "sts:TagSession"])
-    error_message = "trust policy must grant exactly sts:AssumeRole + sts:TagSession"
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role.this.assume_role_policy).Statement :
+      toset(flatten([s.Action])) == toset(["sts:AssumeRole", "sts:TagSession"])
+    ])
+    error_message = "every trust statement must grant exactly sts:AssumeRole + sts:TagSession"
+  }
+
+  # The two rules above pass vacuously on an empty Statement list, so pin the
+  # one statement the module writes.
+  assert {
+    condition     = length(jsondecode(aws_iam_role.this.assume_role_policy).Statement) == 1
+    error_message = "the trust policy must hold exactly one statement"
   }
 
   # No AssumeRoleWithWebIdentity anywhere in the trust policy.
@@ -133,5 +148,46 @@ run "no_inline_policy_by_default" {
   assert {
     condition     = length(aws_iam_role_policy.this) == 0
     error_message = "inline policy resource must not be created when policy_statements is empty"
+  }
+}
+
+# A caller's statements reach the inline policy as written: a statement that
+# sets a Condition keeps it verbatim, and one that sets none carries no
+# Condition key at all (IAM rejects "Condition": null). Dropping a caller's
+# Condition would widen its grant to every request the action allows.
+run "caller_conditions_reach_the_inline_policy_verbatim" {
+  command = plan
+
+  variables {
+    policy_statements = [
+      {
+        Effect    = "Allow"
+        Action    = ["iam:CreateServiceLinkedRole"]
+        Resource  = ["*"]
+        Condition = { StringEquals = { "iam:AWSServiceName" = "elasticloadbalancing.amazonaws.com" } }
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["arn:aws:s3:::example-bucket/*"]
+      },
+    ]
+  }
+
+  assert {
+    condition = jsondecode(aws_iam_role_policy.this[0].policy).Statement == [
+      {
+        Effect    = "Allow"
+        Action    = ["iam:CreateServiceLinkedRole"]
+        Resource  = ["*"]
+        Condition = { StringEquals = { "iam:AWSServiceName" = "elasticloadbalancing.amazonaws.com" } }
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["arn:aws:s3:::example-bucket/*"]
+      },
+    ]
+    error_message = "a caller's statements must reach the inline policy as written: a Condition kept verbatim, and no Condition key where none was set"
   }
 }
