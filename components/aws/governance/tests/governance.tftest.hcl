@@ -108,9 +108,10 @@ run "rejects_tenant_key_that_overflows_bucket_budget" {
 # directly, which is where those resources live.
 #
 # The writer's grant is compared as a whole action set: a Delete*, Update* or
-# Get* verb, or any other addition, fails it. dynamodb:BatchWriteItem is in the
-# set today and it carries DeleteRequest as well as PutRequest, so the IAM layer
-# alone does not make the tables append-only; that is recorded, not fixed, here.
+# Get* verb, or any other addition, fails it. The set holds
+# dynamodb:BatchWriteItem, which carries DeleteRequest as well as PutRequest, so
+# the IAM layer alone does not make the tables append-only. This run pins the
+# grant as it is; narrowing it belongs to the tenant-isolation work (lzg-2).
 run "audit_ledger_is_written_by_a_narrow_role_and_protected_outside_development" {
   command = plan
 

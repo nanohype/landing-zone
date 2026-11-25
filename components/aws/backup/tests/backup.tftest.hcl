@@ -47,10 +47,10 @@ mock_provider "aws" {
   }
 }
 
-# The vault key and the notifications key each get their own ARN. A shared mock
-# default gave both the same one, so "the topic uses the notifications key"
-# could not tell that key from the vault's and passed with the vault key wired
-# in. Distinct ARNs make each key-wiring assertion name exactly one key.
+# The vault key and the notifications key each get their own ARN. With one shared
+# mock default, "the topic uses the notifications key" cannot tell that key from
+# the vault's, and passes with the vault key wired in. Distinct ARNs make each
+# key-wiring assertion name exactly one key.
 override_resource {
   target = aws_kms_key.backup
   values = {
