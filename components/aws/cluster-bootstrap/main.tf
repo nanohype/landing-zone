@@ -169,7 +169,13 @@ provider "kubectl" {
 # Used only when tenants_repo_url is set, to register ArgoCD's read-only deploy
 # key on the tenants repo. owner is parsed from that URL; the token comes from
 # the GITHUB_TOKEN environment variable. When tenants_repo_url is empty, owner
-# is "" and no github resources are created, so the provider is never called.
+# is "" and no github resources are created, but OpenTofu still configures the
+# provider on every run: the deploy-key resources reference it at count 0.
+# Configured with a token (GITHUB_TOKEN, or the GitHub CLI login the provider
+# falls back to) and an empty owner, it looks up the token's user and that
+# user's organisation on api.github.com, so a plan or apply without the tenants
+# repo still reaches GitHub, and fails if either lookup does. With no token it
+# configures without a call. tests/cluster-bootstrap.tftest.hcl mocks it.
 ################################################################################
 
 provider "github" {
