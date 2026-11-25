@@ -41,7 +41,9 @@ A call is found where a command starts: at the start of a line or after `|`,
 `;`, `&`, `(`, a backtick or `$(`, past any variable assignments and any `env`,
 `command`, `exec` or `timeout` in front of the tool. A tool run through another
 program (`xargs`, `sudo`, `nice`) is not found. A line ending in a backslash
-continues onto the next, so a deadline flag on a continuation line counts. Only
+continues onto the next, so a deadline flag on a continuation line counts. The
+call runs to the end of its command (the first `|`, `;`, `&`, `)` or backtick
+outside quotes), so a deadline flag on another command does not bound it. Only
 the calls that reach the network are held to a deadline: git and helm calls
 other than the local subcommands named in LOCAL, and go, tofu and tflint calls
 on the subcommands named in NETWORK.
@@ -199,6 +201,42 @@ def logical_lines(code: str) -> list[tuple[int, str]]:
     return out
 
 
+def call_text(line: str, start: int) -> str:
+    """The command that starts at `start`, up to the first separator outside quotes.
+
+    The separators are `|`, `;`, `&`, `)` and a backtick. The `&` of a redirection
+    (`2>&1`, `&>`) and the `)` closing a `$( )` opened inside the command do not
+    end it, so a deadline flag written after either still belongs to the call. A
+    flag on another command on the same line does not.
+    """
+    quote, depth, i = None, 0, start
+    while i < len(line):
+        c = line[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "\"'":
+            quote = c
+        elif c == "\\":
+            i += 2
+            continue
+        elif line.startswith("$(", i):
+            depth += 1
+            i += 2
+            continue
+        elif c == ")" and depth:
+            depth -= 1
+        elif c == "&" and (line[i - 1] == ">" or line[i + 1 : i + 2] == ">"):
+            pass
+        elif c in "|;&)`":
+            break
+        i += 1
+    return line[start:i]
+
+
 def reaches_network(tool: str, words: list[str]) -> bool:
     """Whether a call, split into words from the tool's name on, is a network call."""
     if tool == "tflint":
@@ -232,7 +270,7 @@ def unbounded_calls(code: str, step_bounded: bool = False) -> tuple[int, list[tu
     for n, line in logical_lines(code):
         for m in CALL.finditer(line):
             tool = m.group("tool")
-            call = line[m.start("tool"):]
+            call = call_text(line, m.start("tool"))
             if tool in wrapped or not reaches_network(tool, call.split()):
                 continue
             checked += 1
@@ -484,6 +522,20 @@ def cases() -> list[tuple[str, dict, int, str, int]]:
          script("kubectl get pods \\", "  --request-timeout=10s"), 0, "1 unwrapped call(s)", 1),
         ("an unbounded call reported at its first line",
          script("kubectl get pods \\", "  -A"), 1, call + "kubectl get pods", 1),
+        ("a deadline on an earlier command does not bound a later one",
+         script("kubectl get ns --request-timeout=5s && kubectl get pods"), 1,
+         call + "kubectl get ns", 1),
+        ("a deadline on a later command does not bound an earlier one",
+         script("kubectl get pods; kubectl get ns --request-timeout=5s"), 1,
+         call + "kubectl get pods;", 1),
+        ("a separator inside quotes does not end the call",
+         script("kubectl get pods -o jsonpath='{.items[*]};a|b&c' --request-timeout=5s"), 0,
+         "1 unwrapped call(s)", 1),
+        ("a redirection does not end the call",
+         script('curl -fsS "$url" 2>&1 --max-time 30'), 0, "1 unwrapped call(s)", 1),
+        ("a $( ) inside the call does not end it",
+         script("kubectl get pods -n $(cat ns) --request-timeout=5s"), 0,
+         "1 unwrapped call(s)", 1),
         # Workflows: the step's timeout-minutes counts, the job's does not.
         ("a step with only its job's timeout-minutes",
          steps("      - run: tflint --init --config .tflint-aws.hcl\n"), 1,
