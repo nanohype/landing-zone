@@ -414,9 +414,7 @@ def self_test() -> int:
     failures = []
     with tempfile.TemporaryDirectory(prefix="render-tenants-") as tmp:
         root = pathlib.Path(tmp)
-        here = sys.modules[__name__]
-        with mock.patch.object(here, "ROOT", root), mock.patch.object(here, "LIVE",
-                                                                      root / "live" / "aws"):
+        with mock.patch.dict(globals(), {"ROOT": root, "LIVE": root / "live" / "aws"}):
             for name, files, args, status, says in CASES:
                 for rel, text in files.items():
                     path = root / rel
