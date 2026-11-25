@@ -11,11 +11,19 @@
 # opencost targets clusters whose annotation is absent and generates an
 # Application that can never render. Both are silent regressions this suite bites.
 #
-# Runs at command = plan against mocked aws/kubernetes/helm/kubectl providers. The
-# Secret's metadata is a plain merge()/jsonencode of variables and mocked SSM
-# reads, so the labels and annotations render for real at plan time. The default
-# tenants_repo_url = "" keeps the tls/github deploy-key resources at count 0, so
-# those providers are never configured.
+# Runs at command = plan against mocked aws/kubernetes/helm/kubectl/github/tls
+# providers. The Secret's metadata is a plain merge()/jsonencode of variables and
+# mocked SSM reads, so the labels and annotations render for real at plan time.
+#
+# github and tls are mocked even though the default tenants_repo_url = "" leaves
+# the deploy-key resources at count 0: a resource at count 0 still puts its
+# provider in the graph, so a real github provider is configured on every run.
+# Configured with an empty owner and a token (GITHUB_TOKEN, or a GitHub CLI
+# login the provider falls back to), it looks up the token's user and that
+# user's organisation on api.github.com, so an unmocked suite makes live GitHub
+# calls, and passes or fails on the caller's token, wherever one is set. The
+# tenants-repo runs at the end set the URL and assert what the deploy key and
+# ArgoCD's repository Secret are given.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
@@ -47,6 +55,8 @@ mock_provider "aws" {
 mock_provider "kubernetes" {}
 mock_provider "helm" {}
 mock_provider "kubectl" {}
+mock_provider "github" {}
+mock_provider "tls" {}
 
 variables {
   environment                        = "staging"
@@ -289,5 +299,75 @@ run "tier_defaults_to_floor" {
   assert {
     condition     = kubernetes_secret_v1.argocd_cluster.metadata[0].labels["observability/tier"] == "floor"
     error_message = "observability_tier must default to floor so a new cluster is born light"
+  }
+}
+
+# ── tenants repo unset (default): no deploy key, no key pair and no repository ──
+# Secret exist, so a cluster that pulls no private tenants repo holds no
+# credential for one.
+run "no_tenants_repo_creates_no_deploy_key_or_credential" {
+  command = plan
+
+  assert {
+    condition     = length(github_repository_deploy_key.argocd_tenants) == 0 && length(tls_private_key.argocd_tenants) == 0 && length(kubernetes_secret_v1.argocd_tenants_repo) == 0
+    error_message = "with tenants_repo_url unset, cluster-bootstrap must create no deploy key, key pair or ArgoCD repository Secret"
+  }
+}
+
+# ── tenants repo as an SSH URL: ArgoCD's deploy key is read-only, named for the ──
+# cluster and registered on the repository and owner the URL names, and the
+# repository Secret ArgoCD reads carries that same URL. A key with write access
+# would let anyone who reads the cluster's ArgoCD Secret push to the tenants
+# repo; a wrong owner would register the key on another account's repository of
+# the same name.
+run "tenants_repo_ssh_url_registers_a_read_only_deploy_key" {
+  command = plan
+
+  variables {
+    tenants_repo_url = "git@github.com:nanohype/tenants.git"
+  }
+
+  assert {
+    condition     = github_repository_deploy_key.argocd_tenants[0].read_only == true
+    error_message = "ArgoCD's deploy key on the tenants repo must be read-only"
+  }
+
+  assert {
+    condition     = github_repository_deploy_key.argocd_tenants[0].repository == "tenants" && local.tenants_repo_owner == "nanohype"
+    error_message = "git@github.com:nanohype/tenants.git must register the key on repository tenants with the github provider's owner nanohype"
+  }
+
+  assert {
+    condition     = github_repository_deploy_key.argocd_tenants[0].title == "argocd-staging-platform-ro"
+    error_message = "the deploy key's title must name the cluster (argocd-<cluster_name>-ro), so each cluster's key can be found and revoked on its own"
+  }
+
+  assert {
+    condition     = tls_private_key.argocd_tenants[0].algorithm == "ED25519"
+    error_message = "the deploy key pair must be ED25519"
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_tenants_repo[0].data["url"] == "git@github.com:nanohype/tenants.git" && kubernetes_secret_v1.argocd_tenants_repo[0].data["type"] == "git"
+    error_message = "ArgoCD's repository Secret must carry the tenants repo URL as a git repository"
+  }
+
+  assert {
+    condition     = kubernetes_secret_v1.argocd_tenants_repo[0].metadata[0].labels["argocd.argoproj.io/secret-type"] == "repository" && kubernetes_secret_v1.argocd_tenants_repo[0].metadata[0].namespace == "argocd"
+    error_message = "the repository Secret must be labelled argocd.argoproj.io/secret-type=repository in ArgoCD's namespace, or ArgoCD never reads it"
+  }
+}
+
+# ── tenants repo as an HTTPS URL: the same repository and owner as the SSH form. ──
+run "tenants_repo_https_url_names_the_same_repository" {
+  command = plan
+
+  variables {
+    tenants_repo_url = "https://github.com/nanohype/tenants.git"
+  }
+
+  assert {
+    condition     = github_repository_deploy_key.argocd_tenants[0].repository == "tenants" && local.tenants_repo_owner == "nanohype"
+    error_message = "https://github.com/nanohype/tenants.git must register the key on repository tenants with the github provider's owner nanohype"
   }
 }
