@@ -363,7 +363,7 @@ The `org-identity` component manages IAM Identity Center -- permission sets, gro
 
 ## State Management
 
-State lives in S3 (versioned, AES-256 encrypted) with native conditional-write locking (`use_lockfile`). Buckets are named `{account_id}-{region}-tfstate` and created by `scripts/init-backend-aws.sh`; state keys follow `{environment}/{component}/terraform.tfstate`.
+State lives in S3 (versioned, AES-256 encrypted) with native conditional-write locking (`use_lockfile`). Buckets are named `{account_id}-{region}-tfstate` and created by `scripts/init-backend-aws.sh`; a leaf's state key is its environment and then its path under `live/`, `{environment}/aws/{account}/{region}/{environment}/{component}/terraform.tfstate`.
 
 Each component in each environment has independent state, enabling parallel operations and isolated blast radius.
 

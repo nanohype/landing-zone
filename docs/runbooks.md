@@ -44,12 +44,12 @@ This brings the resource back to the declared state.
 
 ### Identify the Lock Holder
 
-OpenTofu uses native S3 conditional writes for locking (`use_lockfile = true`). The lock file is stored alongside the state file in S3.
+OpenTofu uses native S3 conditional writes for locking (`use_lockfile = true`). The lock is an object beside the state, at the state's key with `.tflock` appended. `live/root.hcl` keys a leaf's state by its environment and then its path under `live/`, so the leaf at `live/aws/<account>/<region>/<env>/<component>/` keeps its state at `<env>/aws/<account>/<region>/<env>/<component>/terraform.tfstate`. From the leaf's directory, `terragrunt render --format json | jq -r .remote_state.config.key` prints the key.
 
 1. Check if another `plan` or `apply` is still running (CI workflow, colleague, etc.)
 2. Check the S3 bucket for a `.tflock` file:
    ```bash
-   aws s3 ls s3://<account_id>-<region>-tfstate/<env>/<component>/
+   aws s3 ls s3://<account_id>-<region>-tfstate/<env>/aws/<account>/<region>/<env>/<component>/
    ```
 
 ### Force Unlock (if safe)
@@ -61,10 +61,10 @@ cd live/aws/<account>/<region>/<env>/<component>
 terragrunt force-unlock <lock-id>
 ```
 
-If using native S3 locking, you may need to delete the lock file directly:
+If `force-unlock` cannot release it, delete the lock object directly:
 
 ```bash
-aws s3 rm s3://<account_id>-<region>-tfstate/<env>/<component>/terraform.tfstate.tflock
+aws s3 rm s3://<account_id>-<region>-tfstate/<env>/aws/<account>/<region>/<env>/<component>/terraform.tfstate.tflock
 ```
 
 ### Prevention
@@ -141,24 +141,24 @@ A partial apply means some resources exist in state and in AWS. Running `destroy
 
 If the state file itself is corrupted:
 
-1. S3 versioning is enabled — list previous versions:
+1. S3 versioning is enabled — list previous versions. The key is the leaf's environment and then its path under `live/`, as [RB-002](#rb-002-state-lock-stuck) explains:
    ```bash
    aws s3api list-object-versions \
      --bucket <account_id>-<region>-tfstate \
-     --prefix <env>/<component>/terraform.tfstate
+     --prefix <env>/aws/<account>/<region>/<env>/<component>/terraform.tfstate
    ```
 2. Download a known-good version:
    ```bash
    aws s3api get-object \
      --bucket <account_id>-<region>-tfstate \
-     --key <env>/<component>/terraform.tfstate \
+     --key <env>/aws/<account>/<region>/<env>/<component>/terraform.tfstate \
      --version-id <version-id> \
      terraform.tfstate.backup
    ```
 3. Upload it as the current version:
    ```bash
    aws s3 cp terraform.tfstate.backup \
-     s3://<account_id>-<region>-tfstate/<env>/<component>/terraform.tfstate
+     s3://<account_id>-<region>-tfstate/<env>/aws/<account>/<region>/<env>/<component>/terraform.tfstate
    ```
 4. Plan to verify the restored state matches reality
 

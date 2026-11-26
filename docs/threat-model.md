@@ -280,7 +280,7 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
 
 - **Tampering / Information disclosure** — state holds resource metadata and some
   secrets material. Mitigated: S3 buckets are versioned + AES-256 encrypted, keyed
-  `{env}/{component}/terraform.tfstate`, with native conditional-write locking
+  `{env}/aws/{account}/{region}/{env}/{component}/terraform.tfstate`, with native conditional-write locking
   (`use_lockfile`). Per-component/per-env state = isolated blast radius. The
   highest-value state buckets — `fleet-hub` (every vended cluster's OpenTofu state)
   and `portal-hub` (portal's cross-account state) — go further: SSE-KMS with a

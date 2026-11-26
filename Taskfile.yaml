@@ -149,17 +149,26 @@ tasks:
         echo "All tofu test suites passed."
 
   evaluate:
-    desc: Credential-less terragrunt render across every live leaf (config evaluation gate)
+    desc: Credential-less terragrunt render across every live leaf (config evaluation gate), with each leaf's state key held to the documented shape
     cmds:
       - |
         fail=0
+        keys=$(mktemp)
+        json=$(mktemp)
         while IFS= read -r leaf; do
           dir=$(dirname "$leaf")
-          if ! (cd "$dir" && TG_NON_INTERACTIVE=true terragrunt render --format json --no-auto-init > /dev/null 2>/tmp/render.err); then
-            echo "render FAILED: $dir"; tail -6 /tmp/render.err | sed 's/^/    /'; fail=1
+          if ! (cd "$dir" && TG_NON_INTERACTIVE=true terragrunt render --format json --no-auto-init > "$json" 2>/tmp/render.err); then
+            echo "render FAILED: $dir"; tail -6 /tmp/render.err | sed 's/^/    /'; fail=1; continue
           fi
+          python3 -c 'import json, sys; c = json.load(open(sys.argv[1]))["remote_state"]["config"]; print(sys.argv[2], c["bucket"], c["key"], sep="\t")' "$json" "$dir" >> "$keys" || fail=1
         done < <(git ls-files 'live/**/terragrunt.hcl' | grep '/terragrunt\.hcl$')
-        [ "$fail" -eq 0 ] && echo "All live leaves evaluate cleanly." || exit 1
+        status=1
+        if [ "$fail" -eq 0 ]; then
+          echo "All live leaves evaluate cleanly."
+          python3 scripts/check-state-key-docs.py --rendered "$keys" && status=0
+        fi
+        rm -f "$keys" "$json"
+        exit "$status"
 
   # === Planning ===
 
