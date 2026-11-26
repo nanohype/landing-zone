@@ -14,9 +14,12 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 3.0"
     }
+    # alekc/kubectl is the maintained fork of gavinbunney/kubectl, which has
+    # stopped releasing: its last release links dependency versions with known
+    # vulnerabilities, fixed upstream but never taken.
     kubectl = {
-      source  = "gavinbunney/kubectl"
-      version = "~> 1.19"
+      source  = "alekc/kubectl"
+      version = "~> 3.0"
     }
     github = {
       source  = "integrations/github"
