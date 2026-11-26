@@ -352,7 +352,7 @@ def mutations() -> list[Mutation]:
             "a Deny carries a multi-key Null condition, so it can never be satisfied",
             lambda t: _edit(
                 t,
-                "live/aws/management/us-east-1/org/org-scp/terragrunt.hcl",
+                "components/aws/org-scp/guardrails.tf",
                 '            Resource = "*"\n          },',
                 '            Resource = "*"\n'
                 "            Condition = {\n"

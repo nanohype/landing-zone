@@ -4,9 +4,17 @@ locals {
     Team      = var.team
   })
 
+  # The shipped guardrails, each with the targets the leaf binds it to, and the
+  # operator's own policies beside them. The variable validations keep the two
+  # name sets apart, so neither replaces the other.
+  policies = merge(
+    { for name, g in local.guardrails : name => merge(g, { target_ids = lookup(var.guardrail_targets, name, []) }) },
+    var.policies,
+  )
+
   # Flatten policies → attachments: one entry per (policy_key, target_id)
   policy_attachments = flatten([
-    for policy_key, policy in var.policies : [
+    for policy_key, policy in local.policies : [
       for target_id in policy.target_ids : {
         key        = "${policy_key}-${target_id}"
         policy_key = policy_key
@@ -21,7 +29,7 @@ locals {
 ################################################################################
 
 resource "aws_organizations_policy" "this" {
-  for_each = var.policies
+  for_each = local.policies
 
   name        = each.key
   description = each.value.description
@@ -46,7 +54,7 @@ resource "aws_organizations_policy_attachment" "this" {
 ################################################################################
 
 resource "aws_ssm_parameter" "policy_ids" {
-  for_each = var.policies
+  for_each = local.policies
 
   name  = "/platform/${var.environment}/scp/policies/${each.key}/id"
   type  = "String"

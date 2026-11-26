@@ -20,7 +20,7 @@ include "envcommon" {
 # another account's state fails at config-parse time (see `docs/inputs.md`, and the
 # gate at `scripts/check-account-local-deps.py`).
 #
-# `alert_email_endpoints` is empty for the same reason `target_ids` is empty in
+# `alert_email_endpoints` is empty for the same reason `guardrail_targets` is empty in
 # org-scp — an on-call address is an estate value, not a product default. A topic
 # set with no subscription delivers nowhere, and nothing in AWS reports that.
 inputs = {
