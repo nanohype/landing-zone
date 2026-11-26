@@ -161,6 +161,11 @@ tasks:
         done < <(git ls-files 'live/**/terragrunt.hcl' | grep '/terragrunt\.hcl$')
         [ "$fail" -eq 0 ] && echo "All live leaves evaluate cleanly." || exit 1
 
+  provider-vulns:
+    desc: Scan every locked provider with govulncheck, as CI's provider-vulns job does (needs govulncheck on PATH and the network)
+    cmds:
+      - python3 scripts/provider-vulns.py
+
   # === Planning ===
 
   plan:
