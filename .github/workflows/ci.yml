@@ -244,8 +244,16 @@ jobs:
         with:
           tofu_version: "1.13.9"
       - name: tofu test
+        env:
+          # The suites' roots lock the same provider versions, and each init would
+          # download them again. One cache for the job downloads each version once
+          # and links it into every root that locks it, after checking it against
+          # that root's lock file. Nothing restores the cache from another run.
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
         run: |
           set -euo pipefail
+          # OpenTofu caches nothing unless the directory already exists.
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           found=0
           # Each suite's init is its one network call, a provider download with no
           # deadline flag. `timeout` fails a stalled one in that suite, where the
