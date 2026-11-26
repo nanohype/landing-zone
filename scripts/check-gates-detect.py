@@ -376,6 +376,19 @@ def mutations() -> list[Mutation]:
             marker='blind_spot_output',
         ),
         Mutation(
+            "check-state-key-docs.py",
+            "a runbook deletes a stuck lock at a key without the leaf's path under live/",
+            # The real shape: RB-002's lock removal written against
+            # <env>/<component>, a key the backend never writes.
+            lambda t: _append(
+                t,
+                "docs/runbooks.md",
+                "\naws s3 rm s3://<account_id>-<region>-tfstate/<env>/<component>/terraform.tfstate.tflock"
+                " # " + token("check-state-key-docs.py") + "\n",
+            ),
+            marker=token("check-state-key-docs.py"),
+        ),
+        Mutation(
             "check-teardown-gates.py",
             "a protectable resource pins a teardown gate closed while the lever is set",
             lambda t: _edit(

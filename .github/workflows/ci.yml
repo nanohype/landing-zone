@@ -363,24 +363,38 @@ jobs:
         with:
           tg_version: "1.2.2"
           tofu_version: "1.13.9"
+      # Each leaf's rendered bucket and state key go to state-keys.tsv for the
+      # next step.
       - name: Render every live leaf
         run: |
           set -uo pipefail
           fail=0
+          keys="$RUNNER_TEMP/state-keys.tsv"
+          : > "$keys"
           while IFS= read -r leaf; do
             dir=$(dirname "$leaf")
             if ! ( cd "$dir" && TG_NON_INTERACTIVE=true terragrunt render \
-                     --format json --no-auto-init >/dev/null 2>/tmp/render.err ); then
+                     --format json --no-auto-init >"$RUNNER_TEMP/render.json" 2>/tmp/render.err ); then
               echo "::error::terragrunt render failed for $dir"
               tail -8 /tmp/render.err | sed 's/^/    /'
               fail=1
+              continue
             fi
+            python3 -c 'import json, sys; c = json.load(open(sys.argv[1]))["remote_state"]["config"]; print(sys.argv[2], c["bucket"], c["key"], sep="\t")' \
+              "$RUNNER_TEMP/render.json" "$dir" >>"$keys" || fail=1
           done < <(git ls-files 'live/**/terragrunt.hcl' | grep '/terragrunt\.hcl$')
           if [ "$fail" -ne 0 ]; then
             echo "One or more live leaves failed terragrunt evaluation (see errors above)."
             exit 1
           fi
           echo "All live leaves evaluate cleanly against their mocks."
+
+      # The runbooks act on a leaf's state key in an incident: RB-002 deletes a
+      # stuck lock by it and RB-004 restores a state version by it.
+      # scripts/check-state-key-docs.py holds every documented key to one shape;
+      # this proves that shape is the one the backend writes, for every leaf.
+      - name: Every leaf's state key has the documented shape
+        run: python3 scripts/check-state-key-docs.py --rendered "$RUNNER_TEMP/state-keys.tsv"
 
       # A required input nothing supplies makes a component UNPLANNABLE in every
       # environment it appears in. `governance` carried a `vpc_id` that no
@@ -1050,6 +1064,25 @@ jobs:
           python-version: "3.12"
       - run: python3 scripts/check-documented-oidc-trust.py
 
+  # docs/runbooks.md acts on a leaf's state key in an incident: RB-002 deletes a
+  # stuck lock by it and RB-004 restores a state version by it, so a documented
+  # key the backend does not write is a runbook that acts on nothing. This holds
+  # every state key and bucket the documentation names to the shape root.hcl
+  # writes; the evaluate job proves every leaf renders that shape.
+  state-key-docs:
+    name: Docs Name The Backend's State Key
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check-state-key-docs.py
+      - run: python3 scripts/check-state-key-docs.py --self-test
+
   # The staging and production plan roles trust the `drift` GitHub Environment,
   # whose deployment-branch policy admits main only, and that environment holds
   # DRIFT_PLAN_ROLE_ARNS, every account's id. A branch policy admits by ref, so
@@ -1427,6 +1460,7 @@ jobs:
         architecture-components,
         smoke-outputs,
         documented-oidc-trust,
+        state-key-docs,
         drift-workflow,
         region-consistency,
         gate-controls,
