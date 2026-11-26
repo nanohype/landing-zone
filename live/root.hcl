@@ -29,8 +29,10 @@ locals {
 }
 
 # --- Common inputs ---
-# region + environment are declared (no default) by every component, so the
-# root passes the resolved values down. Component-specific inputs (team,
+# Every component declares environment, and every component but portal-hub and
+# portal-spoke declares region, so the root passes the resolved values down.
+# Terragrunt hands inputs over as TF_VAR_ variables, which OpenTofu ignores for
+# a variable the component does not declare. Component-specific inputs (team,
 # cluster_name, tenants, …) come from each component's _envcommon/*.hcl.
 inputs = {
   region      = local.region
