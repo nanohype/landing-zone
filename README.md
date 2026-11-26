@@ -137,7 +137,7 @@ Five GitHub Actions workflows, all authenticating via AWS OIDC with no long-live
 | `ci.yml` | PR / push | placeholders, fmt, validate, tofu test, tflint, checkov, terragrunt evaluate, mock-outputs + smoke-outputs cross-checks, plan (per-leaf matrix, `workload-development` only) |
 | `deploy.yml` | Manual | Plan or apply with account/region/env/component inputs |
 | `destroy.yml` | Manual | Development/staging only, requires confirmation |
-| `drift.yml` | Scheduled | Weekday production + staging drift detection, creates GitHub issues |
+| `drift.yml` | Scheduled, off until armed | Weekday production + staging drift detection, creates GitHub issues. Turned off in the repository's Actions settings until the first account's plan role is recorded ([arming](docs/operations.md#arming-drift-detection-one-plan-role-per-account)) |
 | `e2e.yml` | Manual | Provisions a real substrate, installs the operator, deploys a tenant via GitOps, tears down (never scheduled) |
 
 ## Documentation
