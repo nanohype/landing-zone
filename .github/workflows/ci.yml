@@ -215,11 +215,16 @@ jobs:
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: "1.13.9"
-      - name: Init and Validate
+      # Init downloads the providers and has no deadline flag. The step's timeout
+      # turns a stalled download into a failed step that names it, where the job's
+      # 30 minutes would hold the runner and report a job timeout.
+      - name: Init
         working-directory: ${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }}
-        run: |
-          tofu init -backend=false -input=false -lockfile=readonly
-          tofu validate
+        timeout-minutes: 10
+        run: tofu init -backend=false -input=false -lockfile=readonly
+      - name: Validate
+        working-directory: ${{ matrix.root }}/${{ matrix.cloud }}/${{ matrix.component }}
+        run: tofu validate
 
   # `tofu test` unit tests. They run at command = plan against dummy/mocked
   # providers (no AWS access), so this is a hard gate on security contracts —
@@ -242,10 +247,13 @@ jobs:
         run: |
           set -euo pipefail
           found=0
+          # Each suite's init is its one network call, a provider download with no
+          # deadline flag. `timeout` fails a stalled one in that suite, where the
+          # job's 30 minutes would hold the runner and report a job timeout.
           while IFS= read -r dir; do
             found=1
             echo "::group::tofu test — $dir"
-            ( cd "$dir" && tofu init -backend=false -input=false -lockfile=readonly && tofu test )
+            ( cd "$dir" && timeout 10m tofu init -backend=false -input=false -lockfile=readonly && tofu test )
             echo "::endgroup::"
           done < <(git ls-files 'modules/**/tests/*.tftest.hcl' 'components/**/tests/*.tftest.hcl' 'fleet/**/tests/*.tftest.hcl' | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u)
           if [ "$found" -eq 0 ]; then
@@ -271,7 +279,13 @@ jobs:
       - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6
         with:
           tflint_version: v0.66.0
-      - run: tflint --init --config .tflint-aws.hcl
+      # The ruleset download goes through an HTTP client with no timeout, which
+      # bounds only the dial and the TLS handshake, and tflint has no deadline flag.
+      # The step's timeout turns a stalled download into a failed step that names
+      # it, where the job's 20 minutes would hold the runner.
+      - name: Install the tflint ruleset
+        timeout-minutes: 5
+        run: tflint --init --config .tflint-aws.hcl
       # tflint rule severities are fixed per rule, not configurable: the documented-
       # variables/outputs rules emit at `notice`, the unused-declaration and
       # required-version/providers rules at `warning`. Gating at `notice` is what makes
@@ -722,7 +736,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
+      - run: pip install --quiet pyyaml==6.0.3
       - run: python3 scripts/check-network-deadlines.py
+      - run: python3 scripts/check-network-deadlines.py --self-test
 
   # Both fleet boundaries cap the same cluster and agent-platform operator roles,
   # so an action granted in one ceiling and not the other is accepted at the
