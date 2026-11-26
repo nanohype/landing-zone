@@ -739,6 +739,7 @@ jobs:
       - run: pip install --quiet pyyaml==6.0.3
       - run: python3 scripts/check-network-deadlines.py
       - run: python3 scripts/check-network-deadlines.py --self-test
+      - run: python3 scripts/deadline.py --self-test
 
   # Both fleet boundaries cap the same cluster and agent-platform operator roles,
   # so an action granted in one ceiling and not the other is accepted at the

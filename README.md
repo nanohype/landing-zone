@@ -96,6 +96,7 @@ landing-zone/
 - [Terragrunt](https://terragrunt.gruntwork.io/) (latest)
 - [AWS CLI v2](https://aws.amazon.com/cli/)
 - [TFLint](https://github.com/terraform-linters/tflint) with the AWS plugin
+- [Python](https://www.python.org/) >= 3.11, for the Taskfile's deadlines and the gates under `scripts/`
 
 ## Quick Start
 
