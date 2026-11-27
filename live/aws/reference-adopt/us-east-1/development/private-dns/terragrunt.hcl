@@ -17,7 +17,7 @@ dependency "shared_dns" {
   mock_outputs = {
     profile_id = "rp-mock000000000001"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["validate", "plan"] : ["validate"]
 }
 
 inputs = {

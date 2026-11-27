@@ -35,13 +35,13 @@ docs = "docs/operations.md"
 vendored = []
 
 [floor]
-# What a scan must have seen to report a pass: the five workflows; the six mask
-# steps in deploy, destroy, ci's plan job, e2e, and drift's two jobs that read
-# the role map; and a read of each id above. Fewer means the scan stopped seeing
-# them, or a workflow stopped masking. Lower these only in the change that
-# removes one.
+# What a scan must have seen to report a pass: the five workflows; the seven mask
+# steps in deploy's plan and apply jobs, destroy, ci's plan job, e2e, and drift's
+# two jobs that read the role map; and a read of each id above. Fewer means the
+# scan stopped seeing them, or a workflow stopped masking. Lower these only in
+# the change that removes one.
 min_workflows = 5
-min_mask_steps = 6
+min_mask_steps = 7
 known_id_reads = [
   "AWS_ROLE_ARN",
   "DEPLOY_ACCOUNT_ID",
@@ -71,14 +71,14 @@ known_id_reads = [
 
 [[mutation]]
 name = "role-to-assume from a variable"
-file = "deploy.yml"
+file = "destroy.yml"
 old = 'role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}'
 new = 'role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}'
 must_say = "It must be `${{ secrets.NAME }}`"
 
 [[mutation]]
 name = "a variable in a later step's env"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
           DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           TARGET_ENV: ${{ inputs.environment }}
@@ -93,7 +93,7 @@ must_say = "A variable is never masked"
 
 [[mutation]]
 name = "a variable read with index syntax"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
           DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           TARGET_ENV: ${{ inputs.environment }}
@@ -108,7 +108,7 @@ must_say = "A variable is never masked"
 
 [[mutation]]
 name = "a variable read through a mixed-case context name"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
           DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           TARGET_ENV: ${{ inputs.environment }}
@@ -135,7 +135,7 @@ must_say = "a computed index or filter of the `vars` context"
 
 [[mutation]]
 name = "a step receives the secret before the mask step"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
       - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
 '''
@@ -149,8 +149,28 @@ new = '''
 must_say = "is the first to receive DEPLOY_ACCOUNT_ID"
 
 [[mutation]]
-name = "an early step reads the secret with index syntax"
+name = "a step in deploy's apply job receives the secret before that job's mask step"
 file = "deploy.yml"
+# The apply job's guard follows its checkout directly; the plan job's follows a
+# comment. Each job that reads the secret masks it first, whatever the job it
+# needs has already done.
+old = '''
+          persist-credentials: false
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+new = '''
+          persist-credentials: false
+      - name: Early
+        env:
+          EARLY: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+        run: echo early
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+'''
+must_say = "is the first to receive DEPLOY_ACCOUNT_ID"
+
+[[mutation]]
+name = "an early step reads the secret with index syntax"
+file = "destroy.yml"
 old = '''
       - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
 '''
@@ -165,7 +185,7 @@ must_say = "is the first to receive DEPLOY_ROLE_ARN"
 
 [[mutation]]
 name = "an early step reads the secret through a mixed-case context name"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
       - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
 '''
@@ -182,7 +202,7 @@ must_say = "is the first to receive DEPLOY_ROLE_ARN"
 # message is redacted, not only the text it quotes.
 [[mutation]]
 name = "an early step named with an account id reads the secret"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
       - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
 '''
@@ -197,7 +217,7 @@ must_say = "step 'Early <account id>'"
 
 [[mutation]]
 name = "an early step reads every variable at once"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
       - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
 '''
@@ -239,7 +259,7 @@ must_say = "and its first command is"
 
 [[mutation]]
 name = "the mask step is conditional"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
       - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
         env:
@@ -253,7 +273,7 @@ must_say = "has an `if:`"
 
 [[mutation]]
 name = "the mask step continues on error"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
       - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
         env:
@@ -317,7 +337,7 @@ must_say = "and its first command is"
 
 [[mutation]]
 name = "a receiving step runs after a failure"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
       - name: Verify the credential is in DEPLOY_ACCOUNT_ID's account
 '''
@@ -700,7 +720,7 @@ must_say = "in a job that can hold AWS credentials"
 
 [[mutation]]
 name = "configure-aws-credentials without mask-aws-account-id"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
           mask-aws-account-id: true
 '''
@@ -739,7 +759,7 @@ must_say = "passes `secrets: inherit`"
 # Shapes only one rule sees: each case is rejected by that rule and by no other.
 [[mutation]]
 name = "an expression the gate cannot read names a secret"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
           DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           TARGET_ENV: ${{ inputs.environment }}
@@ -755,7 +775,7 @@ must_say = "that mentions the secrets, vars or inputs context"
 
 [[mutation]]
 name = "every secret read through a `*` filter"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
           DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           TARGET_ENV: ${{ inputs.environment }}
@@ -819,10 +839,14 @@ must_say = "in its workflow-level `env`. Such a key takes only the guard form"
 [[mutation]]
 name = "a job that reads an environment's secret needs no job refusing it"
 file = "deploy.yml"
+# The plan job's needs; the apply job reaches refuse-inherited-config only
+# through it, so both are left without the refusal.
 old = '''
-    needs: refuse-inherited-config
+    needs: [refuse-inherited-config, refuse-apply-all]
 '''
-new = ''
+new = '''
+    needs: [refuse-apply-all]
+'''
 line = '^\s+DEPLOY_ROLE_ARN: \$\{\{ secrets\.DEPLOY_ROLE_ARN \}\}'
 must_say = "but no job it needs, with no environment, compares"
 
@@ -901,8 +925,8 @@ line = '^\s+DRIFT_PLAN_ROLE_ARNS: \$\{\{ secrets\.DRIFT_PLAN_ROLE_ARNS \}\}'
 must_say = "neither it nor a job it needs on the same environment compares"
 
 [[mutation]]
-name = "the deploy job's in-environment variable guard removed"
-file = "deploy.yml"
+name = "the destroy job's in-environment variable guard removed"
+file = "destroy.yml"
 old = '''
           DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           ROLE_ARN_VARIABLE: ${{ vars.DEPLOY_ROLE_ARN != '' }}
@@ -926,7 +950,7 @@ must_say = "A variable is never masked"
 
 [[accepted]]
 name = "mask-aws-account-id spelt in mixed case"
-file = "deploy.yml"
+file = "destroy.yml"
 old = '''
           mask-aws-account-id: true
 '''

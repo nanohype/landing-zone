@@ -338,6 +338,19 @@ def mutations() -> list[Mutation]:
             marker='blind_spot_key',
         ),
         Mutation(
+            "check-plan-mocks.py",
+            "a dependency admits its mocks to every plan, the one deploy.yml applies included",
+            lambda t: _edit(
+                t,
+                "live/_envcommon/aws/cluster.hcl",
+                'mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true")'
+                ' == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]',
+                'mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"] # '
+                + token("check-plan-mocks.py"),
+            ),
+            marker=token("check-plan-mocks.py"),
+        ),
+        Mutation(
             "check-region-consistency.py",
             # region-ok: eu-west-1 IS the injected violation — a region no tree
             # deploys into is the whole point of this control, and the region gate

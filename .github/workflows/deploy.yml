@@ -22,12 +22,12 @@ on:
           - staging
           - production
       component:
-        description: "Component to deploy (e.g., network, cluster, or 'all')"
+        description: "Component to plan or apply (e.g., network or cluster). 'all' plans every component and applies none"
         required: true
         type: string
         default: "all"
       action:
-        description: "Action to perform"
+        description: "plan, or apply: plan one component, then apply exactly that plan once its environment admits the apply"
         required: true
         type: choice
         options:
@@ -40,7 +40,10 @@ permissions:
 # Serialize mutating runs against the same environment/component so two dispatched
 # applies (or an apply racing a destroy) can't plan-and-write concurrently against one
 # target's state. The group is shared with destroy.yml (same `mutate-<env>-<component>`
-# key) so deploy and destroy of the same target queue behind each other too.
+# key) so deploy and destroy of the same target queue behind each other too. A run
+# holds the group from its plan through its apply, the wait for the apply's approval
+# included, so no other deploy or destroy of the same target moves its state between
+# the two; a change made any other way makes tofu refuse the saved plan as stale.
 # cancel-in-progress is false: never abort an apply mid-flight — let it finish and run
 # the next dispatch after.
 concurrency:
@@ -68,8 +71,9 @@ jobs:
   # exists prints its account id. The GITHUB_TOKEN cannot read repository
   # variables, so no other check is available: delete the old variables, and
   # never run this workflow with debug logging while one exists. Failing here
-  # costs no environment approval. The deploy job repeats the variable check in
-  # its environment, which also sees a variable left on the environment itself.
+  # costs no environment approval. The plan and apply jobs repeat the variable
+  # check in their environment, which also sees a variable left on the
+  # environment itself.
   refuse-inherited-config:
     name: Refuse repository-level DEPLOY_* secrets and any DEPLOY_* variable
     runs-on: ubuntu-latest
@@ -107,18 +111,47 @@ jobs:
           fi
           echo "DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID are set at neither repository nor organization level, as a secret or as a variable."
 
-  deploy:
+  # An apply takes one component. A saved plan fixes its inputs when it is
+  # made, so a run applying several units' saved plans would apply a unit's plan
+  # against the outputs an earlier unit in the same run had just changed. Each
+  # environment approval therefore covers exactly one saved plan, and
+  # component=all plans every unit and applies none. This job declares no
+  # environment, so refusing here costs no approval.
+  refuse-apply-all:
+    name: Refuse an apply of every component
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require an apply to name one component
+        env:
+          ACTION: ${{ inputs.action }}
+          COMPONENT: ${{ inputs.component }}
+        run: |
+          if [ "$ACTION" = "apply" ] && [ "$COMPONENT" = "all" ]; then
+            echo "::error title=An apply takes one component::component=all plans every component and applies none. Apply one component per run, in dependency order (see docs/operations.md)."
+            exit 1
+          fi
+          echo "The run plans, or applies one component."
+
+  # Plans one component, or every component for component=all, and puts the
+  # plan in the job summary. For an apply it also saves the plan for the apply
+  # job, which applies exactly that file.
+  plan:
     permissions:
       # Scoped to this job rather than the workflow: a job added here later
       # would otherwise inherit the right to mint an OIDC token and assume
       # the AWS deploy role without anyone granting it.
       id-token: write
       contents: read
-    name: ${{ inputs.action }} ${{ inputs.environment }}/${{ inputs.component }}
-    needs: refuse-inherited-config
+    name: plan ${{ inputs.environment }}/${{ inputs.component }}
+    needs: [refuse-inherited-config, refuse-apply-all]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
+    outputs:
+      plan_key: ${{ steps.plan.outputs.plan_key }}
+      plan_sha256: ${{ steps.plan.outputs.plan_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -269,7 +302,8 @@ jobs:
           fi
           echo "The assumed credential is in DEPLOY_ACCOUNT_ID's account."
 
-      - name: Run Terragrunt
+      - name: Plan
+        id: plan
         working-directory: live/aws/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
         # Dispatch inputs reach the shell through env, never through ${{ }} inside
         # the script. A ${{ }} expansion is substituted into the script TEXT before
@@ -278,32 +312,50 @@ jobs:
         # under the deploy role's AWS credentials. An env var is a value bash reads,
         # not text bash parses.
         #
-        # No one is at the keyboard, so both paths run non-interactively and
-        # hand tofu the same flags. --non-interactive answers terragrunt's own
-        # prompts (the terragrunt 1.x spelling; TG_NON_INTERACTIVE as an env
-        # var). It does not answer tofu's, and tofu has two: the "Enter a value:"
-        # prompt for a required variable nothing set, and apply's confirmation.
-        # With stdin closed the variable prompt fails ("No value for required
-        # variable") and the confirmation fails ("error asking for approval:
-        # EOF"); with stdin held open either waits out the job timeout.
-        # `run --all` appends -input=false to plan and apply, and -auto-approve
-        # to apply, on its own.
-        # A single unit passes the tofu command through as written, so the
-        # single-component path spells the same flags out: -input=false on both
-        # commands, -auto-approve on apply only (plan has nothing to confirm).
-        # A unit missing a required variable therefore fails fast on either
-        # path, and an apply proceeds without a prompt on either. Terragrunt's
+        # No one is at the keyboard, so the plan runs non-interactively.
+        # --non-interactive answers terragrunt's own prompts (the terragrunt 1.x
+        # spelling; TG_NON_INTERACTIVE as an env var). It does not answer tofu's
+        # "Enter a value:" prompt for a required variable nothing set: with stdin
+        # closed it fails ("No value for required variable"), and with stdin held
+        # open it waits out the job timeout. `run --all` appends -input=false to
+        # the plan on its own; a single unit passes the tofu command through as
+        # written, so that path spells -input=false out. A unit missing a
+        # required variable therefore fails fast on either path. Terragrunt's
         # automatic `tofu init` takes no flag from either command line, so
         # TF_INPUT=false covers it: tofu reads it as -input=false on every
-        # command, init included, so a backend or variable needing a value
-        # fails at once there too, on both paths, instead of waiting at a
-        # prompt. A human still decides before anything changes: the
-        # environment's protection rules hold the job before it starts
-        # (production requires approval).
+        # command, init included.
+        #
+        # The saved plan reads only real dependency outputs.
+        # MOCK_OUTPUTS_IN_PLAN=false takes `plan` off every dependency's
+        # mock_outputs_allowed_terraform_commands, and
+        # scripts/check-plan-mocks.py holds every dependency in live/, and every
+        # step that saves a plan, to that. A dependency with no state, or one
+        # whose state lacks an output this unit reads, then fails the plan, where
+        # a mock would have gone into the saved plan and from there into the
+        # apply. component=all saves no plan: it plans every unit before any is
+        # applied, so it sets MOCK_OUTPUTS_IN_PLAN=true on that one command, and
+        # a unit whose dependency has no state yet plans against that
+        # dependency's mocks there. Nothing applies it.
+        #
+        # The plan's text goes in the job summary through
+        # scripts/redact-account-ids.py. The runner masks this environment's
+        # account id there as it does in the log, but a plan also names other
+        # accounts (a shared-services topic, a RAM share), and the redactor
+        # removes every account id. For an apply, the plan file goes to the
+        # state bucket of DEPLOY_ACCOUNT_ID's account, not to an artifact: this
+        # repository is public, a workflow artifact can be downloaded by anyone,
+        # and a saved plan holds the values of every attribute it plans,
+        # sensitive ones included. The bucket already holds the state those
+        # values come from. --expected-bucket-owner makes S3 refuse the write
+        # unless that account owns the bucket. The plan's key and SHA-256 reach
+        # the apply job as job outputs, and neither holds an account id.
         env:
           TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
           COMPONENT: ${{ inputs.component }}
           ACTION: ${{ inputs.action }}
+          REGION: ${{ inputs.region }}
+          TARGET_ENV: ${{ inputs.environment }}
+          MOCK_OUTPUTS_IN_PLAN: "false"
           TF_INPUT: "false"
         run: |
           case "$ACTION" in
@@ -314,12 +366,183 @@ jobs:
               ;;
           esac
           if [ "$COMPONENT" = "all" ]; then
-            terragrunt run --all --non-interactive -- "$ACTION"
-          else
-            cd "$COMPONENT"
-            if [ "$ACTION" = "apply" ]; then
-              terragrunt run --non-interactive -- apply -input=false -auto-approve
-            else
-              terragrunt run --non-interactive -- plan -input=false
-            fi
+            MOCK_OUTPUTS_IN_PLAN=true terragrunt run --all --non-interactive -- plan
+            echo "Planned every component of ${TARGET_ENV}. component=all applies none; each unit's plan is in this step's log." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+          cd "$COMPONENT"
+          plan_file="$RUNNER_TEMP/tfplan"
+          terragrunt run --non-interactive -- plan -input=false -out="$plan_file"
+          terragrunt run --non-interactive --tf-forward-stdout -- show -no-color "$plan_file" > "$RUNNER_TEMP/tfplan.txt"
+          python3 "$GITHUB_WORKSPACE/scripts/redact-account-ids.py" < "$RUNNER_TEMP/tfplan.txt" > "$RUNNER_TEMP/tfplan.redacted.txt"
+          plan_sha256=$(sha256sum "$plan_file" | cut -d ' ' -f 1)
+          {
+            echo "## ${ACTION} ${TARGET_ENV}/${COMPONENT}"
+            echo
+            if [ "$ACTION" = "apply" ]; then
+              echo "The apply job applies exactly this plan, SHA-256 \`${plan_sha256}\`, once the ${TARGET_ENV} environment admits it."
+            else
+              echo "A plan only: an apply plans again, and applies that plan."
+            fi
+            echo
+            # A step's summary is capped at 1 MiB, and one over it is not
+            # uploaded at all; the plan's text is also in this step's log.
+            if [ "$(wc -c < "$RUNNER_TEMP/tfplan.redacted.txt")" -gt 1000000 ]; then
+              echo "The plan's text is over 1 MB, more than a job summary holds. It is in this step's log."
+            else
+              echo '````text'
+              cat "$RUNNER_TEMP/tfplan.redacted.txt"
+              echo '````'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$ACTION" = "apply" ]; then
+            plan_key="deploy-plans/${TARGET_ENV}/${COMPONENT}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tfplan"
+            aws s3api put-object --bucket "${TERRAGRUNT_ACCOUNT_ID}-${REGION}-tfstate" --key "$plan_key" \
+              --body "$plan_file" --expected-bucket-owner "$TERRAGRUNT_ACCOUNT_ID" > /dev/null
+            echo "plan_key=${plan_key}" >> "$GITHUB_OUTPUT"
+            echo "plan_sha256=${plan_sha256}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Applies the plan the plan job saved, and nothing else. The job declares the
+  # same environment, so its protection rules hold it again: production asks
+  # for a second approval here, with the plan in the plan job's summary in front
+  # of the reviewer. Development and staging have no reviewers, so their apply
+  # follows the plan without a pause, and still applies only the saved plan.
+  #
+  # Its first six steps are the plan job's own, for the same reasons: see the
+  # comments there. The guard is again the first step to receive either secret,
+  # and masks both before anything prints.
+  apply:
+    permissions:
+      # Scoped to this job, as on the plan job: it mints the OIDC token that
+      # assumes the deploy role again, for the apply.
+      id-token: write
+      contents: read
+    name: apply ${{ inputs.environment }}/${{ inputs.component }}
+    needs: plan
+    if: inputs.action == 'apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Require DEPLOY_ROLE_ARN, DEPLOY_ACCOUNT_ID and a matching leaf
+        env:
+          DEPLOY_ROLE_ARN: ${{ secrets.DEPLOY_ROLE_ARN }}
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          ROLE_ARN_VARIABLE: ${{ vars.DEPLOY_ROLE_ARN != '' }}
+          ACCOUNT_ID_VARIABLE: ${{ vars.DEPLOY_ACCOUNT_ID != '' }}
+          TARGET_ENV: ${{ inputs.environment }}
+          ACCOUNT: ${{ inputs.account }}
+          REGION: ${{ inputs.region }}
+          COMPONENT: ${{ inputs.component }}
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/mask-aws-ids.sh" --optional DEPLOY_ROLE_ARN DEPLOY_ACCOUNT_ID
+          failed=0
+          if [ "$ROLE_ARN_VARIABLE" != "false" ]; then
+            echo "::error title=DEPLOY_ROLE_ARN is still a variable::DEPLOY_ROLE_ARN is set as a variable on the ${TARGET_ENV} environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it: gh variable delete DEPLOY_ROLE_ARN --env ${TARGET_ENV} --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable; for an organization variable, narrow its repository access so this repository no longer sees it, or gh variable delete DEPLOY_ROLE_ARN --org <org> if nothing else uses it. It is a secret on the environment now (see docs/operations.md)."
+            failed=1
+          fi
+          if [ "$ACCOUNT_ID_VARIABLE" != "false" ]; then
+            echo "::error title=DEPLOY_ACCOUNT_ID is still a variable::DEPLOY_ACCOUNT_ID is set as a variable on the ${TARGET_ENV} environment, the repository or the organization. Variables are never masked, so it would reach the public Actions logs. Delete it: gh variable delete DEPLOY_ACCOUNT_ID --env ${TARGET_ENV} --repo <owner>/<repo> for an environment variable, the same without --env for a repository variable; for an organization variable, narrow its repository access so this repository no longer sees it, or gh variable delete DEPLOY_ACCOUNT_ID --org <org> if nothing else uses it. It is a secret on the environment now (see docs/operations.md)."
+            failed=1
+          fi
+          if [ -z "$DEPLOY_ACCOUNT_ID" ]; then
+            echo "::error title=DEPLOY_ACCOUNT_ID is not set::The ${TARGET_ENV} environment has no DEPLOY_ACCOUNT_ID secret (Settings > Environments > ${TARGET_ENV} > Environment secrets), so root.hcl would name the state bucket after the tracked account.hcl placeholder. Set it to the 12-digit id of the workload-${TARGET_ENV} account (see docs/operations.md)."
+            failed=1
+          elif ! [[ "$DEPLOY_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error title=DEPLOY_ACCOUNT_ID is not an account id::The ${TARGET_ENV} environment's DEPLOY_ACCOUNT_ID is not a 12-digit AWS account id."
+            failed=1
+          fi
+          if [ -z "$DEPLOY_ROLE_ARN" ]; then
+            echo "::error title=DEPLOY_ROLE_ARN is not set::The ${TARGET_ENV} environment has no DEPLOY_ROLE_ARN secret (Settings > Environments > ${TARGET_ENV} > Environment secrets). Set it to the github-oidc deploy role in the workload-${TARGET_ENV} account (see docs/operations.md)."
+            failed=1
+          elif ! [[ "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/.+$ ]]; then
+            echo "::error title=DEPLOY_ROLE_ARN is not a role ARN::The ${TARGET_ENV} environment's DEPLOY_ROLE_ARN is not an IAM role ARN (arn:aws:iam::<account>:role/<name>)."
+            failed=1
+          elif [ -n "$DEPLOY_ACCOUNT_ID" ] && [ "${BASH_REMATCH[1]}" != "$DEPLOY_ACCOUNT_ID" ]; then
+            echo "::error title=DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID name different accounts::The ${TARGET_ENV} environment's DEPLOY_ROLE_ARN is a role in a different account from its DEPLOY_ACCOUNT_ID. Set both to the workload-${TARGET_ENV} account."
+            failed=1
+          fi
+          if [ "$ACCOUNT" != "workload-${TARGET_ENV}" ]; then
+            echo "::error title=Account does not match the environment::The ${TARGET_ENV} environment carries the role and account id of the workload-${TARGET_ENV} account, so it can only deploy leaves under live/aws/workload-${TARGET_ENV}/. Run leaves in other account directories locally (see docs/operations.md)."
+            failed=1
+          elif ! [[ "$REGION" =~ ^[a-z0-9-]+$ ]] || [ ! -f "live/aws/${ACCOUNT}/${REGION}/${TARGET_ENV}/env.hcl" ]; then
+            echo "::error title=No such live environment::live/aws/${ACCOUNT}/<region>/${TARGET_ENV} has no env.hcl for the region input. Check it against the region directories under live/aws/${ACCOUNT}/."
+            failed=1
+          elif [ "$COMPONENT" != "all" ] && { ! [[ "$COMPONENT" =~ ^[a-z0-9-]+$ ]] || [ ! -f "live/aws/${ACCOUNT}/${REGION}/${TARGET_ENV}/${COMPONENT}/terragrunt.hcl" ]; }; then
+            echo "::error title=No such component::The component input must be all or the name of a directory holding a terragrunt.hcl under live/aws/${ACCOUNT}/${REGION}/${TARGET_ENV}/."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "DEPLOY_ROLE_ARN and DEPLOY_ACCOUNT_ID are set for ${TARGET_ENV}, and the leaf exists."
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+        with:
+          tofu_version: "1.13.9"
+      - uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # v3
+        with:
+          tg_version: "1.2.2"
+          tofu_version: "1.13.9"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+          mask-aws-account-id: true
+
+      - name: Verify the credential is in DEPLOY_ACCOUNT_ID's account
+        env:
+          DEPLOY_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if ! caller_account=$(aws sts get-caller-identity --query Account --output text); then
+            echo "::error title=Could not read the credential's account::sts get-caller-identity failed for the assumed DEPLOY_ROLE_ARN, so the target account could not be confirmed."
+            exit 1
+          fi
+          if [ "$caller_account" != "$DEPLOY_ACCOUNT_ID" ]; then
+            echo "::error title=The credential is not in DEPLOY_ACCOUNT_ID's account::The role the ${TARGET_ENV} environment's DEPLOY_ROLE_ARN names did not issue a credential in the account its DEPLOY_ACCOUNT_ID names. Set both to the workload-${TARGET_ENV} account."
+            exit 1
+          fi
+          echo "The assumed credential is in DEPLOY_ACCOUNT_ID's account."
+
+      # The plan file comes back from the bucket the plan job put it in, and it
+      # must hash to the SHA-256 that job reported and its summary shows: the
+      # approval covered that plan, so a different file is refused before tofu
+      # sees it. Applying a saved plan asks no confirmation, and tofu refuses one
+      # the state has moved past since it was made ("Saved plan is stale"), so an
+      # apply is exactly the reviewed plan or nothing.
+      #
+      # The plan object is deleted once its apply succeeds. After a failure it
+      # stays, so re-running this job applies the same plan, which tofu refuses
+      # if the failed attempt moved the state; a new run then plans afresh.
+      - name: Apply the saved plan
+        working-directory: live/aws/${{ inputs.account }}/${{ inputs.region }}/${{ inputs.environment }}
+        env:
+          TERRAGRUNT_ACCOUNT_ID: ${{ secrets.DEPLOY_ACCOUNT_ID }}
+          COMPONENT: ${{ inputs.component }}
+          REGION: ${{ inputs.region }}
+          PLAN_KEY: ${{ needs.plan.outputs.plan_key }}
+          PLAN_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+          TF_INPUT: "false"
+        run: |
+          if [[ "$PLAN_KEY" != deploy-plans/*.tfplan ]] || ! [[ "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error title=No saved plan::The plan job passed no saved plan, so there is nothing this run may apply."
+            exit 1
+          fi
+          plan_file="$RUNNER_TEMP/tfplan"
+          aws s3api get-object --bucket "${TERRAGRUNT_ACCOUNT_ID}-${REGION}-tfstate" --key "$PLAN_KEY" \
+            --expected-bucket-owner "$TERRAGRUNT_ACCOUNT_ID" "$plan_file" > /dev/null
+          if [ "$(sha256sum "$plan_file" | cut -d ' ' -f 1)" != "$PLAN_SHA256" ]; then
+            echo "::error title=Not the plan the plan job saved::The plan file in the state bucket does not hash to the SHA-256 the plan job reported, so it is not the plan that was reviewed. Nothing was applied."
+            exit 1
+          fi
+          cd "$COMPONENT"
+          terragrunt run --non-interactive -- apply -input=false "$plan_file"
+          aws s3api delete-object --bucket "${TERRAGRUNT_ACCOUNT_ID}-${REGION}-tfstate" --key "$PLAN_KEY" \
+            --expected-bucket-owner "$TERRAGRUNT_ACCOUNT_ID" > /dev/null
