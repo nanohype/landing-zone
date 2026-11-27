@@ -1,15 +1,16 @@
 # shared-backup — the owner side of central backup.
 #
-# A dedicated backup account runs this component in the DR region to hold the durable copy
-# of every workload account's backups. Workload accounts keep a local vault for fast
+# A dedicated backup account runs this component to hold the durable copy of every
+# workload account's backups. Workload accounts keep a local vault for fast
 # restores (components/aws/backup) and add a copy_action targeting the vault this component
 # owns, so a recovery point survives the loss — compromise, or a confident delete — of the
 # account that produced it.
 #
 # The seam this closes: a backup that lives only in the account it protects is one account
 # event away from being gone with the thing it protected. Moving the durable copy to a
-# separate account in a second region survives both an account-level event and a region
-# loss (region-model R4's backup-and-restore DR posture, RPO ~24h).
+# separate account survives an account-level event. Surviving a region loss as well
+# (region-model R4's backup-and-restore DR posture, RPO ~24h) needs the vault in a second
+# region, and the estate runs in us-east-1 alone (live/aws/backup/us-east-1/region.hcl).
 #
 # Cross-account copy into this vault is authorized two ways, both scoped to the org: the
 # vault access policy admits backup:CopyIntoBackupVault, and the vault CMK admits the

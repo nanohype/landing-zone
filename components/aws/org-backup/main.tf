@@ -8,8 +8,9 @@
 #      centrally instead of the management account.
 #   3. An Organizations backup policy (type BACKUP_POLICY) attached to the org root or OUs —
 #      a floor that backs up every BackupPolicy-tagged resource in every member account to
-#      that account's Default vault and copies it to the central vault, whether or not the
-#      account ever deployed its own backup component. Member accounts cannot opt out.
+#      that account's Default vault, and copies it to the central vault when the policy
+#      carries a copy action, whether or not the account ever deployed its own backup
+#      component. Member accounts cannot opt out.
 #
 # The policy is generated from a structured input into the @@assign / @@append document shape
 # AWS Organizations requires, with $account substituted per member account at evaluation.

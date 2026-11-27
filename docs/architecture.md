@@ -208,7 +208,7 @@ component: it is written on `Platform.spec.datastores` and provisioned by
 | **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed per environment — each workload environment runs its own for that environment's cluster, and the hub runs one for its own. | *(required input)* |
 | **private-dns** | Private hosted zones for a workload account, `create` or `adopt` mode, associated to the shared Route53 profile | platform |
 | **shared-dns** | Owner side of private DNS: the hosted zones plus the Route53 profile the workload accounts adopt | platform |
-| **shared-backup** | Owner side of central backup — the destination vault a workload account's plan copies into, in a second account and the DR region. See [What backs up what](#what-backs-up-what) | sre |
+| **shared-backup** | Owner side of central backup — the destination vault a workload account's plan copies into, in a second account in the same region. See [What backs up what](#what-backs-up-what) | sre |
 | **shared-observability** | Fleet-wide destination for alarm delivery, so a spoke's alarms reach one place rather than each account's own topic | sre |
 
 ### What backs up what
@@ -221,7 +221,14 @@ what is the difference between "we have backups" and "we have backups of the thi
 | covers | tenant datastores — databases, key-value tables, object stores, streams | Kubernetes API objects and persistent-volume snapshots |
 | selected by | the `BackupPolicy` tag | Velero's own schedules, in-cluster |
 | owned by | `backup` (per account) + `org-backup` (org-wide floor) + `shared-backup` (the central vault) | the `velero` addon, with an S3 bucket from `cluster-addons` |
-| durable copy | a second account, in the DR region, on a multi-region CMK | the cluster's own account and region, unless opted in below |
+| durable copy | a second account, in the same region, on a multi-region CMK, once that account is provisioned (below) | the cluster's own account and region, unless opted in below |
+
+**The durable copy survives losing an account, not a region, and it is not in force yet.** The
+central vault is in us-east-1 with the rest of the estate (`live/aws/backup/us-east-1/region.hcl`),
+so a copy there outlives the account that produced it but not the region. And while
+`live/aws/backup/account.hcl` carries its placeholder id, `live/_envcommon/aws/backup.hcl`
+composes no vault ARN: no plan rule carries a copy action, and recovery points stay in each
+account's own vault until the backup account is provisioned.
 
 **AWS Backup cannot cover cluster state.** It has no EKS resource type, so no amount of tagging
 makes it capture a Deployment, a ConfigMap or a CRD. And nothing stamps `BackupPolicy` on the
@@ -233,8 +240,9 @@ visibility into an RDS instance or a DynamoDB table. Neither system is a superse
 `shared-backup` exists because "a backup that lives only in the account it protects is one
 account event away from being gone with the thing it protected" — and that describes the Velero
 bucket exactly. Set `velero_backup_policy` on `cluster-addons` to a plan key to bring it into the
-same substrate: the plan copies its recovery points to the central vault, cross-account and
-cross-region. Default off, because it costs money and no one should discover that on a bill.
+same substrate: the plan copies its recovery points to the central vault, cross-account once
+the backup account is provisioned, and in the same region. Default off, because it costs money
+and no one should discover that on a bill.
 
 **A cluster's own restore points are not meant to outlive it.** Clusters here are agent-managed
 and often short-lived — an eks-fleet `Cluster` with `ttlDays > 0` is tagged `Lifecycle=ephemeral`
@@ -347,7 +355,7 @@ GitHub Actions assumes its roles via OIDC federation -- no long-lived credential
 
 ### Pod Authentication (EKS Pod Identity)
 
-The `modules/aws/workload-identity/` module creates IAM roles for service accounts using **EKS Pod Identity**: each role's trust policy targets `pods.eks.amazonaws.com` (not an OIDC provider) and is bound to an exact (cluster, namespace, service-account) through an EKS Pod Identity association. A `tofu test` gate asserts the trust stays Pod-Identity-only. Every in-cluster workload role is minted this way, and multi-tenant components mint one role per tenant. Web-identity (OIDC) trust is reserved for the roles assumed from outside the cluster — the agent-platform operator (`agent-iam`), `fleet-hub`, `portal-hub`, and GitHub Actions CI federation. See the [Threat Model](threat-model.md) for the reasoning.
+The `modules/aws/workload-identity/` module creates IAM roles for service accounts using **EKS Pod Identity**: each role's trust policy targets `pods.eks.amazonaws.com` (not an OIDC provider) and is bound to an exact (cluster, namespace, service-account) through an EKS Pod Identity association. A `tofu test` gate asserts the trust stays Pod-Identity-only. Every pod role this repository mints comes from it, each tenant's roles in `druid`, `pipeline` and `governance` included, with three exceptions. The agent-platform operator (`agent-iam`), the eks-fleet Crossplane runner (`fleet-hub`) and the portal worker (`portal-hub`) are IRSA roles: each trusts the OIDC provider of the cluster its pod runs in, for one service account. `tenant-substrate` mints no role; the operator creates each agent-platform tenant's role at runtime, under the path and permissions boundary `agent-iam` sets. The one web-identity trust from outside a cluster is GitHub Actions CI federation. See the [Threat Model](threat-model.md) for the reasoning.
 
 ### Guardrails
 

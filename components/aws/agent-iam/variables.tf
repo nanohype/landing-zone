@@ -141,9 +141,10 @@ variable "artifacts_backup_policy" {
     is regenerable from the substrate.
 
     Set it to bring both into the same durability substrate the tenant datastores use: the plan
-    copies recovery points to the central vault in the backup account's DR region, so the
-    artifacts survive the loss of the account that produced them. Billed — the backup itself,
-    plus the noncurrent versions it retains alongside the lifecycle rule above.
+    copies recovery points to the central vault in the backup account, so the artifacts
+    survive the loss of the account that produced them. The copy starts once the backup
+    account is provisioned; until then the recovery points stay in this account. Billed — the
+    backup itself, plus the noncurrent versions it retains alongside the lifecycle rule above.
 
     The AWS Backup S3 prerequisite is met by construction here: both buckets enable versioning
     unconditionally, so unlike the tenant object stores there is no per-bucket gate to apply.

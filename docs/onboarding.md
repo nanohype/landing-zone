@@ -49,7 +49,7 @@ Run the local validation suite -- no cloud credentials needed:
 task check
 ```
 
-This is the sequence CI runs: formatting, validation, lint, the `tofu test` suites, and every gate under `scripts/`. If `tflint` fails, make sure you ran `tflint --init -c .tflint-aws.hcl` to install the plugin.
+It runs formatting, validation, lint, the `tofu test` suites, every gate under `scripts/` with its self-test, the gates' coverage floor, and the credential-less render of every leaf. CI runs all of it, and also checkov and zizmor, the locked providers' vulnerability scan, the required-inputs check, the PR plan and the tenant re-render. If `tflint` fails, make sure you ran `tflint --init -c .tflint-aws.hcl` to install the plugin.
 
 ## Your First Plan
 

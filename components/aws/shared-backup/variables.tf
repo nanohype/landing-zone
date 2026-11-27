@@ -14,10 +14,10 @@ variable "environment" {
 
 # Uniform envcommon interface variable — every component declares it for live/_envcommon wiring.
 # The provider carries the region; this component names no region-qualified resources, so the
-# value is not referenced directly. The DR region is expressed by where this leaf is placed.
+# value is not referenced directly. The vault's region is expressed by where this leaf is placed.
 # tflint-ignore: terraform_unused_declarations
 variable "region" {
-  description = "AWS region — the DR region this central vault is placed in."
+  description = "AWS region the central vault is placed in."
   type        = string
 }
 

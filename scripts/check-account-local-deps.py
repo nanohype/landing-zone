@@ -78,10 +78,10 @@ LIVE = ROOT / "live" / "aws"
 # the rule is an accident that reads identically.
 EXEMPT: dict[str, str] = {
     "live/_envcommon/aws/backup.hcl": (
-        "Reads the backup account's account.hcl and its DR-region region.hcl to compose "
-        "the central vault ARN. Deliberate, and the reasoning is at backup.hcl:19-40: it "
-        "reads the SAME region.hcl the shared-backup leaves sit under, so moving the DR "
-        "region is one file rather than a constant here and another under live/aws/backup/. "
+        "Reads the backup account's account.hcl and region.hcl to compose the central vault "
+        "ARN. Deliberate, and the reasoning is in backup.hcl's locals: reading the SAME "
+        "region.hcl the shared-backup leaves sit under makes moving the vault's region one "
+        "file rather than a constant here and another under live/aws/backup/. "
         "It also gates on the placeholder — an unprovisioned backup account yields an empty "
         "ARN and no copy_action at all, rather than a durability claim terminating nowhere. "
         "This is a cross-account READ of configuration, not a dependency on another "

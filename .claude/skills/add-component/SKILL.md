@@ -85,7 +85,9 @@ Scaffold a new component named `$ARGUMENTS`.
    position so reordering cannot mask a regression.
 
 7. **Run the gates**: `task check` — formatting, validation, lint, the `tofu test`
-   suites, and every script under `scripts/`. This is what CI runs.
+   suites, and every gate under `scripts/` with its self-test. CI runs all of it, and
+   also checkov and zizmor, the locked providers' vulnerability scan, the
+   required-inputs check, the PR plan and the tenant re-render.
 
 8. **Show next steps**: no workflow edit is needed. The `ci.yml` validate, test
    and plan matrices are auto-discovered from the tree via `git ls-files`, so the

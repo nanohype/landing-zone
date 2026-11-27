@@ -80,9 +80,10 @@ LEAF = re.compile(r"live/aws/(?P<account>[^/]+)/(?P<region>[^/]+)/(?P<env>[^/]+)
 # The spellings of a placeholder the documentation uses, folded to the shape's.
 SYNONYMS = {"environment": "env", "account_dir": "account"}
 
-# The documentation names the key in eight places, five of them in the runbooks,
-# and the scan reads several dozen files. Fewer than this means the scan, not the
-# documentation, changed.
+# Floors under what the scan must find before it reports a pass, since a scan that
+# recognises nothing passes vacuously. Both sit below what the documentation holds,
+# so finding fewer means the scan stopped reading it (a moved file, a narrowed glob,
+# a pattern that no longer matches), and the gate refuses.
 MIN_KEYS = 5
 MIN_FILES = 10
 

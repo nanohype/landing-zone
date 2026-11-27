@@ -6,17 +6,16 @@ locals {
   env_vars    = read_terragrunt_config(find_in_parent_folders("env.hcl"))
   environment = local.env_vars.locals.environment
 
-  # Backup account that owns shared-backup in the DR region. Cross-account SSM is
-  # not readable from workload accounts, so the central vault ARN is composed
-  # from the account catalog + the vault naming convention
-  # (<env>-central-backup-vault) rather than looked up at plan time. Replacing
-  # the placeholder in live/aws/backup/account.hcl is what makes the ARN real —
-  # and until it is replaced, no ARN is composed at all (see below).
+  # Backup account that owns shared-backup. Cross-account SSM is not readable from
+  # workload accounts, so the central vault ARN is composed from the account catalog
+  # + the vault naming convention (<env>-central-backup-vault) rather than looked up
+  # at plan time. Replacing the placeholder in live/aws/backup/account.hcl is what
+  # makes the ARN real — and until it is replaced, no ARN is composed at all (see below).
   backup_account = read_terragrunt_config("${dirname(find_in_parent_folders("cloud.hcl"))}/backup/account.hcl")
 
-  # shared-backup lives in the DR region (region-model R4), not the primary.
-  # Read the same region.hcl the shared-backup leaves sit under so a DR-region
-  # move is one file, not a constant here and another under live/aws/backup/.
+  # shared-backup's region, read from the region.hcl its leaves sit under, so moving
+  # the vault to a second region (region-model R4) is one file, not a constant here
+  # and another under live/aws/backup/. Today it is us-east-1, the estate's only region.
   central_backup_region = read_terragrunt_config(
     "${dirname(find_in_parent_folders("cloud.hcl"))}/backup/us-east-1/region.hcl"
   ).locals.region

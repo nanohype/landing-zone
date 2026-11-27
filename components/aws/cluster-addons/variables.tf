@@ -40,9 +40,10 @@ variable "velero_backup_policy" {
 
     Set it to bring cluster-state restore points into the same durability substrate the tenant
     datastores use: the plan copies recovery points to the central vault in the backup
-    account's DR region, so a cluster's backups survive the loss of the account that produced
-    them. Without it, Velero's restore points live only in the account and region of the
-    cluster they protect.
+    account, so a cluster's backups survive the loss of the account that produced them. The
+    copy starts once the backup account is provisioned; until then the restore points stay in
+    this account. Without it, Velero's restore points live only in the account and region of
+    the cluster they protect.
 
     Setting this also enables S3 Versioning on the bucket, which AWS Backup requires for S3.
     Both are billed — the backup itself, and the noncurrent versions Velero's own TTL deletes
@@ -107,9 +108,9 @@ variable "force_destroy_buckets" {
     lands it in state, so allowing the destroy and performing it cannot be the same command.
 
     If cluster state needs to survive the cluster, that is what velero_backup_policy is for —
-    it copies the recovery points to the central vault in the backup account's DR region, so
-    emptying this bucket stops being lossy. Set that first if the restore points matter, then
-    this.
+    it copies the recovery points to the central vault in the backup account (once that
+    account is provisioned), so emptying this bucket stops being lossy. Set that first if the
+    restore points matter, then this.
   EOT
   type        = bool
   default     = false

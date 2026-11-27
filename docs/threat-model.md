@@ -310,10 +310,16 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   `pods.eks.amazonaws.com` only (no OIDC/web-identity principal), bound to an exact
   (cluster, namespace, service-account) via an EKS Pod Identity association. A
   `tofu test` gate asserts the trust never gains a web-identity action and that
-  inline policies pass through unbroadened. Every workload role in the repo is
-  minted this way, one per tenant; web-identity (OIDC) trust is reserved for the
-  control-plane roles that assume from outside the cluster — the agent-platform
-  operator, fleet-hub, portal-hub, and GitHub Actions CI federation.
+  inline policies pass through unbroadened. Every pod role the repo mints comes
+  from this module, each tenant's roles in druid, pipeline and governance
+  included, with three exceptions. The agent-platform operator (`agent-iam`), the eks-fleet Crossplane
+  runner (`fleet-hub`) and the portal worker (`portal-hub`) are IRSA roles: each
+  trusts the OIDC provider of the cluster its pod runs in, with `StringEquals` on
+  one service account's `sub` and on `aud`. `tenant-substrate` mints no role. The
+  operator creates each agent-platform tenant's role at runtime and binds it with a
+  Pod Identity association, and `agent-iam` lets it create one only under
+  `/eks-agent-platform/tenants/` and with the tenant permissions boundary attached.
+  The one web-identity trust from outside a cluster is GitHub Actions CI federation.
   The `workload-identity` module renders an optional per-statement `Condition`, so
   a caller's grant can be ARN-scoped **and** tag/StringEquals-locked. The addon and
   tenant grants use this: the AWS Load Balancer Controller's mutating EC2/ELB verbs
@@ -324,7 +330,9 @@ GitHub Actions ──OIDC──► AWS account ──► Terraform state (S3)
   entirely when disabled rather than falling back to `*`.
 - **Residual** — inline policy scope is the tenant author's responsibility; the
   module does not widen it, but it does not audit it either. Keep `Resource`
-  scoped or condition-locked (the checkov gate enforces this at CI).
+  scoped or condition-locked; review holds this, not a gate. Checkov evaluates a
+  statement in isolation and cannot see a boundary ceiling, so `.checkov.yaml`
+  skips its IAM wildcard checks (`CKV_AWS_355` and its siblings) repo-wide.
 
 ## 5. Cross-account fleet vend  (`fleet-vend`, `cluster` path/boundary vars)
 

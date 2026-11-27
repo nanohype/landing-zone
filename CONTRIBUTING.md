@@ -9,7 +9,7 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
 ## Development Workflow
 
 1. **Branch** -- create a feature branch from `main`
-2. **Validate locally** -- `task check` (formatting, validation, lint, the `tofu test` suites, and every gate CI runs)
+2. **Validate locally** -- `task check` (formatting, validation, lint, the `tofu test` suites, every gate under `scripts/` with its self-test, the gates' coverage floor, and the credential-less render of every leaf)
 3. **Plan against development** -- `task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=<name>`
 4. **Open a PR** -- CI runs fmt, validate (per-component matrix), tflint, checkov, and the plan matrix (`workload-development` leaves only)
 5. **Review** -- get approval, verify plan output in CI
@@ -73,7 +73,9 @@ Complete the [Onboarding Guide](docs/onboarding.md) first -- tool installation, 
    variable validations — locating statements by `Sid` rather than by position.
 
 10. Run `task check` — formatting, validation, lint, the `tofu test` suites, and
-    every gate under `scripts/`. This is the sequence CI runs.
+    every gate under `scripts/`. CI runs all of it, and also checkov and zizmor, the
+    locked providers' vulnerability scan, the required-inputs check, the PR plan and
+    the tenant re-render.
 
 11. CI auto-discovers the new component from the tree (`git ls-files`) -- the validate, test and (for a `workload-development` leaf) plan matrix entries materialize on the next PR with no workflow edit.
 
