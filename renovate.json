@@ -96,6 +96,17 @@
       "extractVersionTemplate": "^go(?<version>[0-9]+\\.[0-9]+)"
     },
     {
+      "description": "govulncheck, built with go install in ci.yml's provider-vulns job. The scanner decides a blocking check, so its version moves only through a reviewed pull request, which this opens.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "go install (?<depName>golang\\.org/x/vuln)/cmd/govulncheck@(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "go"
+    },
+    {
       "description": "Kubernetes control-plane version the cluster component defaults to. EKS retires minors on a published schedule, so this is the pin with a deadline rather than merely an upgrade. Keyed on the `# k8s-version` marker so the match is one line, which is what makes it checkable.",
       "customType": "regex",
       "managerFilePatterns": [

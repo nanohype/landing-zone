@@ -98,6 +98,19 @@ PIN_PATTERNS = [
         re.compile(r"pip install\s+(?:-[-\w]+\s+)*(?!.*==)[a-zA-Z0-9._-]+\s*$", re.M),
     ),
     (
+        # A tool built with `go install <package>@<version>` in a run step: no
+        # built-in manager reads a run step, so only a customManager watches it.
+        "go install pin",
+        re.compile(r"^\.github/workflows/"),
+        re.compile(r"go install\s+(?:-[-\w]+\s+)*\S+@v\d+\.\d+"),
+    ),
+    (
+        # @latest, or a branch, names no version a manager could move.
+        "unpinned go install",
+        re.compile(r"^\.github/workflows/"),
+        re.compile(r"go install\s+(?:-[-\w]+\s+)*\S+@(?!v\d)\S+"),
+    ),
+    (
         "eks addon version",
         re.compile(r"^components/aws/cluster/variables\.tf$"),
         re.compile(r"^[ \t]*[a-z-]+[ \t]*=[ \t]*\"v\d+\.\d+\.\d+-eksbuild\.\d+\"", re.M),
