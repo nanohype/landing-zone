@@ -36,7 +36,7 @@ dependency "cluster" {
   # module-cache reasons, so the dependency has to resolve at init or the destroy behind it
   # never executes. Testing this with a bare `terragrunt destroy` passes and proves nothing —
   # that is a different command from the one the tool runs.
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
@@ -49,7 +49,7 @@ dependency "secrets" {
   mock_outputs = {
     kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/mock"
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"
 }
 

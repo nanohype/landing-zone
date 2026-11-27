@@ -25,7 +25,7 @@ dependency "observability" {
     sns_topic_arns     = { critical = "arn:aws:sns:us-east-1:222222222222:mock-critical" }
     alerts_kms_key_arn = "arn:aws:kms:us-east-1:222222222222:key/mock"
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
