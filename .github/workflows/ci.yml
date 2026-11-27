@@ -1083,6 +1083,40 @@ jobs:
       - run: python3 scripts/check-state-key-docs.py
       - run: python3 scripts/check-state-key-docs.py --self-test
 
+  # A provider runs inside every plan and apply, with the run's credentials.
+  # scripts/provider-vulns.py scans the binary each lock file installs, with
+  # govulncheck, and fails on the two findings this repository can act on: a
+  # provider with linked findings and no release in a year (replace it), and a
+  # release at least 14 days old that no longer carries a finding the locked
+  # version does (merge the Renovate pull request that proposes it, which
+  # Renovate opens within 10 days). Every other finding is listed in the job
+  # summary.
+  provider-vulns:
+    name: Locked Providers Are Maintained And Patched
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.27"
+          cache: false
+      # go install's module download has no deadline flag of its own.
+      - name: Install govulncheck
+        run: |
+          timeout 5m go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Scan every locked provider
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/provider-vulns.py
+      - run: python3 scripts/provider-vulns.py --self-test
+
   # The staging and production plan roles trust the `drift` GitHub Environment,
   # whose deployment-branch policy admits main only, and that environment holds
   # DRIFT_PLAN_ROLE_ARNS, every account's id. A branch policy admits by ref, so
@@ -1461,6 +1495,7 @@ jobs:
         smoke-outputs,
         documented-oidc-trust,
         state-key-docs,
+        provider-vulns,
         drift-workflow,
         region-consistency,
         gate-controls,
