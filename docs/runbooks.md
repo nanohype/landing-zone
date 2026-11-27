@@ -78,16 +78,28 @@ aws s3 rm s3://<account_id>-<region>-tfstate/<env>/aws/<account>/<region>/<env>/
 
 **When:** production incident requiring elevated AWS access beyond normal SSO permissions.
 
+**The role exists only where a leaf creates it.** An account has a break-glass role once its
+`break-glass` leaf names a trusted account, the management account, in `trusted_account_ids`
+and is applied. The component refuses an empty list, so if the account's leaf names none,
+there is no role to assume. Standing the role up is in
+[the component README](../components/aws/break-glass/README.md#deploy).
+
 ### Assume the Break-Glass Role
 
-1. Get the break-glass role ARN from the `break-glass` component outputs or from a platform engineer
-2. Assume the role:
+The role is `<environment>-break-glass` in the workload account, for example
+`production-break-glass`. Its ARN is the component's `role_arn` output, and the SSM parameter
+`/<environment>/break-glass/role-arn` in that account. It trusts only the accounts in
+`trusted_account_ids`, and only with MFA, so call from one of them with your MFA code:
+
+1. Assume the role:
    ```bash
    aws sts assume-role \
-     --role-arn arn:aws:iam::<account_id>:role/<break-glass-role> \
-     --role-session-name "incident-<your-name>-$(date +%Y%m%d)"
+     --role-arn arn:aws:iam::<workload_account_id>:role/<environment>-break-glass \
+     --role-session-name "incident-<your-name>-$(date +%Y%m%d)" \
+     --serial-number <your-mfa-device-arn> \
+     --token-code <current-mfa-code>
    ```
-3. Export the returned credentials:
+2. Export the returned credentials:
    ```bash
    export AWS_ACCESS_KEY_ID=<...>
    export AWS_SECRET_ACCESS_KEY=<...>
@@ -96,8 +108,13 @@ aws s3 rm s3://<account_id>-<region>-tfstate/<env>/aws/<account>/<region>/<env>/
 
 ### During the Incident
 
-- The role has a maximum session duration (default 1 hour)
-- SNS notifications fire when the role is assumed — the security team is automatically alerted
+- The session lasts at most the leaf's `max_session_duration`, 3600 seconds (one hour) by default
+- The role has `AdministratorAccess` under a permissions boundary that denies the IAM writes
+  a session could use to outlast the incident, `sts:AssumeRole` and every `organizations:*`
+  action ([the list](../components/aws/break-glass/README.md#what-it-builds))
+- Assuming the role sends CloudTrail's `AssumeRole` record to the
+  `<environment>-break-glass-alert` SNS topic, which emails the addresses in the leaf's
+  `notification_emails`. A leaf that sets none alerts nobody
 - Document every action you take
 
 ### Post-Incident

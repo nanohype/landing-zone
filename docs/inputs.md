@@ -129,7 +129,7 @@ most often sets:
 | `eks_addon_versions` | `cluster` | pinned addon versions; re-pin when `cluster_version` moves |
 | `cluster_endpoint_public_access` + `..._cidrs` | `cluster` | **not set in the committed tree** — private by default; posture is supplied by rackctl at apply time (see [EKS API endpoint posture](#eks-api-endpoint-posture)) |
 | `gitops_repo_url` | `cluster-bootstrap` | **not set in the committed tree, and required with no default** — the app-of-apps must point at this org's own fork, so the component fails the plan rather than guess. Every caller supplies it; `scripts/e2e.sh` passes `https://github.com/nanohype/eks-gitops` unless `E2E_GITOPS_REPO_URL` overrides |
-| `tenants` | `druid`, `pipeline`, `governance`, `tenant-substrate` | per-tenant maps (one Pod Identity role each). `tenant-substrate`'s is rendered from the Platform CRs, not hand-authored |
+| `tenants` | `druid`, `pipeline`, `governance`, `tenant-substrate` | per-tenant maps. `druid`, `pipeline` and `governance` mint a tenant's Pod Identity roles, one per workload; `tenant-substrate` mints none, and its map is rendered from the Platform CRs, not hand-authored |
 | `cluster_iam_role_path` + `cluster_permissions_boundary_arn` | `cluster` | set for cross-account fleet-vend gating; defaults `/` + empty = same-account |
 | `network_mode` + `adopt_*` | `network` | whether the VPC is built here or adopted from a shared owner (see [Network mode](#network-mode-create--adopt)) |
 | `observability_tier` | `cluster-bootstrap` | `floor` (CloudWatch only) or `full` (+ in-cluster LGTM and AMP/AMG) — published as the `observability/tier` cluster-Secret label the eks-gitops generators select on (see [Observability tier](#observability-tier-floor--full)) |

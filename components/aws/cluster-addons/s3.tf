@@ -14,9 +14,10 @@
 # restore points. A cluster here is agent-managed and often short-lived: eks-fleet
 # vends spokes with a ttlDays and a hub reaper deletes them on expiry, so a spoke's
 # own backups are not meant to outlive it. Where they should, velero_backup_policy
-# copies the recovery points into the central vault in the backup account's DR
-# region — and then emptying this bucket is not a loss. That is the mechanism for
-# durable cluster backups; refusing to delete a local copy never was.
+# copies the recovery points into the central vault in the backup account, once
+# that account is provisioned — and then emptying this bucket is not a loss. That
+# is the mechanism for durable cluster backups; refusing to delete a local copy
+# never was.
 #
 # What keeps the opt-in honest is that force_destroy only takes effect once an apply
 # has landed it in state, so permitting a destroy and performing one are necessarily
@@ -35,9 +36,9 @@ locals {
   #
   # Setting velero_backup_policy to a plan key in the backup component brings this bucket
   # into that substrate — the plan copies its recovery points to the central vault in the
-  # backup account's DR region — reusing what already exists rather than building a second
-  # mechanism. Default empty, so nothing changes for an operator who has not opted in and
-  # no backup cost appears unannounced.
+  # backup account, once that account is provisioned — reusing what already exists rather
+  # than building a second mechanism. Default empty, so nothing changes for an operator who
+  # has not opted in and no backup cost appears unannounced.
   #
   # The tag is withheld unless versioning is on, for the same reason as tenant-substrate's
   # object stores: AWS Backup requires S3 Versioning, so a tagged unversioned bucket is
@@ -80,7 +81,8 @@ module "velero_bucket" {
   # once var.force_destroy_buckets has been applied. Both are deliberate — a cluster
   # with a ttlDays is declared disposable, and its backups are disposable with it. If
   # they should not be, velero_backup_policy puts the durable copy in the central vault
-  # first, and then emptying this bucket costs nothing.
+  # first (once the backup account is provisioned), and then emptying this bucket costs
+  # nothing.
   force_destroy = local.bucket_force_destroy
 
   server_side_encryption_configuration = {

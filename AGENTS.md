@@ -18,7 +18,7 @@ Plus:
 The build interface is [`Taskfile.yaml`](Taskfile.yaml) ([Task](https://taskfile.dev)), not raw `tofu`/`terragrunt`. Prerequisites: OpenTofu >= 1.11.0, Terragrunt, TFLint with the AWS plugin, Python 3, and the AWS CLI for anything that touches an account.
 
 ```bash
-task check                        # everything CI runs: fmt, validate, lint, tofu test, and every gate
+task check                        # the pre-push sequence: fmt, validate, lint, tofu test, every gate, coverage, leaf render
 task fmt:check                    # formatting only
 task validate                     # tofu init -backend=false + validate, every root
 task lint                         # tflint at --minimum-failure-severity=notice
@@ -27,7 +27,7 @@ task gates                        # the semantic gates under scripts/, each its 
 task plan ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=network
 ```
 
-`task check` needs no AWS credentials — every suite runs against mocked providers and every gate reads the tree. `task plan` and `task apply` need credentials for the target account.
+`task check` needs no AWS credentials — every suite runs against mocked providers and every gate reads the tree. CI runs all of it, and also checkov and zizmor, the locked providers' vulnerability scan, the required-inputs check, the PR plan and the tenant re-render. `task plan` and `task apply` need credentials for the target account.
 
 Six user-invocable skills live in [`.claude/skills/`](.claude/skills/): `add-component`, `add-tenant`, `plan`, `drift`, `validate`, `destroy`. Each names the steps and the gates its change has to satisfy.
 

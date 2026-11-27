@@ -65,7 +65,7 @@ variable "central_vault_arn" {
     copy_action override copies to this vault with the plan's own retention.
 
     Live leaves wire this via live/_envcommon/aws/backup.hcl: composed from the backup
-    account catalog, the DR-region region.hcl, and the <env>-central-backup-vault naming
+    account catalog, the vault's region.hcl, and the <env>-central-backup-vault naming
     convention. Cross-account SSM is not readable from workload accounts, so the ARN is a
     known input rather than a looked-up one. Empty remains valid for unit tests and for a
     greenfield account that has not stood up shared-backup yet.

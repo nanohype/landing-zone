@@ -469,7 +469,7 @@ See [RB-008](runbooks.md#rb-008-retargeting-an-account-tree-to-a-different-regio
 
 ## Backup and Recovery
 
-The `backup` component manages AWS Backup: configurable plans, vault lock for production, KMS encryption, and cross-region copy.
+The `backup` component manages AWS Backup: configurable plans, vault lock for production, KMS encryption, and a copy of each recovery point to the central vault in the backup account, once that account is provisioned ([What backs up what](architecture.md#what-backs-up-what)).
 
 Backup plans are configurable via the `backup_plans` map (schedule, retention, cold storage transition). Email notifications go to `notification_emails`.
 
