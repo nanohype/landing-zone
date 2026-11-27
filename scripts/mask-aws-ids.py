@@ -76,9 +76,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Mapping, NamedTuple, Sequence
 from unittest import mock
@@ -351,13 +353,33 @@ def in_process(case: Case) -> tuple[int, list[str], str]:
     return status, out.getvalue().splitlines(), ""
 
 
+def run_bounded(cmd: list[str], timeout: float,
+                env: Mapping[str, str] | None = None) -> subprocess.CompletedProcess:
+    """cmd run with its output captured, and every process it starts held to the timeout.
+
+    subprocess.run's own timeout kills the one process it started, and returns, while a
+    process that one started runs on: the python3 that scripts/mask-aws-ids.sh starts
+    outlives the bash it was started from. This starts cmd in a session of its own and,
+    once the timeout passes, kills that session's whole process group, then re-raises.
+    """
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          env=env, start_new_session=True) as proc:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()
+            raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
 def through_shim(case: Case, path: str | None = None) -> tuple[int, list[str], str]:
     """case run through scripts/mask-aws-ids.sh with nothing in the environment but PATH
     and its own variables."""
-    proc = subprocess.run(["bash", str(SHIM), *case.args],
-                          env={"PATH": os.environ.get("PATH", "") if path is None else path,
-                               **case.env},
-                          capture_output=True, text=True, timeout=60, check=False)
+    proc = run_bounded(["bash", str(SHIM), *case.args], timeout=60,
+                       env={"PATH": os.environ.get("PATH", "") if path is None else path,
+                            **case.env})
     return proc.returncode, proc.stdout.splitlines(), proc.stderr
 
 
@@ -400,6 +422,41 @@ def self_test_checks() -> list[str]:
     return failures
 
 
+def gone(pid: int) -> bool:
+    """Whether pid has exited, within five seconds. A zombie has exited: all that is left of
+    it is its parent's wait, which a container's init may never make."""
+    def exited() -> bool:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
+                               text=True, timeout=10, check=False).stdout.strip()
+        return not state or state.startswith("Z")
+    return any(exited() or time.sleep(0.1) for _ in range(50))
+
+
+def bounded_checks() -> list[str]:
+    """Why run_bounded does not kill every process a timed-out command started, or return a
+    finished command's status and output, or nothing."""
+    with tempfile.TemporaryDirectory(prefix="mask-aws-ids-") as tmp:
+        started, raised, clock = Path(tmp) / "grandchild.pid", False, time.monotonic()
+        try:
+            run_bounded(["sh", "-c", f'sleep 60 & echo $! > "{started}"; wait'], timeout=2)
+        except subprocess.TimeoutExpired:
+            raised = True
+        # The child holds the output pipes too, so a kill that misses it is a call that
+        # waits out the child's minute rather than returning at the timeout.
+        elapsed = time.monotonic() - clock
+        pid = int(started.read_text()) if started.is_file() else 0
+    survived = bool(pid) and not gone(pid)
+    _ = survived and os.kill(pid, signal.SIGKILL)
+    done = run_bounded(["sh", "-c", "echo out; echo err >&2; exit 3"], timeout=60)
+    return (expect(raised, "a command past its timeout returned instead of raising")
+            + expect(elapsed < 12, f"a command with a 2s timeout took {elapsed:.0f}s to return")
+            + expect(bool(pid), "the command past its timeout never started its child")
+            + expect(not survived, f"process {pid}, started by a timed-out command, outlived it")
+            + expect((done.returncode, done.stdout, done.stderr) == (3, "out\n", "err\n"),
+                     f"a finished command returned {done.returncode} with {done.stdout!r} "
+                     f"and {done.stderr!r}"))
+
+
 def shell_without_python() -> list[str]:
     """Why the shell entry point did not stop on a host with no python3, or nothing."""
     bash, dirname = shutil.which("bash"), shutil.which("dirname")
@@ -436,7 +493,7 @@ def self_test(cases: Sequence[Case] = tuple(CASES), shim: bool = True) -> int:
                            "the shell entry point")
         # The reporter itself, checked without it: a failed check must yield its message.
         failures += ["expect() does not report a failed check"] * (expect(False, "x") != ["x"])
-        failures += self_test_checks() + shell_without_python()
+        failures += self_test_checks() + shell_without_python() + bounded_checks()
         with mock.patch.object(shutil, "which", lambda _name: None):
             failures += expect(bool(shell_without_python()),
                                "the no-python3 case passed on a host with no bash to run it")
@@ -453,8 +510,9 @@ def self_test(cases: Sequence[Case] = tuple(CASES), shim: bool = True) -> int:
         return 1
     print(f"mask-aws-ids self-test passed ({len(cases)} cases, each in this process and "
           "through scripts/mask-aws-ids.sh; a host with no python3 stops; the self-test's own "
-          f"{len(BROKEN) + 3} checks report what breaks them, and a self-test over a failing "
-          "case or too few cases fails).")
+          f"{len(BROKEN) + 3} checks report what breaks them; a timed-out command's whole "
+          "process group is killed; and a self-test over a failing case or too few cases "
+          "fails).")
     return 0
 
 

@@ -271,9 +271,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
@@ -1995,11 +1997,43 @@ def _main_check_output(root: Path) -> tuple[int, str]:
     return code, out.getvalue()
 
 
+def run_bounded(cmd: list[str], timeout: float, check: bool = False) -> subprocess.CompletedProcess:
+    """cmd run with its output captured, and every process it starts held to the timeout.
+
+    subprocess.run's own timeout kills the one process it started, and returns, while a
+    process that one started runs on: a helper git starts, or the git the gate starts when
+    the self-test runs it under sys.executable. This starts cmd in a session of its own
+    and, once the timeout passes, kills that session's whole process group, then re-raises.
+    """
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          start_new_session=True) as proc:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()
+            raise
+    if check and proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, out, err)
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+def _gone(pid: int) -> bool:
+    """Whether pid has exited, within five seconds. A zombie has exited: all that is left of
+    it is its parent's wait, which a container's init may never make."""
+    def exited() -> bool:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
+                               text=True, timeout=10, check=False).stdout.strip()
+        return not state or state.startswith("Z")
+    return any(exited() or time.sleep(0.1) for _ in range(50))
+
+
 def _git(root: Path, *args: str) -> None:
     git = shutil.which("git")
     if git is None:
         raise OSError("git is not installed, so the case cannot be built")
-    subprocess.run([git, "-C", str(root), *args], check=True, capture_output=True, timeout=60)
+    run_bounded([git, "-C", str(root), *args], timeout=60, check=True)
 
 
 # One self-test case's result: (its name, why it failed or None, lines to show).
@@ -2446,19 +2480,19 @@ def meta_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
         out.append((f"meta: a self-test over {name} fails", None if ok else
                     "self_test printed an account id" if leaked else
                     f"self_test exited {code}, not {status} saying {says!r}", []))
-    proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--no-such-flag"],
-                          capture_output=True, text=True, timeout=60, check=False)
+    proc = run_bounded([sys.executable, str(Path(__file__).resolve()), "--no-such-flag"],
+                       timeout=60)
     ok = proc.returncode == CANNOT_RUN and "usage:" in proc.stderr
     out.append(("meta: an argument the gate does not take", None if ok else
                 f"exited {proc.returncode} saying {proc.stderr.strip()[:80]!r}", []))
     for module, says in (("tomllib", "tomllib is not available"),
                          ("yaml", "PyYAML is not installed")):
         # The gate loaded in a process where the module cannot be imported.
-        proc = subprocess.run(
+        proc = run_bounded(
             [sys.executable, "-c", (f"import runpy, sys; sys.modules[{module!r}] = None; "
                                     f"runpy.run_path({str(Path(__file__).resolve())!r}, "
                                     f"run_name='without_{module}')")],
-            capture_output=True, text=True, timeout=60, check=False)
+            timeout=60)
         ok = proc.returncode == CANNOT_RUN and says in proc.stderr
         out.append((f"meta: no {module}", None if ok else
                     f"the gate exited {proc.returncode} without {module}, not {CANNOT_RUN} "
@@ -2469,6 +2503,43 @@ def meta_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome]:
 # What meta_outcomes reports: its eight stage checks, the predicates, four broken
 # self-tests, the bad argument and the two missing modules.
 META_OUTCOMES = 16
+
+# What bounded_outcomes reports: a timed-out command, a finished one, a checked failure.
+BOUNDED_OUTCOMES = 3
+
+
+def bounded_outcomes(scratch: Path) -> list[Outcome]:
+    """run_bounded kills every process a timed-out command started, returns a finished
+    command's status and output, and raises on a failure it is told to check."""
+    started, raised, clock = scratch / "bounded-grandchild.pid", False, time.monotonic()
+    try:
+        run_bounded(["sh", "-c", f'sleep 60 & echo $! > "{started}"; wait'], timeout=2)
+    except subprocess.TimeoutExpired:
+        raised = True
+    # The child holds the output pipes too, so a kill that misses it is a call that waits
+    # out the child's minute rather than returning at the timeout.
+    elapsed = time.monotonic() - clock
+    pid = int(started.read_text()) if started.is_file() else 0
+    survived = bool(pid) and not _gone(pid)
+    _ = survived and os.kill(pid, signal.SIGKILL)
+    done = run_bounded(["sh", "-c", "echo out; echo err >&2; exit 3"], timeout=60)
+    checked = "returned, where check=True must raise"
+    try:
+        run_bounded(["sh", "-c", "exit 3"], timeout=60, check=True)
+    except subprocess.CalledProcessError as e:
+        checked = None if e.returncode == 3 else f"raised for status {e.returncode}"
+    finished = (done.returncode, done.stdout, done.stderr) == (3, "out\n", "err\n")
+    return [
+        ("bounded: a command past its timeout",
+         None if raised and pid and not survived and elapsed < 12 else
+         "returned instead of raising" if not raised else
+         f"took {elapsed:.0f}s to return from a 2s timeout" if elapsed >= 12 else
+         "never started the process it was to leave behind" if not pid else
+         f"left process {pid}, which it started, running", []),
+        ("bounded: a finished command", None if finished else
+         f"returned {done.returncode} with {done.stdout!r} and {done.stderr!r}", []),
+        ("bounded: a checked failure", checked, []),
+    ]
 
 
 def self_test(meta: bool = True) -> int:
@@ -2498,6 +2569,7 @@ def self_test(meta: bool = True) -> int:
                 "visible": visibility_outcomes(scratch),
                 "status": status_outcomes(scratch, policy),
                 "refusals": self_refusal_outcomes(base, scratch, policy),
+                "bounded": bounded_outcomes(scratch) if meta else [],
                 "meta": meta_outcomes(base, scratch, policy) if meta else [],
             }
 
@@ -2524,7 +2596,8 @@ def self_test(meta: bool = True) -> int:
                 + len(VENDORED_CASES)
                 + 1 + len(POLICY_CASES) + len(VISIBILITY_CASES) + len(GIT_FAILURES)
                 + len(STATUS_CASES)
-                + len(meta_cases(policy.mutations[0])) + 5 + (META_OUTCOMES if meta else 0))
+                + len(meta_cases(policy.mutations[0])) + 5
+                + ((META_OUTCOMES + BOUNDED_OUTCOMES) if meta else 0))
     if len(outcomes) < expected:
         emit(f"self-test ran {len(outcomes)} of the {expected} cases it lists; refusing to "
              "report a pass", err=True)
@@ -2540,7 +2613,8 @@ def self_test(meta: bool = True) -> int:
          "list refused; "
          f"{len(stages['status'])} exit statuses; {len(stages['refusals'])} vacuous "
          f"self-test outcomes reported; {len(stages['meta'])} ways of breaking the self-test "
-         "itself reported).")
+         f"itself reported; {len(stages['bounded'])} checks that a timed-out command's whole "
+         "process group is killed).")
     return 0
 
 
