@@ -31,19 +31,20 @@ procedure for using it.
 The trust names other accounts on purpose. Break-glass is for the case where this account's
 IAM cannot be trusted, and a principal inside the account depends on that same IAM. So the
 component refuses an empty `trusted_account_ids`, which would be a role nobody can assume. It
-also refuses `123456789012`, the placeholder for the unprovisioned management account. A role
-trusting it is assumable by nobody, yet reads as configured.
+also refuses `123456789012`, the placeholder id for the management account. A role trusting
+it is assumable by nobody, yet reads as configured.
 
 ## Deploy
 
-No account has this role yet. The account meant to hold the emergency operators is the
-management account, and it has not been provisioned. Until it is, every leaf
-(`live/aws/workload-<env>/us-east-1/<env>/break-glass`) sets `trusted_account_ids = []`, which
-the component refuses. To stand the role up in an account:
+An account has this role only once its leaf
+(`live/aws/workload-<env>/us-east-1/<env>/break-glass`) names a trusted account and is
+applied. A leaf whose `trusted_account_ids` is empty is refused, and creates no role. The
+account meant to hold the emergency operators is the management account, so a leaf can name
+it only once that account exists. To stand the role up in an account:
 
 1. Set `trusted_account_ids` in the leaf to the management account's id.
-2. Set `notification_emails` to the people who must hear about every use. No leaf sets any
-   today, and with none the alert reaches nobody.
+2. Set `notification_emails` to the people who must hear about every use. With none set, the
+   alert reaches nobody.
 3. Apply the leaf. Each address then receives a subscription confirmation from SNS, and the
    alert reaches it only once confirmed.
 4. Follow RB-003 once from the management account, MFA included, and check that the alert

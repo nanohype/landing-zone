@@ -15,7 +15,7 @@ locals {
 
   # shared-backup's region, read from the region.hcl its leaves sit under, so moving
   # the vault to a second region (region-model R4) is one file, not a constant here
-  # and another under live/aws/backup/. Today it is us-east-1, the estate's only region.
+  # and another under live/aws/backup/.
   central_backup_region = read_terragrunt_config(
     "${dirname(find_in_parent_folders("cloud.hcl"))}/backup/us-east-1/region.hcl"
   ).locals.region

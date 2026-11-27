@@ -16,9 +16,10 @@ network-owner account                                workload account
 A consumer associates the Profile with its VPC, and every zone the Profile carries resolves
 there. The owner attaches a zone once; no zone is associated VPC by VPC.
 
-The workload environments in this tree do not consume it. Each runs `private-dns` in `create`
-mode with its own zone, so an environment can come up without the network account. The adopt
-wiring is the worked example under `live/aws/reference-adopt/`.
+A workload environment in this tree runs `private-dns` in `create` mode with its own zone,
+because a workload leaf may not depend on another account's state (the installability rule in
+`CLAUDE.md`). So it does not consume this Profile, and it comes up without the network
+account. The adopt wiring is the worked example under `live/aws/reference-adopt/`.
 
 ## The contract
 
@@ -64,9 +65,9 @@ The association is inert unless the consumer VPC has DNS resolution enabled, and
 - **Enable resource sharing with AWS Organizations** (`aws ram enable-sharing-with-aws-organizations`,
   once per organization), as for `shared-network`. Without it, a share that admits no
   external principals does not resolve for the other accounts in the organization.
-- **Replace the consumer placeholder.** Every leaf shares to `111111111111`. Set it to the
-  real workload account, the same one the sibling `shared-network` leaf shares to.
-  Every id must be a member of the organization.
+- **Name the real consumers.** `111111111111` in a leaf's `consumer_account_ids` is a
+  placeholder. Set it to the real workload account, the same one the sibling `shared-network`
+  leaf shares to. Every id must be a member of the organization.
 
 ## Hosted zone tags
 

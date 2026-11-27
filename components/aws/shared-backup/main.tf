@@ -9,8 +9,8 @@
 # The seam this closes: a backup that lives only in the account it protects is one account
 # event away from being gone with the thing it protected. Moving the durable copy to a
 # separate account survives an account-level event. Surviving a region loss as well
-# (region-model R4's backup-and-restore DR posture, RPO ~24h) needs the vault in a second
-# region, and the estate runs in us-east-1 alone (live/aws/backup/us-east-1/region.hcl).
+# (region-model R4's backup-and-restore DR posture, RPO ~24h) needs the vault in a region
+# the workloads do not run in; live/aws/backup/us-east-1/region.hcl sets the vault's region.
 #
 # Cross-account copy into this vault is authorized two ways, both scoped to the org: the
 # vault access policy admits backup:CopyIntoBackupVault, and the vault CMK admits the

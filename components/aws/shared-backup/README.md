@@ -2,13 +2,13 @@
 
 The owner side of **central backup**. A dedicated backup account runs this component to hold
 the durable copy of every workload account's backups, so a recovery point survives the loss of
-the account that produced it. It runs in us-east-1, the estate's only region, so the copy does
-not survive the loss of the region.
+the account that produced it. Its region is the one `live/aws/backup/us-east-1/region.hcl` sets,
+and the copy survives the loss of a region only when that differs from the workloads' region.
 
 ## Where it sits
 
 ```
-workload account                         backup account (us-east-1)
+workload account                         backup account
   backup                        ──copy──▶  shared-backup
   (local vault, fast restores)   job       (central vault, durable copy)
 ```
@@ -21,7 +21,8 @@ workload account                         backup account (us-east-1)
 This closes the seam where a backup living only in the account it protects is one account
 event — a compromise, or a confident `DeleteBackupVault` — away from being gone alongside the
 thing it protected. It is the data path region-model's backup-and-restore posture (RTO
-hours, RPO ~24h) rests on, and the cross-region half of that posture waits on a second region.
+hours, RPO ~24h) rests on; the posture's cross-region half holds only when the vault's region
+differs from the workloads'.
 
 ## Cross-account copy authorization
 
@@ -40,8 +41,7 @@ setting; see the `org-backup` component).
 
 The vault CMK is multi-region because a cross-region restore cannot decrypt with the source
 region's key — this is the first key that has to be (region-model R5). Replica keys are minted
-per recovery region as a restore path demands one, not eagerly for every region. There is no
-recovery region yet, so there is no replica.
+per recovery region as a restore path demands one, not eagerly for every region.
 
 ## GOVERNANCE, not COMPLIANCE
 

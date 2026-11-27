@@ -78,10 +78,10 @@ aws s3 rm s3://<account_id>-<region>-tfstate/<env>/aws/<account>/<region>/<env>/
 
 **When:** production incident requiring elevated AWS access beyond normal SSO permissions.
 
-**Not available yet.** No account has a break-glass role today. Every `break-glass` leaf sets
-`trusted_account_ids = []`, which the component refuses, because the account meant to hold the
-emergency operators, the management account, has not been provisioned. Until a leaf names it
-and is applied, there is no role to assume. Standing the role up is in
+**The role exists only where a leaf creates it.** An account has a break-glass role once its
+`break-glass` leaf names a trusted account, the management account, in `trusted_account_ids`
+and is applied. The component refuses an empty list, so if the account's leaf names none,
+there is no role to assume. Standing the role up is in
 [the component README](../components/aws/break-glass/README.md#deploy).
 
 ### Assume the Break-Glass Role
@@ -108,13 +108,13 @@ The role is `<environment>-break-glass` in the workload account, for example
 
 ### During the Incident
 
-- The session lasts at most `max_session_duration`: 3600 seconds, one hour, in every leaf
+- The session lasts at most the leaf's `max_session_duration`, 3600 seconds (one hour) by default
 - The role has `AdministratorAccess` under a permissions boundary that denies the IAM writes
   a session could use to outlast the incident, `sts:AssumeRole` and every `organizations:*`
   action ([the list](../components/aws/break-glass/README.md#what-it-builds))
 - Assuming the role sends CloudTrail's `AssumeRole` record to the
-  `<environment>-break-glass-alert` SNS topic, which emails the addresses in
-  `notification_emails`. No leaf sets any today, so until one does, nobody is alerted
+  `<environment>-break-glass-alert` SNS topic, which emails the addresses in the leaf's
+  `notification_emails`. A leaf that sets none alerts nobody
 - Document every action you take
 
 ### Post-Incident

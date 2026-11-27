@@ -208,7 +208,7 @@ component: it is written on `Platform.spec.datastores` and provisioned by
 | **managed-monitoring** | Amazon Managed Prometheus + Amazon Managed Grafana (SSO role associations, AMP/CloudWatch read), Grafana URL/AMP endpoint published to SSM. Deployed per environment — each workload environment runs its own for that environment's cluster, and the hub runs one for its own. | *(required input)* |
 | **private-dns** | Private hosted zones for a workload account, `create` or `adopt` mode, associated to the shared Route53 profile | platform |
 | **shared-dns** | Owner side of private DNS: the hosted zones plus the Route53 profile the workload accounts adopt | platform |
-| **shared-backup** | Owner side of central backup — the destination vault a workload account's plan copies into, in a second account in the same region. See [What backs up what](#what-backs-up-what) | sre |
+| **shared-backup** | Owner side of central backup — the destination vault a workload account's plan copies into, in a second account. See [What backs up what](#what-backs-up-what) | sre |
 | **shared-observability** | Fleet-wide destination for alarm delivery, so a spoke's alarms reach one place rather than each account's own topic | sre |
 
 ### What backs up what
@@ -221,14 +221,14 @@ what is the difference between "we have backups" and "we have backups of the thi
 | covers | tenant datastores — databases, key-value tables, object stores, streams | Kubernetes API objects and persistent-volume snapshots |
 | selected by | the `BackupPolicy` tag | Velero's own schedules, in-cluster |
 | owned by | `backup` (per account) + `org-backup` (org-wide floor) + `shared-backup` (the central vault) | the `velero` addon, with an S3 bucket from `cluster-addons` |
-| durable copy | a second account, in the same region, on a multi-region CMK, once that account is provisioned (below) | the cluster's own account and region, unless opted in below |
+| durable copy | a second account, on a multi-region CMK, under the conditions below | the cluster's own account and region, unless opted in below |
 
-**The durable copy survives losing an account, not a region, and it is not in force yet.** The
-central vault is in us-east-1 with the rest of the estate (`live/aws/backup/us-east-1/region.hcl`),
-so a copy there outlives the account that produced it but not the region. And while
-`live/aws/backup/account.hcl` carries its placeholder id, `live/_envcommon/aws/backup.hcl`
-composes no vault ARN: no plan rule carries a copy action, and recovery points stay in each
-account's own vault until the backup account is provisioned.
+**When the durable copy exists, and what it survives.** While `live/aws/backup/account.hcl`
+carries its placeholder id, `live/_envcommon/aws/backup.hcl` composes no vault ARN: no plan
+rule carries a copy action, and recovery points stay in each account's own vault. Once it
+names the backup account, every plan rule copies to the central vault there, and the copy
+outlives the account that produced it. It outlives a region only when the vault's region,
+which `live/aws/backup/us-east-1/region.hcl` sets, differs from the workloads'.
 
 **AWS Backup cannot cover cluster state.** It has no EKS resource type, so no amount of tagging
 makes it capture a Deployment, a ConfigMap or a CRD. And nothing stamps `BackupPolicy` on the
@@ -240,9 +240,9 @@ visibility into an RDS instance or a DynamoDB table. Neither system is a superse
 `shared-backup` exists because "a backup that lives only in the account it protects is one
 account event away from being gone with the thing it protected" — and that describes the Velero
 bucket exactly. Set `velero_backup_policy` on `cluster-addons` to a plan key to bring it into the
-same substrate: the plan copies its recovery points to the central vault, cross-account once
-the backup account is provisioned, and in the same region. Default off, because it costs money
-and no one should discover that on a bill.
+same substrate: the plan copies its recovery points to the central vault, under the
+conditions above. Default off, because it costs money and no one should discover that on a
+bill.
 
 **A cluster's own restore points are not meant to outlive it.** Clusters here are agent-managed
 and often short-lived — an eks-fleet `Cluster` with `ttlDays > 0` is tagged `Lifecycle=ephemeral`
