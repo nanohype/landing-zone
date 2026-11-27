@@ -37,7 +37,7 @@ dependency "shared_network" {
     private_subnet_ids = ["subnet-mock-1", "subnet-mock-2", "subnet-mock-3"]
     public_subnet_ids  = ["subnet-mock-4", "subnet-mock-5", "subnet-mock-6"]
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["validate", "plan"] : ["validate"]
 }
 
 inputs = {

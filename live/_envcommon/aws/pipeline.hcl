@@ -12,7 +12,7 @@ dependency "network" {
       private_subnet_azs = ["us-east-1a", "us-east-1b", "us-east-1c"]
     }
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
@@ -23,7 +23,7 @@ dependency "cluster" {
     node_security_group_id    = "sg-node-mock"
     cluster_name              = "mock-eks"
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"
 }
 

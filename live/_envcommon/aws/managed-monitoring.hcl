@@ -15,7 +15,7 @@ dependency "cluster" {
   mock_outputs = {
     cluster_name = "mock-eks"
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"
 }
 

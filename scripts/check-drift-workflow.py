@@ -381,7 +381,9 @@ def main() -> int:
 CI_PLAN_ENV = "    environment: plan\n"
 DEPLOY_ENV_CHOICE = ("        options:\n          - development\n          - staging\n"
                      "          - production\n      component:")
-DEPLOY_JOB_ENV = "    environment: ${{ inputs.environment }}\n"
+# deploy.yml's plan job; its apply job declares the same environment, and only
+# the plan job follows it with outputs.
+DEPLOY_JOB_ENV = "    environment: ${{ inputs.environment }}\n    outputs:\n"
 DRIFT_ON = "on:\n  schedule:\n"
 DRIFT_SELECT_ENV = ("    timeout-minutes: 5\n    environment: drift\n    permissions:\n"
                     "      contents: read\n    outputs:\n      matrix: ${{ steps.select.outputs.matrix }}")
@@ -425,7 +427,7 @@ MUTATIONS = [
      "  workflow_dispatch:\n",
      r"^\s+environment: \$\{\{ inputs\.environment \}\}"),
     ("an environment computed with format()", "deploy.yml", DEPLOY_JOB_ENV,
-     "    environment: ${{ format('{0}', inputs.environment) }}\n", None),
+     "    environment: ${{ format('{0}', inputs.environment) }}\n    outputs:\n", None),
     ("another workflow reads the role map through a mixed-case context", "ci.yml",
      CI_PLAN_ENV, CI_PLAN_ENV + "    env:\n      MAP: ${{ Secrets.DRIFT_PLAN_ROLE_ARNS != '' }}\n",
      None),
@@ -458,7 +460,7 @@ MUTATIONS = [
     ("a computed environment quoting an account id across the quote's cut", "deploy.yml",
      DEPLOY_JOB_ENV,
      ("    environment: ${{ format('{0}-{1}', inputs.environment, 'qqqqqqqqqqqqqqqqqq-"
-      "222233334444') }}\n"), None),
+      "222233334444') }}\n    outputs:\n"), None),
     ("a dispatch choice input offers drift beside an account id", "deploy.yml",
      DEPLOY_ENV_CHOICE,
      DEPLOY_ENV_CHOICE.replace("          - production\n",

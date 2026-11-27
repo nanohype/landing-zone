@@ -9,7 +9,7 @@ dependency "cluster" {
     cluster_endpoint                   = "https://mock.eks.amazonaws.com"
     cluster_certificate_authority_data = "bW9jaw=="
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
@@ -21,7 +21,7 @@ dependency "network" {
     private_subnet_ids = ["subnet-1", "subnet-2", "subnet-3"]
     public_subnet_ids  = ["subnet-4", "subnet-5", "subnet-6"]
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = get_env("MOCK_OUTPUTS_IN_PLAN", "true") == "true" ? ["init", "validate", "plan", "destroy"] : ["init", "validate", "destroy"]
   mock_outputs_merge_strategy_with_state  = "shallow"
 }
 

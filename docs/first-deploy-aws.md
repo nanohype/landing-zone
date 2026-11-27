@@ -426,9 +426,10 @@ TERRAGRUNT_ACCOUNT_ID=<workload-development account id> AWS_PROFILE=<its admin p
   task apply ACCOUNT=workload-development REGION=us-east-1 ENVIRONMENT=development COMPONENT=github-oidc
 ```
 
-Once it is applied, a `deploy.yml` run reaching this leaf (`component=all`)
-plans only the per-commit `Revision` tag there, which the boundary leaves
-writable; any other change it would make fails with `AccessDenied`. Changing
+Once it is applied, a `deploy.yml` plan of this leaf, or of `component=all`,
+shows only the per-commit `Revision` tag there, which the boundary leaves
+writable, so an apply of it goes through; any other change it would make fails
+with `AccessDenied`. Changing
 the boundary or either role is always a local apply. A `destroy.yml` run with
 `component=all` fails at this leaf and the `ecr-public-pull` leaf by design
 ([operations.md](operations.md#destroyyml----manual-destroy)). The boundary's
