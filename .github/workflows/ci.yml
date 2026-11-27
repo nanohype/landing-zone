@@ -1087,9 +1087,10 @@ jobs:
   # scripts/provider-vulns.py scans the binary each lock file installs, with
   # govulncheck, and fails on the two findings this repository can act on: a
   # provider with linked findings and no release in a year (replace it), and a
-  # release at least three days old, past the Renovate floor, that no longer
-  # carries a finding the locked version does (take it). Every other finding is
-  # listed in the job summary.
+  # release at least 14 days old that no longer carries a finding the locked
+  # version does (merge the Renovate pull request that proposes it, which
+  # Renovate opens within 10 days). Every other finding is listed in the job
+  # summary.
   provider-vulns:
     name: Locked Providers Are Maintained And Patched
     runs-on: ubuntu-latest

@@ -19,10 +19,12 @@ on the two findings this repository can act on:
                 findings only grow. The remedy is to replace the provider;
                 cluster-bootstrap uses alekc/kubectl, the maintained fork of
                 gavinbunney/kubectl, for that reason.
-  UNTAKEN FIX   A newer release, published at least 3 days ago (the
-                organisation's Renovate floor), no longer carries a finding
-                the locked version does. The remedy is to take it; Renovate
-                proposes it once the floor has passed.
+  UNTAKEN FIX   A newer release, published at least 14 days ago, no longer
+                carries a finding the locked version does. The remedy is to
+                merge the Renovate pull request that proposes it. Renovate
+                proposes a provider release within 10 days of its
+                publication, so by then that pull request has had at least
+                4 days to merge.
 
 Every other finding is listed in the summary, provider by provider, and in the
 job summary when GITHUB_STEP_SUMMARY is set.
@@ -78,7 +80,12 @@ ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = "https://registry.opentofu.org/v1/providers"
 GITHUB_API = "https://api.github.com"
 ABANDONED = dt.timedelta(days=365)
-FLOOR = dt.timedelta(days=3)
+# A fix blocks only once Renovate has proposed it and its pull request has had
+# time to merge. The organisation's preset (nanohype/.github, default.json)
+# holds a release back for minimumReleaseAge, 3 days, and proposes terraform
+# providers only in its weekly run, before 6am on Monday, America/Los_Angeles:
+# at most 10 days after the release. The other 4 days are the merge's.
+FLOOR = dt.timedelta(days=14)
 PLATFORM = "linux/amd64"
 HTTP_TIMEOUT = 120
 SCAN_TIMEOUT = 900
@@ -451,17 +458,18 @@ def cases() -> list[tuple[str, dict, dict, dict, int, str]]:
         ("findings and no release in a year", {"a/stale": {"1.0.0": (400, F1, GH)}},
          one("a/stale", "1.0.0"), {}, 1, "ABANDONED: 1 linked finding(s), and no release since 1.0.0"),
         ("a release past the floor clears a finding",
-         {"a/behind": {"1.0.0": (40, F2, GH), "1.1.0": (10, F1, GH)}},
-         one("a/behind", "1.0.0"), {}, 1, "UNTAKEN FIX: 1.1.0, published 2026-11-16, no longer carries GO-2026-0002"),
-        ("a release inside the floor waits",
-         {"a/fresh": {"1.0.0": (40, F2, GH), "1.1.0": (1, F1, GH)}},
-         one("a/fresh", "1.0.0"), {}, 0, "1.1.0, published 2026-11-25 12:00Z, is inside the 3-day floor"),
+         {"a/behind": {"1.0.0": (40, F2, GH), "1.1.0": (15, F1, GH)}},
+         one("a/behind", "1.0.0"), {}, 1, "UNTAKEN FIX: 1.1.0, published 2026-11-11, no longer carries GO-2026-0002"),
+        ("a release Renovate has only just proposed waits",
+         {"a/fresh": {"1.0.0": (40, F2, GH), "1.1.0": (10, F1, GH)}},
+         one("a/fresh", "1.0.0"), {}, 0,
+         "1.1.0, published 2026-11-16 12:00Z, is inside the 14-day floor until 2026-11-30 12:00Z"),
         ("the newest past the floor behind a fresh one decides",
-         {"a/two": {"1.0.0": (40, F2, GH), "1.1.0": (10, F1, GH), "1.2.0": (1, {}, GH)}},
+         {"a/two": {"1.0.0": (40, F2, GH), "1.1.0": (15, F1, GH), "1.2.0": (1, {}, GH)}},
          one("a/two", "1.0.0"), {}, 1, "UNTAKEN FIX: 1.1.0"),
         ("a newer release that clears nothing",
-         {"a/same": {"1.0.0": (40, F1, GH), "1.1.0": (10, F2, GH)}},
-         one("a/same", "1.0.0"), {}, 0, "1.1.0, published 2026-11-16, clears none of these"),
+         {"a/same": {"1.0.0": (40, F1, GH), "1.1.0": (15, F2, GH)}},
+         one("a/same", "1.0.0"), {}, 0, "1.1.0, published 2026-11-11, clears none of these"),
         ("both: abandoned, and behind a fix",
          {"a/both": {"1.0.0": (800, F2, GH), "1.1.0": (500, F1, GH)}},
          one("a/both", "1.0.0"), {}, 1, "BLOCKS: ABANDONED; UNTAKEN FIX"),
