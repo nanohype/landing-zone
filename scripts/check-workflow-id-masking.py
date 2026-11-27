@@ -1710,7 +1710,10 @@ QUOTING = Mutation(
 # Each way a vendored record can fail to hold: (name, the record file's text or None
 # for no file, the vendored copy's text or None for no copy, the paths the policy
 # lists as vendored, the file the finding must cite, what it must say). A must_say of
-# None is a record that holds, which must be accepted.
+# None is a record that holds, which must be accepted. With no record file either, it
+# is a tree that vendors nothing: accepted, with no record counted, and copied by
+# _tree without one. The tree the self-test runs in may itself vendor files, so this
+# case is the only one that walks those paths there.
 VENDORED_COPY = "scripts/zz-vendored-self-test.sh"
 VENDORED_BYTES = "#!/usr/bin/env bash\necho vendored\n"
 
@@ -1728,6 +1731,7 @@ VENDORED_ID_PATH = "scripts/zz-vendored-222233334444.sh"
 
 VENDORED_CASES = [
     ("a record that holds", _record(), VENDORED_BYTES, (VENDORED_COPY,), None, None),
+    ("no record file, and nothing listed as vendored", None, None, (), None, None),
     ("a vendored copy edited in place", _record(), VENDORED_BYTES + "echo edited\n", (),
      VENDORED_COPY, "It is vendored byte for byte"),
     ("a path listed as vendored with no record", "{}", VENDORED_BYTES, (VENDORED_COPY,),
@@ -2125,8 +2129,17 @@ def vendored_outcomes(base: Path, scratch: Path, policy: Policy) -> list[Outcome
             out.append((label, f"{len(leaked)} finding(s) quote an account id, at {leaked}", []))
             continue
         if says is None:
-            # The self-test's trees carry each file a record names.
+            # The self-test's trees carry each file a record names, and a record file
+            # only when the tree has one.
             carried = _tree(scratch / f"carried-{n}", source=tree)
+            if record is None:
+                out.append((label, (f"rejected a tree that vendors nothing ({len(res.findings)} "
+                                    f"finding(s))" if res.findings else
+                                    f"counted {res.vendored} record(s) in a tree with none"
+                                    if res.vendored else
+                                    f"_tree carried a {VENDORED_REL} its source does not have"
+                                    if (carried / VENDORED_REL).exists() else None), shown))
+                continue
             out.append((label, holds_problem(res) or (
                 None if (carried / VENDORED_COPY).is_file() else
                 f"_tree did not carry {VENDORED_COPY}, which the record names"), shown))
