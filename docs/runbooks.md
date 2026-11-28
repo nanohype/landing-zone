@@ -403,3 +403,84 @@ done
 ```
 
 A leaf whose wiring broke in the move cannot pass that.
+
+---
+
+## RB-009: Cluster Alarms
+
+**When:** a cluster's alert topic delivers a notification. `<cluster>-health-critical` entering ALARM is a page, `<cluster>-health-degraded` entering ALARM is a ticket, and either one returning to OK arrives on the info topic.
+
+`<cluster>` is the EKS cluster's name, `<environment>-<cluster_name>` (for example `production-platform`), which is the `cluster` component's `cluster_name` output. Everything below is what `components/aws/observability/` builds for that cluster, in the cluster's account and region. Where a leaf sets `enable_cluster_alarms = false`, none of these alarms exist.
+
+### Where Alerts Go
+
+Only the two composite alarms notify. Each one ORs a set of child alarms that carry no action of their own, so a hard-down cluster pages once rather than once per firing alarm.
+
+| Composite | Rolls up | ALARM goes to | OK goes to |
+|-----------|----------|---------------|------------|
+| `<cluster>-health-critical` | `api-server-5xx`, `failed-nodes`, and the `fast` and `quick` SLO burn pairs | critical topic | info topic |
+| `<cluster>-health-degraded` | `node-cpu-high`, `node-memory-high`, and the `steady` and `slow` SLO burn pairs | warning topic | info topic |
+
+Which topics those are depends on the leaf's `observability_mode`:
+
+- **`create`**, the default: this account's `<cluster>-alerts-critical`, `<cluster>-alerts-warning` and `<cluster>-alerts-info`, encrypted with the `alias/<cluster>-alerts` key. Their ARNs are the `sns_topic_arns` output and the SSM parameters `/eks-agent-platform/<cluster>/observability/alerts_<severity>_topic_arn`. The critical and warning topics email each address in the leaf's `alert_email_endpoints`, the only subscription the component makes, so a leaf that lists none notifies nobody.
+- **`adopt`**: the central topics `shared-observability` owns, passed in as `adopt_topic_arns`. Their subscriptions belong to that component.
+
+### Escalation
+
+A page is a message on the critical topic and a ticket is a message on the warning topic. Whoever subscribes to those topics receives them. This repository names no pager, rota or ticket queue: routing the critical and warning topics to one is the owner's to set up.
+
+### Dashboard
+
+`<cluster>-overview`, in CloudWatch in the cluster's account and region. The leaf's `dashboard_url` output links to it, and it exists where `enable_dashboard` is on. It reads top to bottom:
+
+1. **SLO**, where the SLO alarms are on: the availability SLI against its objective over 30 days, the error budget remaining, and the 1h and 6h burn rates against the page (14.4x) and ticket (3x) lines.
+2. **Errors and traffic**: the API server's error ratio, and its request rate with 5xx.
+3. **Latency and load**: API server request duration (p50, p95, p99), and in-flight requests.
+4. **Saturation**: node CPU, node memory, and nodes with running pods.
+5. **Failure**: failed or not-ready nodes, and node network throughput.
+
+### The Alarms
+
+Every alarm reads the `ContainerInsights` namespace at the `ClusterName` dimension. The `amazon-cloudwatch-observability` EKS add-on publishes those metrics, with enhanced Container Insights on, through its agent: the `cloudwatch-agent` service account in the `amazon-cloudwatch` namespace.
+
+| Alarm | Severity | Fires when | With no data |
+|-------|----------|------------|--------------|
+| `<cluster>-api-server-5xx` | critical | `apiserver_request_total_5xx`, summed over 5 minutes, exceeds `alarm_config.api_server_error_threshold` (default 5) in 3 consecutive periods | fires |
+| `<cluster>-failed-nodes` | critical | `cluster_failed_node_count` exceeds 0 over one `alarm_config.node_not_ready_period` (default 300 seconds) | fires |
+| `<cluster>-node-cpu-high` | warning | average `node_cpu_utilization` exceeds `alarm_config.cpu_utilization_threshold` (default 80%) in 3 consecutive 5-minute periods | does not fire |
+| `<cluster>-node-memory-high` | warning | average `node_memory_utilization` exceeds `alarm_config.memory_utilization_threshold` (default 80%) in 3 consecutive 5-minute periods | does not fire |
+| `<cluster>-slo-burn-<pair>` | critical for `fast` and `quick`, warning for `steady` and `slow` | the API server availability SLO (`slo_availability_objective`, default 0.999 over 30 days) spends its error budget at or above the pair's rate over both of its windows: `fast` 14.4x over 1h and 5m, `quick` 6x over 6h and 30m, `steady` 3x over 1d and 2h, `slow` 1x over 3d and 6h | does not fire |
+
+Each SLO pair is a composite of two window alarms, `<cluster>-slo-burn-<pair>-long` and `<cluster>-slo-burn-<pair>-short`, and fires only while both do. The pairs exist where `enable_slo_alarms` is on as well as `enable_cluster_alarms`.
+
+### First Checks
+
+Start from the alarm's state reason in its CloudWatch history. A reason saying no datapoints were received means the metrics stopped, not the cluster: go to [When the Metrics Stop](#when-the-metrics-stop).
+
+**`api-server-5xx`, and the SLO burn pairs**, which count the same 5xx series:
+
+1. On the dashboard, the error ratio and request rate panels show whether errors rose or traffic fell.
+2. `aws eks describe-cluster --name <cluster> --query cluster.health` lists the control-plane issues AWS reports.
+3. An admission webhook whose service is down returns errors to every request it intercepts when its `failurePolicy` is `Fail`. List them with `kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations` and check the services they name.
+
+**`failed-nodes`:**
+
+1. `kubectl get nodes` for nodes that are not `Ready`, then `kubectl describe node <node>` for the condition behind it: memory, disk or PID pressure, or a network that is not ready.
+2. For a node Karpenter launched, `kubectl get nodeclaims` shows a claim that failed to launch or to register.
+
+**`node-cpu-high` and `node-memory-high`:**
+
+1. On the dashboard, whether one node or every node is saturated.
+2. Container Insights' pod view of the cluster names the pods using the most CPU or memory. For memory, a pod restarting with `OOMKilled` in `kubectl describe pod` points at its limit or a leak.
+3. Whether Karpenter can add capacity: each NodePool's `limits` cap what it launches (`kubectl get nodepools`).
+
+### When the Metrics Stop
+
+`api-server-5xx` and `failed-nodes` treat missing data as breaching, so a cluster that stops publishing pages as critical instead of reading healthy. The agent stops publishing when its nodes are too full to run it, when the add-on rolls back, or when its Pod Identity binding breaks:
+
+1. `aws eks describe-addon --cluster-name <cluster> --addon-name amazon-cloudwatch-observability`: expect `ACTIVE` and no health issues.
+2. `kubectl -n amazon-cloudwatch get pods`: the agent runs on every node.
+3. `aws eks list-pod-identity-associations --cluster-name <cluster> --namespace amazon-cloudwatch`: the association for `cloudwatch-agent` exists.
+
+Other components' alarms (service quotas, budgets, the break-glass delivery alarm) notify on their own topics and are outside this runbook.
