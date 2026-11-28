@@ -440,7 +440,7 @@ component for the full schema:
 
 ### Cluster and Infrastructure Monitoring
 
-The `observability` component creates CloudWatch alarms (CPU, memory, node count, API errors) with configurable thresholds and SNS topics (critical/warning/info). Subscribe team emails via `alert_email_endpoints` or a Slack webhook via `slack_webhook_url`.
+The `observability` component creates each cluster's CloudWatch alarms (API server 5xx, failed nodes, node CPU and memory, and API server SLO burn rates) with configurable thresholds, two composite alarms that carry every notification, and the `<cluster>-overview` dashboard. In `create` mode it also builds the critical, warning and info SNS topics they publish to, and the critical and warning topics email the addresses in `alert_email_endpoints`, the only subscription it makes. [RB-009](runbooks.md#rb-009-cluster-alarms) covers each alarm, where it routes and what to check first.
 
 ### Budget Alerts
 
